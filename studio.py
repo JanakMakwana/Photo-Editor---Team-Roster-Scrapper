@@ -2438,12 +2438,21 @@ HTML_PAGE = r"""<!DOCTYPE html>
             image_base64: b64
           })
         });
+        if (!res.ok) {
+          const errText = await res.text();
+          try {
+            const errJson = JSON.parse(errText);
+            throw new Error(errJson.message || errText);
+          } catch (_) {
+            throw new Error(`HTTP ${res.status}: ${errText.substring(0, 100)}`);
+          }
+        }
         const json = await res.json();
         photoData[name].saved = true;
         document.getElementById(`dot-${currentIndex}`).className = 'status-dot saved';
         alert(`✅ Saved: ${json.output_name} to ${json.folder_name}/`);
       } catch (e) {
-        alert('Save error: ' + e);
+        alert('Save error: ' + (e.message || e));
       } finally {
         hideLoading();
       }
@@ -2476,6 +2485,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
               offset_y: pData.offset_y
             })
           });
+          if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(`HTTP ${res.status}: ${errText.substring(0, 80)}`);
+          }
           const json = await res.json();
           if (json && json.status === 'ok') {
             completed++;
@@ -3224,162 +3237,165 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(zip_bytes)
             else:
-                self.send_error(404, "Folder not found")
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": f"Folder '{os.path.basename(raw_folder)}' not found or empty."}).encode("utf-8"))
         else:
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "error", "message": "Endpoint not found"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "error", "message": f"Endpoint not found: {path}"}).encode("utf-8"))
 
     def do_POST(self):
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-        content_len = int(self.headers.get("Content-Length", 0))
+        try:
+            parsed = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed.query)
+            content_len = int(self.headers.get("Content-Length", 0))
 
-        # Handle raw binary photo uploads from browser (enables full AI functionality on Render)
-        if parsed.path == "/api/upload_single_file":
-            raw_folder = params.get("folder", ["Selected_Photos"])[0]
-            clean_folder = re.sub(r'[^a-zA-Z0-9_\-\s]', '', os.path.basename(raw_folder)).strip() or "Selected_Photos"
-            filename = params.get("name", ["photo.png"])[0]
-            clean_filename = os.path.basename(filename)
+            # Handle raw binary photo uploads from browser (enables full AI functionality on Render)
+            if parsed.path == "/api/upload_single_file":
+                raw_folder = params.get("folder", ["Selected_Photos"])[0]
+                clean_folder = re.sub(r'[^a-zA-Z0-9_\-\s]', '', os.path.basename(raw_folder)).strip() or "Selected_Photos"
+                filename = params.get("name", ["photo.png"])[0]
+                clean_filename = os.path.basename(filename)
 
-            workspace_dir = os.path.dirname(os.path.abspath(__file__))
-            target_dir = os.path.join(workspace_dir, "input_photos", clean_folder)
-            os.makedirs(target_dir, exist_ok=True)
-            out_path = os.path.join(target_dir, clean_filename)
+                workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                target_dir = os.path.join(workspace_dir, "input_photos", clean_folder)
+                os.makedirs(target_dir, exist_ok=True)
+                out_path = os.path.join(target_dir, clean_filename)
 
-            file_bytes = self.rfile.read(content_len) if content_len > 0 else b""
-            with open(out_path, "wb") as f:
-                f.write(file_bytes)
+                file_bytes = self.rfile.read(content_len) if content_len > 0 else b""
+                with open(out_path, "wb") as f:
+                    f.write(file_bytes)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "ok",
-                "folder_path": target_dir,
-                "file_path": out_path
-            }).encode("utf-8"))
-            return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "folder_path": target_dir,
+                    "file_path": out_path
+                }).encode("utf-8"))
+                return
 
-        body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
-        data = json.loads(body) if body else {}
+            body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
+            data = json.loads(body) if body else {}
 
-        if parsed.path == "/api/resolve_folder_name":
-            fname = data.get("folder_name", "")
-            found_path = resolve_input_path(fname)
+            if parsed.path == "/api/resolve_folder_name":
+                fname = data.get("folder_name", "")
+                found_path = resolve_input_path(fname)
 
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "found": found_path is not None,
-                "path": found_path
-            }).encode("utf-8"))
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "found": found_path is not None,
+                    "path": found_path
+                }).encode("utf-8"))
 
-        elif parsed.path == "/api/preview_cutout":
-            raw_folder = data.get("folder", ".")
-            folder = resolve_input_path(raw_folder) or raw_folder
-            photo = data.get("photo", "")
-            scale = float(data.get("scale", 0.35))
-            offset_x = float(data.get("offset_x", 0))
-            offset_y = float(data.get("offset_y", 0))
-
-            img_path = os.path.join(folder, photo)
-            with AI_LOCK:
-                canvas = process_custom_framed_portrait(
-                    image_path=img_path,
-                    scale=scale,
-                    offset_x=offset_x,
-                    offset_y=offset_y,
-                    output_size=180,
-                )
-            gc.collect()
-
-            buf = io.BytesIO()
-            canvas.save(buf, "PNG")
-            img_bytes = buf.getvalue()
-
-            self.send_response(200)
-            self.send_header("Content-Type", "image/png")
-            self.end_headers()
-            self.wfile.write(img_bytes)
-
-        elif parsed.path == "/api/save_refined_data":
-            raw_folder = data.get("folder", ".")
-            folder = resolve_input_path(raw_folder) or raw_folder
-            filename = data.get("filename", "")
-            b64_data = data.get("image_base64", "")
-
-            if "," in b64_data:
-                b64_data = b64_data.split(",", 1)[1]
-            img_bytes = base64.b64decode(b64_data)
-
-            out_dir = resolve_edited_dir(folder, create=True)
-            out_path = os.path.join(out_dir, filename)
-
-            img = Image.open(io.BytesIO(img_bytes))
-            img.save(out_path, "PNG")
-
-            folder_display = os.path.basename(out_dir)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "ok",
-                "output_name": filename,
-                "folder_name": folder_display
-            }).encode("utf-8"))
-
-        elif parsed.path == "/api/process_single_portrait":
-            raw_folder = data.get("folder", ".")
-            folder = resolve_input_path(raw_folder) or raw_folder
-            photo = data.get("photo", "")
-            scale = float(data.get("scale", 0.35))
-            offset_x = float(data.get("offset_x", 0))
-            offset_y = float(data.get("offset_y", 0))
-
-            out_dir = resolve_edited_dir(folder, create=True)
-            img_path = os.path.join(folder, photo)
-            out_name = f"{os.path.splitext(photo)[0]}.png"
-            out_path = os.path.join(out_dir, out_name)
-
-            with AI_LOCK:
-                process_custom_framed_portrait(
-                    image_path=img_path,
-                    scale=scale,
-                    offset_x=offset_x,
-                    offset_y=offset_y,
-                    output_path=out_path,
-                    output_size=180,
-                )
-            gc.collect()
-
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "ok",
-                "filename": out_name,
-                "folder_name": os.path.basename(out_dir)
-            }).encode("utf-8"))
-
-        elif parsed.path == "/api/save_batch":
-            raw_folder = data.get("folder", ".")
-            folder = resolve_input_path(raw_folder) or raw_folder
-            items = data.get("items", [])
-            out_dir = resolve_edited_dir(folder, create=True)
-            saved_names = []
-
-            for item in items:
-                photo = item.get("photo", "")
-                scale = float(item.get("scale", 0.35))
-                offset_x = float(item.get("offset_x", 0))
-                offset_y = float(item.get("offset_y", 0))
+            elif parsed.path == "/api/preview_cutout":
+                raw_folder = data.get("folder", ".")
+                folder = resolve_input_path(raw_folder) or raw_folder
+                photo = data.get("photo", "")
+                scale = float(data.get("scale", 0.35))
+                offset_x = float(data.get("offset_x", 0))
+                offset_y = float(data.get("offset_y", 0))
 
                 img_path = os.path.join(folder, photo)
-                out_name = f"{os.path.splitext(photo)[0]}.png"
-                out_path = os.path.join(out_dir, out_name)
+                if not os.path.exists(img_path):
+                    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                    alt_path = os.path.join(workspace_dir, "input_photos", os.path.basename(folder), photo)
+                    if os.path.exists(alt_path):
+                        img_path = alt_path
+
+                if not os.path.exists(img_path):
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": f"Photo '{photo}' not found on server."}).encode("utf-8"))
+                    return
+
+                with AI_LOCK:
+                    canvas = process_custom_framed_portrait(
+                        image_path=img_path,
+                        scale=scale,
+                        offset_x=offset_x,
+                        offset_y=offset_y,
+                        output_size=180,
+                    )
+                gc.collect()
+
+                buf = io.BytesIO()
+                canvas.save(buf, "PNG")
+                img_bytes = buf.getvalue()
+
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.end_headers()
+                self.wfile.write(img_bytes)
+
+            elif parsed.path == "/api/save_refined_data":
+                raw_folder = data.get("folder", ".")
+                folder = resolve_input_path(raw_folder)
+                if not folder:
+                    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                    folder = os.path.join(workspace_dir, "input_photos", os.path.basename(raw_folder))
+                filename = data.get("filename", "headshot.png")
+                clean_name = os.path.splitext(os.path.basename(filename))[0] + ".png"
+                b64_data = data.get("image_base64", "")
+
+                if "," in b64_data:
+                    b64_data = b64_data.split(",", 1)[1]
+                img_bytes = base64.b64decode(b64_data)
+
+                out_dir = resolve_edited_dir(folder, create=True)
+                out_path = os.path.join(out_dir, clean_name)
+
+                img = Image.open(io.BytesIO(img_bytes))
+                img.save(out_path, "PNG")
+
+                folder_display = os.path.basename(out_dir)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "output_name": clean_name,
+                    "folder_name": folder_display
+                }).encode("utf-8"))
+
+            elif parsed.path == "/api/process_single_portrait":
+                raw_folder = data.get("folder", ".")
+                folder = resolve_input_path(raw_folder)
+                if not folder:
+                    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                    folder = os.path.join(workspace_dir, "input_photos", os.path.basename(raw_folder))
+                photo = data.get("photo", "")
+                scale = float(data.get("scale", 0.35))
+                offset_x = float(data.get("offset_x", 0))
+                offset_y = float(data.get("offset_y", 0))
+
+                out_dir = resolve_edited_dir(folder, create=True)
+                clean_name = os.path.splitext(os.path.basename(photo))[0] + ".png"
+                out_path = os.path.join(out_dir, clean_name)
+
+                img_path = os.path.join(folder, photo)
+                if not os.path.exists(img_path):
+                    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                    alt_path = os.path.join(workspace_dir, "input_photos", os.path.basename(folder), photo)
+                    if os.path.exists(alt_path):
+                        img_path = alt_path
+
+                if not os.path.exists(img_path):
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "status": "error",
+                        "message": f"Source image '{photo}' not found on server."
+                    }).encode("utf-8"))
+                    return
 
                 with AI_LOCK:
                     process_custom_framed_portrait(
@@ -3390,110 +3406,170 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                         output_path=out_path,
                         output_size=180,
                     )
-                saved_names.append(out_name)
                 gc.collect()
 
-            folder_display = os.path.basename(out_dir)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({
-                "status": "ok",
-                "saved_count": len(saved_names),
-                "files": saved_names,
-                "folder_name": folder_display
-            }).encode("utf-8"))
-
-        elif parsed.path == "/api/fetch_roster":
-            url = data.get("url", "").strip()
-            if not url:
-                self.send_error(400, "Missing url parameter")
-                return
-            try:
-                result = scrape_roster_data(url)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     "status": "ok",
-                    "suggested_folder": result["suggested_folder"],
-                    "players": result["players"]
+                    "filename": clean_name,
+                    "folder_name": os.path.basename(out_dir)
                 }).encode("utf-8"))
-            except Exception as e:
-                self.send_response(500)
+
+            elif parsed.path == "/api/save_batch":
+                raw_folder = data.get("folder", ".")
+                folder = resolve_input_path(raw_folder) or raw_folder
+                items = data.get("items", [])
+                out_dir = resolve_edited_dir(folder, create=True)
+                saved_names = []
+
+                for item in items:
+                    photo = item.get("photo", "")
+                    scale = float(item.get("scale", 0.35))
+                    offset_x = float(item.get("offset_x", 0))
+                    offset_y = float(item.get("offset_y", 0))
+
+                    img_path = os.path.join(folder, photo)
+                    if not os.path.exists(img_path):
+                        workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                        alt_path = os.path.join(workspace_dir, "input_photos", os.path.basename(folder), photo)
+                        if os.path.exists(alt_path):
+                            img_path = alt_path
+
+                    if not os.path.exists(img_path):
+                        continue
+
+                    out_name = f"{os.path.splitext(photo)[0]}.png"
+                    out_path = os.path.join(out_dir, out_name)
+
+                    with AI_LOCK:
+                        process_custom_framed_portrait(
+                            image_path=img_path,
+                            scale=scale,
+                            offset_x=offset_x,
+                            offset_y=offset_y,
+                            output_path=out_path,
+                            output_size=180,
+                        )
+                    saved_names.append(out_name)
+                    gc.collect()
+
+                folder_display = os.path.basename(out_dir)
+                self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({
-                    "status": "error",
-                    "message": str(e)
+                    "status": "ok",
+                    "saved_count": len(saved_names),
+                    "files": saved_names,
+                    "folder_name": folder_display
                 }).encode("utf-8"))
 
-        elif parsed.path == "/api/download_roster_players":
-            folder_name = data.get("folder_name", "Downloaded_Roster").strip()
-            players = data.get("players", [])
-            target_width = int(data.get("target_width", 800))
-
-            workspace_dir = os.path.dirname(os.path.abspath(__file__))
-            downloads_dir = os.path.expanduser("~/Downloads")
-            if os.environ.get("RENDER"):
-                target_dir = os.path.join(workspace_dir, "input_photos", folder_name)
-            elif os.path.exists(downloads_dir) and not os.path.isabs(folder_name):
-                target_dir = os.path.join(downloads_dir, folder_name)
-            else:
-                target_dir = os.path.join(workspace_dir, "input_photos", folder_name)
-
-            os.makedirs(target_dir, exist_ok=True)
-
-            def _download_worker(item):
-                p_name = item.get("name", "").strip()
-                assigned = item.get("assigned_number", "").strip()
-                img_url = item.get("image", "").strip()
-
-                clean_name = re.sub(r'[\\/*?:"<>|]', '', p_name).strip()
-                if assigned:
-                    clean_assigned = re.sub(r'[\\/*?:"<>|]', '', assigned).strip()
-                    out_filename = f"{clean_assigned}.png"
-                    used_type = "assigned"
-                else:
-                    out_filename = f"{clean_name}.png"
-                    used_type = "name"
-
-                save_path = os.path.join(target_dir, out_filename)
+            elif parsed.path == "/api/fetch_roster":
+                url = data.get("url", "").strip()
+                if not url:
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Missing url parameter"}).encode("utf-8"))
+                    return
                 try:
-                    sp, sz = download_player_portrait(img_url, save_path, target_width=target_width)
-                    return {
-                        "name": p_name,
-                        "filename": out_filename,
-                        "type": used_type,
-                        "dimensions": sz,
-                        "path": sp,
-                        "status": "ok"
-                    }
+                    result = scrape_roster_data(url)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "status": "ok",
+                        "suggested_folder": result["suggested_folder"],
+                        "players": result["players"]
+                    }).encode("utf-8"))
                 except Exception as e:
-                    return {
-                        "name": p_name,
-                        "filename": out_filename,
-                        "type": used_type,
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
                         "status": "error",
-                        "error": str(e)
-                    }
+                        "message": str(e)
+                    }).encode("utf-8"))
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-                saved_files = list(executor.map(_download_worker, players))
+            elif parsed.path == "/api/download_roster_players":
+                folder_name = data.get("folder_name", "Downloaded_Roster").strip()
+                players = data.get("players", [])
+                target_width = int(data.get("target_width", 800))
 
-            self.send_response(200)
+                workspace_dir = os.path.dirname(os.path.abspath(__file__))
+                downloads_dir = os.path.expanduser("~/Downloads")
+                if os.environ.get("RENDER"):
+                    target_dir = os.path.join(workspace_dir, "input_photos", folder_name)
+                elif os.path.exists(downloads_dir) and not os.path.isabs(folder_name):
+                    target_dir = os.path.join(downloads_dir, folder_name)
+                else:
+                    target_dir = os.path.join(workspace_dir, "input_photos", folder_name)
+
+                os.makedirs(target_dir, exist_ok=True)
+
+                def _download_worker(item):
+                    p_name = item.get("name", "").strip()
+                    assigned = item.get("assigned_number", "").strip()
+                    img_url = item.get("image", "").strip()
+
+                    clean_name = re.sub(r'[\\/*?:"<>|]', '', p_name).strip()
+                    if assigned:
+                        clean_assigned = re.sub(r'[\\/*?:"<>|]', '', assigned).strip()
+                        out_filename = f"{clean_assigned}.png"
+                        used_type = "assigned"
+                    else:
+                        out_filename = f"{clean_name}.png"
+                        used_type = "name"
+
+                    save_path = os.path.join(target_dir, out_filename)
+                    try:
+                        sp, sz = download_player_portrait(img_url, save_path, target_width=target_width)
+                        return {
+                            "name": p_name,
+                            "filename": out_filename,
+                            "type": used_type,
+                            "dimensions": sz,
+                            "path": sp,
+                            "status": "ok"
+                        }
+                    except Exception as e:
+                        return {
+                            "name": p_name,
+                            "filename": out_filename,
+                            "type": used_type,
+                            "status": "error",
+                            "error": str(e)
+                        }
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    saved_files = list(executor.map(_download_worker, players))
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "target_dir": target_dir,
+                    "folder_name": os.path.basename(target_dir),
+                    "total": len(players),
+                    "saved_count": len([s for s in saved_files if s.get("status") == "ok"]),
+                    "files": saved_files
+                }).encode("utf-8"))
+            else:
+                self.send_response(404)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "error", "message": f"Endpoint not found: {parsed.path}"}).encode("utf-8"))
+        except Exception as e:
+            self.send_response(500)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({
-                "status": "ok",
-                "target_dir": target_dir,
-                "folder_name": os.path.basename(target_dir),
-                "total": len(players),
-                "saved_count": len([s for s in saved_files if s.get("status") == "ok"]),
-                "files": saved_files
+                "status": "error",
+                "message": f"Server processing error: {str(e)}"
             }).encode("utf-8"))
-        else:
-            self.send_error(404)
 
     def log_message(self, format, *args):
         return
