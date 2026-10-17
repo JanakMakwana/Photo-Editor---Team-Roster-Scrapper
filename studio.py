@@ -1129,6 +1129,207 @@ def scrape_uk_roster(url: str):
     }
 
 
+def is_eurobasket_url(url: str) -> bool:
+    """Detects whether a URL belongs to Eurobasket, Asia-Basket, Latinbasket, etc."""
+    u = url.lower()
+    domains = [
+        "asia-basket.com", "eurobasket.com", "latinbasket.com",
+        "afrobasket.com", "usbasket.com", "australiabasket.com"
+    ]
+    return any(d in u for d in domains)
+
+
+def parse_eurobasket_single_player(url: str) -> dict:
+    """Scrapes an individual Eurobasket / Asia-Basket player profile."""
+    ctx = ssl._create_unverified_context()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    name_m = re.search(r'<h1[^>]*>([^<]+)</h1>', html, re.I)
+    name = name_m.group(1).strip() if name_m else ""
+    if not name:
+        title_m = re.search(r'<title>([^<|]+)', html)
+        name = title_m.group(1).strip() if title_m else ""
+
+    img_m = re.search(r'class=[\"\']left-photo[\"\']><img[^>]+src=[\"\']([^\"\']+)[\"\']', html)
+    if not img_m:
+        img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']*(?:photos/|player/)[^\"\']+)[\"\']', html)
+    img = img_m.group(1) if img_m else ""
+
+    bio_m = re.search(r'class=[\"\']player-info-new-notlg[\"\']>(.*?)</div>', html, re.S)
+    bio = re.sub(r'<[^>]+>', ' ', bio_m.group(1)).strip() if bio_m else ""
+
+    ht_m = re.search(r'(\d{1,2}\'\d{1,2}(?:\'\')?|\d{3}\s*cm)', bio)
+    ht = ht_m.group(1) if ht_m else ""
+
+    pos_m = re.search(r'\b(forward|guard|center|point guard|shooting guard|power forward|small forward|pg|sg|sf|pf|c|f|g)\b', bio, re.I)
+    pos = pos_m.group(1).capitalize() if pos_m else ""
+
+    born_m = re.search(r'born on\s+([A-Za-z]+ \d{1,2} \d{4})', bio, re.I)
+    born = born_m.group(1) if born_m else ""
+
+    nat_m = re.search(r'is\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+basketball player', bio, re.I)
+    nat = nat_m.group(1) if nat_m else ""
+
+    team_m = re.search(r'played at\s+<a[^>]*>([^<]+)</a>', html)
+    team = team_m.group(1).strip() if team_m else ""
+    if not team:
+        team = name or "Basketball"
+
+    det_parts = []
+    if pos: det_parts.append(f"Position: {pos}")
+    if born: det_parts.append(f"Born: {born}")
+    if nat: det_parts.append(f"Nationality: {nat}")
+    if ht: det_parts.append(f"Height: {ht}")
+    details = " | ".join(det_parts)
+
+    player = {
+        "name": name,
+        "jersey": "",
+        "pos": pos,
+        "position": pos,
+        "shoots": "",
+        "height": ht,
+        "weight": "",
+        "born": born,
+        "birthplace": nat,
+        "image": img,
+        "raw_image": img,
+        "details": details,
+        "assigned_number": ""
+    }
+    return {"suggested_folder": team, "players": [player]}
+
+
+def scrape_eurobasket_roster(url: str) -> dict:
+    """Scrapes full team roster or single player page from Eurobasket / Asia-Basket / Latinbasket."""
+    # Check if single player URL
+    if "/player/" in url.lower():
+        return parse_eurobasket_single_player(url)
+
+    ctx = ssl._create_unverified_context()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    # Suggested folder name
+    suggested_folder = ""
+    team_slug_m = re.search(r'/team/([^/]+)', url)
+    if team_slug_m:
+        slug = team_slug_m.group(1).replace("-", " ").strip()
+        if slug:
+            suggested_folder = slug
+    if not suggested_folder:
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.I | re.S)
+        if h1_m:
+            suggested_folder = re.sub(r'<[^>]+>', '', h1_m.group(1)).replace("&nbsp;", " ").strip()
+    if not suggested_folder:
+        title_m = re.search(r'<title>(.*?)(?:Basketball|Roster)', html, re.I | re.S)
+        if title_m:
+            suggested_folder = title_m.group(1).strip()
+    if not suggested_folder:
+        suggested_folder = "Eurobasket Team"
+
+    # 1. Featured player cards (containing photo thumbnails directly)
+    featured_photos = {}
+    for m in re.finditer(r'<a class=[\"\']ArRosterfeat-card[\"\']\s+href=[\"\']([^\"\']+)[\"\']>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\'].*?</a>', html, re.S):
+        href = m.group(1).split("?")[0]
+        img = m.group(2)
+        featured_photos[href] = img
+
+    # 2. Extract player rows from table
+    rows = re.findall(r'<div class=[\"\']ArRosterplayer[^>]*>(.*?)</div>\s*(?=<div class=[\"\']ArRosterplayer|<div class=[\"\']ArRostercoach|</div>\s*</div>)', html, re.S)
+
+    players = []
+    seen = set()
+    for r in rows:
+        name_m = re.search(r'ArRostername[^>]*><a\s+href=[\"\']([^\"\']+)[\"\']>([^<]+)</a>', r)
+        purl = name_m.group(1).strip() if name_m else ""
+        name = name_m.group(2).strip() if name_m else ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+
+        num_m = re.search(r'ArRosterjersey[^>]*>([^<]*)</div>', r)
+        num = num_m.group(1).strip() if num_m else ""
+
+        ht_m = re.search(r'ArRosterheight[^>]*>([^<]+(?:<small>[^<]+</small>)?)</div>', r)
+        ht = re.sub(r'<[^>]+>', '', ht_m.group(1)).strip() if ht_m else ""
+
+        pos_m = re.search(r'ArRosterpos[^>]*>([^<]*)</div>', r)
+        pos = pos_m.group(1).strip() if pos_m else ""
+
+        age_m = re.search(r'ArRosterage[^>]*>([^<]*)</div>', r)
+        age = age_m.group(1).strip() if age_m else ""
+
+        nat_m = re.search(r'ArRosternat[^>]*><img[^>]+(?:title|alt)=[\"\']([^\"\']+)[\"\']', r)
+        nat = nat_m.group(1).strip() if nat_m else ""
+
+        clean_purl = purl.split("?")[0]
+        img = featured_photos.get(clean_purl, "")
+
+        players.append({
+            "name": name,
+            "jersey": num,
+            "pos": pos,
+            "position": pos,
+            "height": ht,
+            "age": age,
+            "nationality": nat,
+            "birthplace": nat,
+            "image": img,
+            "raw_image": img,
+            "profile_url": purl,
+            "born": "",
+            "assigned_number": num
+        })
+
+    # 3. Enrich players in parallel (fetch headshot from player page if missing + exact birth date)
+    def _enrich_eb_player(p):
+        purl = p.get("profile_url")
+        if not purl:
+            return p
+        try:
+            r = urllib.request.Request(purl, headers=headers)
+            with urllib.request.urlopen(r, context=ctx, timeout=6) as resp:
+                h = resp.read().decode("utf-8", errors="ignore")
+                if not p.get("image"):
+                    m_img = re.search(r'class=[\"\']left-photo[\"\']><img[^>]+src=[\"\']([^\"\']+)[\"\']', h)
+                    if not m_img:
+                        m_img = re.search(r'<img[^>]+src=[\"\']([^\"\']*(?:photos/|player/)[^\"\']+)[\"\']', h)
+                    if m_img:
+                        p["image"] = m_img.group(1)
+                        p["raw_image"] = m_img.group(1)
+
+                m_born = re.search(r'born on\s+([A-Za-z]+ \d{1,2} \d{4})', h)
+                if m_born:
+                    p["born"] = m_born.group(1)
+        except Exception:
+            pass
+
+        v_parts = []
+        if p.get("pos"): v_parts.append(f"Position: {p['pos']}")
+        if p.get("born"): v_parts.append(f"Born: {p['born']}")
+        elif p.get("age"): v_parts.append(f"Age: {p['age']}")
+        if p.get("nationality"): v_parts.append(f"Nationality: {p['nationality']}")
+        if p.get("height"): v_parts.append(f"Height: {p['height']}")
+        p["details"] = " | ".join(v_parts)
+        return p
+
+    if players:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            players = list(ex.map(_enrich_eb_player, players))
+
+    return {"suggested_folder": suggested_folder, "players": players}
+
+
 BCHL_TEAMS = {
     '16': 'Alberni Valley Bulldogs', '82': 'Blackfalds Bulldogs', '81': 'Brooks Bandits',
     '13': 'Chilliwack Chiefs', '9': 'Coquitlam Express', '10': 'Cowichan Valley Capitals',
@@ -1398,12 +1599,20 @@ def scrape_hockeytech_roster(url: str) -> dict:
 
 def scrape_roster_data(url: str):
     """
-    Intelligently routes roster URL to NHL, HockeyTech/BCHL, UK Teams, or College/NCAA athletics scrapers
+    Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL, UK Teams, or College/NCAA athletics scrapers
     with automatic fallbacks.
     """
     url_lower = url.lower()
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
         return scrape_nhl_roster(url)
+
+    if is_eurobasket_url(url):
+        try:
+            res = scrape_eurobasket_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Eurobasket / Asia-Basket scraper notice: {e}, falling back...")
 
     if is_hockeytech_or_bchl_url(url):
         try:
@@ -1424,7 +1633,13 @@ def scrape_roster_data(url: str):
     # College / NCAA / Sidearm athletics scraper
     res = scrape_college_roster(url)
     if not res.get("players") or len(res["players"]) == 0:
-        # Fallback to HockeyTech / BCHL or UK / general sports scraper if college returned no players
+        # Fallback to Eurobasket, HockeyTech / BCHL or UK / general sports scraper if college returned no players
+        try:
+            eb_res = scrape_eurobasket_roster(url)
+            if eb_res.get("players") and len(eb_res["players"]) > 0:
+                return eb_res
+        except Exception:
+            pass
         try:
             ht_res = scrape_hockeytech_roster(url)
             if ht_res.get("players") and len(ht_res["players"]) > 0:
