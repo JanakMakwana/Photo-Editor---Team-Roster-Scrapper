@@ -569,11 +569,128 @@ def is_uk_sports_url(url: str) -> bool:
     return any(k in url_lower for k in uk_keywords)
 
 
+def parse_cardiff_single_player(url: str, html: str):
+    """Scrapes an individual Cardiff Devils player profile page (e.g. /team/davies-5/)."""
+    name = ""
+    h1_m = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
+    if h1_m:
+        name = h1_m.group(1).strip()
+    if not name:
+        title_m = re.search(r'<title>(.*?)(?:\s*\(\d+\))?\s*\|', html)
+        if title_m:
+            name = title_m.group(1).strip()
+
+    num_m = re.search(r'player__image--number[^>]*>[\s\n]*(\d+)', html)
+    if not num_m:
+        num_m = re.search(r'\((\d+)\)', html)
+    jersey = num_m.group(1).strip() if num_m else ""
+
+    labels = dict(re.findall(r'class=[\"\']player__info--label[^\"\']*[\"\']>([^<]+)</span>\s*<span>([^<]+)</span>', html))
+    pos = labels.get("Position", "").capitalize()
+    shoots = labels.get("Shoots", "").strip()
+    height = labels.get("Height", "").strip()
+    weight = labels.get("Weight", "").strip()
+    born = labels.get("Age", "").strip()
+    birthplace = labels.get("Nationality", "").strip()
+
+    img = ""
+    img_m = re.search(r'<img[^>]+class=[\"\'][^\"\']*player__image[^\"\']*[\"\'][^>]+srcset=[\"\']([^\"\']+)[\"\']', html)
+    if not img_m:
+        img_m = re.search(r'<img[^>]+srcset=[\"\']([^\"\']+)[\"\'][^>]+class=[\"\'][^\"\']*player__image', html)
+    if not img_m:
+        img_m = re.search(r'<img[^>]+class=[\"\'][^\"\']*player__image[^\"\']*[\"\'][^>]+src=[\"\']([^\"\']+)[\"\']', html)
+
+    if img_m:
+        sources = [s.strip().split() for s in img_m.group(1).split(",") if s.strip()]
+        sources.sort(key=lambda s: int(s[1][:-1]) if len(s) > 1 and s[1].endswith("w") else 0, reverse=True)
+        if sources:
+            img = sources[0][0]
+    else:
+        alt_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\'][^>]*alt=[\"\']' + re.escape(name) + r'[\"\']', html, re.I)
+        if alt_m:
+            img = alt_m.group(1)
+
+    full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+    v_parts = []
+    if born: v_parts.append(f"Age: {born}")
+    if birthplace: v_parts.append(f"Nationality: {birthplace}")
+    if shoots: v_parts.append(f"Shoots: {shoots}")
+    if height: v_parts.append(f"Height: {height}")
+    if weight: v_parts.append(f"Weight: {weight}")
+    details = " | ".join(v_parts)
+
+    return {
+        "suggested_folder": "Cardiff Devils",
+        "players": [{
+            "name": name,
+            "jersey": jersey,
+            "position": pos,
+            "pos": pos,
+            "image": full_img,
+            "raw_image": full_img,
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": birthplace,
+            "details": details,
+            "assigned_number": jersey or ""
+        }]
+    }
+
+
+def parse_coventry_single_player(url: str, html: str):
+    """Scrapes an individual Coventry Blaze player profile page (e.g. /player/carson-musser)."""
+    m = re.search(r'<script\s+[^>]*data-page=[\"\']app[\"\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(1))
+            hero = data.get("props", {}).get("hero", {})
+            if hero:
+                name = hero.get("name") or f"{hero.get('firstName', '')} {hero.get('lastName', '')}".strip()
+                jersey = str(hero.get("number", "")).strip()
+                pos = hero.get("positionLabel", "").strip()
+                img = hero.get("photoUrl", "")
+                vitals = hero.get("vitals", [])
+                v_dict = {"shoots": "", "height": "", "weight": "", "born": "", "birthplace": ""}
+                for v in vitals:
+                    t = v.get("text", "")
+                    if any(x in t.lower() for x in ["cm", "'", '"']):
+                        v_dict["height"] = t
+                    elif any(x in t.lower() for x in ["american", "canadian", "british", "swedish", "finnish"]) or len(t) <= 4:
+                        v_dict["birthplace"] = t
+                    elif any(char.isdigit() for char in t) and ("(" in t or len(t) <= 4 or any(m in t.lower() for m in ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])):
+                        v_dict["born"] = t
+                full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                return {
+                    "suggested_folder": "Coventry Blaze",
+                    "players": [{
+                        "name": name,
+                        "jersey": jersey,
+                        "position": pos.capitalize(),
+                        "pos": pos.capitalize(),
+                        "image": full_img,
+                        "raw_image": full_img,
+                        "shoots": v_dict["shoots"],
+                        "height": v_dict["height"],
+                        "weight": v_dict["weight"],
+                        "born": v_dict["born"],
+                        "birthplace": v_dict["birthplace"],
+                        "details": " | ".join(v.get("text", "") for v in vitals),
+                        "assigned_number": jersey or ""
+                    }]
+                }
+        except Exception:
+            pass
+    return None
+
+
 def scrape_uk_roster(url: str):
     """
     Scrapes UK sports and EIHL hockey team rosters (Cardiff Devils, Coventry Blaze,
     Belfast Giants, Sheffield Steelers, Nottingham Panthers, Manchester Storm, etc.)
     extracting player names, jersey numbers, positions, vitals, and high-res headshot URLs.
+    Supports both full team roster pages and individual player profile pages.
     """
     req = urllib.request.Request(
         url,
@@ -583,6 +700,19 @@ def scrape_uk_roster(url: str):
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         html = resp.read().decode("utf-8", errors="ignore")
+
+    # 0. Check if this is a single player profile page
+    u_lower = url.lower().rstrip('/')
+    is_cardiff_single = "cardiffdevils.com/team/" in u_lower and u_lower.split("/team/")[-1] not in ("", "team")
+    is_coventry_single = "coventryblaze.co.uk/player/" in u_lower and u_lower.split("/player/")[-1] not in ("", "player")
+
+    if is_cardiff_single:
+        return parse_cardiff_single_player(url, html)
+
+    if is_coventry_single:
+        single_res = parse_coventry_single_player(url, html)
+        if single_res:
+            return single_res
 
     suggested_folder = clean_uk_team_folder(url, html)
     players = []
@@ -702,6 +832,9 @@ def scrape_uk_roster(url: str):
                     if src_m:
                         img = src_m.group(1)
 
+                link_m = re.search(r'href=[\"\'](https://www.cardiffdevils.com/team/[^\"\']+)[\"\']', c)
+                profile_url = link_m.group(1) if link_m else ""
+
                 if name and img and 'logo' not in img.lower() and 'facebook' not in img.lower() and 'icon' not in img.lower():
                     full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
                     players.append({
@@ -717,8 +850,42 @@ def scrape_uk_roster(url: str):
                         "born": "",
                         "birthplace": "",
                         "details": "",
-                        "assigned_number": ""
+                        "assigned_number": "",
+                        "profile_url": profile_url
                     })
+
+        # Enrich Cardiff Devils / UK players with their individual profile vitals in parallel
+        if any(p.get("profile_url") for p in players):
+            def _fetch_profile_vitals(item):
+                purl = item.get("profile_url")
+                if not purl:
+                    return item
+                try:
+                    r = urllib.request.Request(purl, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
+                    with urllib.request.urlopen(r, timeout=5) as rp:
+                        h = rp.read().decode("utf-8")
+                        labels = dict(re.findall(r'class=[\"\']player__info--label[^\"\']*[\"\']>([^<]+)</span>\s*<span>([^<]+)</span>', h))
+                        item["shoots"] = labels.get("Shoots", item.get("shoots", "")).strip()
+                        item["height"] = labels.get("Height", item.get("height", "")).strip()
+                        item["weight"] = labels.get("Weight", item.get("weight", "")).strip()
+                        item["born"] = labels.get("Age", item.get("born", "")).strip()
+                        item["birthplace"] = labels.get("Nationality", item.get("birthplace", "")).strip()
+                        if labels.get("Position"):
+                            item["pos"] = labels.get("Position").capitalize().strip()
+                            item["position"] = item["pos"]
+                        v_summary = []
+                        if item["born"]: v_summary.append(f"Age: {item['born']}")
+                        if item["birthplace"]: v_summary.append(f"Nationality: {item['birthplace']}")
+                        if item["shoots"]: v_summary.append(f"Shoots: {item['shoots']}")
+                        if item["height"]: v_summary.append(f"Height: {item['height']}")
+                        if item["weight"]: v_summary.append(f"Weight: {item['weight']}")
+                        item["details"] = " | ".join(v_summary)
+                except Exception:
+                    pass
+                return item
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                players = list(ex.map(_fetch_profile_vitals, players))
 
     # 3. Next.js / Manchester Storm aria-label articles
     if not players:
