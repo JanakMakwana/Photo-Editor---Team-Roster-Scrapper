@@ -16,9 +16,17 @@ import html as py_html
 import urllib.request
 import urllib.parse
 import zipfile
+import threading
+import concurrent.futures
+import gc
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from PIL import Image
+
+# Optimize thread allocation for low-resource cloud environments (Render Free tier)
+os.environ.setdefault("OMP_NUM_THREADS", "2")
+os.environ.setdefault("MKL_NUM_THREADS", "2")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
 
 # Auto-activate local .venv if not in virtualenv
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,6 +40,8 @@ from process_portraits import FaceDetectorWrapper, find_input_images
 DETECTOR = None
 REMBG_SESSION = None
 FACE_CACHE = {}
+# Concurrency limiter to protect Render's 512MB RAM and single CPU from spikes
+AI_LOCK = threading.Semaphore(1)
 
 
 def get_services():
@@ -40,8 +50,10 @@ def get_services():
         print("[Studio] Initializing Face Detector...")
         DETECTOR = FaceDetectorWrapper()
     if REMBG_SESSION is None:
-        print("[Studio] Initializing Rembg Engine...")
-        REMBG_SESSION = rembg.new_session("u2net")
+        # Default to u2netp on Render to use only ~199MB RAM instead of 371MB (preventing 503 OOM crashes)
+        model_name = os.environ.get("REMBG_MODEL", "u2netp" if os.environ.get("RENDER") else "u2net")
+        print(f"[Studio] Initializing Rembg Engine ({model_name})...")
+        REMBG_SESSION = rembg.new_session(model_name)
     return DETECTOR, REMBG_SESSION
 
 
@@ -175,7 +187,16 @@ def process_custom_framed_portrait(
         canvas = Image.new("RGBA", (output_size, output_size), (0, 0, 0, 0))
     else:
         crop = orig.crop((ox1, oy1, ox2, oy2))
-        no_bg_crop = rembg.remove(crop, session=rembg_session)
+        
+        # Optimize memory & CPU for Cloud / Low-RAM: cap crop to 512px before U-2-Net inference
+        max_dim = 512
+        cw, ch = crop.size
+        if max(cw, ch) > max_dim:
+            ratio = max_dim / float(max(cw, ch))
+            downscaled = crop.resize((max(1, int(round(cw * ratio))), max(1, int(round(ch * ratio)))), Image.Resampling.BILINEAR)
+            no_bg_crop = rembg.remove(downscaled, session=rembg_session)
+        else:
+            no_bg_crop = rembg.remove(crop, session=rembg_session)
 
         sw = max(1, int(round((ox2 - ox1) * scale_factor)))
         sh = max(1, int(round((oy2 - oy1) * scale_factor)))
@@ -510,7 +531,7 @@ def download_player_portrait(img_url: str, save_path: str, target_width: int = 8
                     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 }
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
+            with urllib.request.urlopen(req, timeout=8) as resp:
                 raw_bytes = resp.read()
             if raw_bytes:
                 break
@@ -1867,17 +1888,30 @@ HTML_PAGE = r"""<!DOCTYPE html>
         showWorkbenchPage();
         hideLoading();
 
-        // Resolve backend path in background if folder exists on disk
-        fetch('/api/resolve_folder_name', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ folder_name: folderName })
-        }).then(r => r.json()).then(data => {
-          if (data && data.found && data.path) {
-            currentFolder = data.path;
-            editedFolder = currentFolder + '_edited';
-          }
-        }).catch(() => {});
+        // Upload images to backend so cloud / Render can run AI cutout, face detection, and batch processing
+        const cleanFolder = (folderName || 'Selected_Photos').replace(/[^a-zA-Z0-9_\-\s]/g, '').trim() || 'Selected_Photos';
+        const uploadQueue = imageFiles.map(file => {
+          return fetch(`/api/upload_single_file?folder=${encodeURIComponent(cleanFolder)}&name=${encodeURIComponent(file.name)}`, {
+            method: 'POST',
+            body: file
+          }).catch(err => console.warn('Upload error for ' + file.name, err));
+        });
+
+        // Run uploads in background and update currentFolder to server path
+        Promise.all(uploadQueue).then(async () => {
+          try {
+            const res = await fetch('/api/resolve_folder_name', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ folder_name: cleanFolder })
+            });
+            const rdata = await res.json();
+            if (rdata && rdata.found && rdata.path) {
+              currentFolder = rdata.path;
+              editedFolder = currentFolder + '_edited';
+            }
+          } catch (e) {}
+        });
 
         await selectPhoto(0);
       } catch (err) {
@@ -2419,35 +2453,48 @@ HTML_PAGE = r"""<!DOCTYPE html>
       if (!confirm(`Process and export all ${photos.length} portraits into ${editedFolder.split('/').pop()}?`)) return;
       const btn = document.getElementById('btn-batch-all');
       btn.disabled = true;
-      showLoading(`Batch processing ${photos.length} portraits...`);
+      let completed = 0;
+      let errors = 0;
 
-      const items = photos.map(name => ({
-        photo: name,
-        scale: photoData[name].scale,
-        offset_x: photoData[name].offset_x,
-        offset_y: photoData[name].offset_y
-      }));
+      showLoading(`Starting batch export for ${photos.length} portraits...`);
 
-      try {
-        const res = await fetch('/api/save_batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            folder: currentFolder,
-            items: items
-          })
-        });
-        const json = await res.json();
-        photos.forEach((_, idx) => {
-          document.getElementById(`dot-${idx}`).className = 'status-dot saved';
-        });
-        alert(`🎉 Complete! Successfully saved ${json.saved_count} portraits into ${json.folder_name}/`);
-      } catch (e) {
-        alert('Batch error: ' + e);
-      } finally {
-        hideLoading();
-        btn.disabled = false;
+      for (let i = 0; i < photos.length; i++) {
+        const name = photos[i];
+        const pct = Math.round(((i + 1) / photos.length) * 100);
+        showLoading(`Processing ${i + 1} of ${photos.length}: ${name} (${pct}%)...`);
+
+        const pData = photoData[name] || { scale: 0.35, offset_x: 0, offset_y: 0 };
+        try {
+          const res = await fetch('/api/process_single_portrait', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              folder: currentFolder,
+              photo: name,
+              scale: pData.scale,
+              offset_x: pData.offset_x,
+              offset_y: pData.offset_y
+            })
+          });
+          const json = await res.json();
+          if (json && json.status === 'ok') {
+            completed++;
+            const dot = document.getElementById(`dot-${i}`);
+            if (dot) dot.className = 'status-dot saved';
+            photoData[name].saved = true;
+          } else {
+            errors++;
+          }
+        } catch (err) {
+          errors++;
+          console.error(`Failed to process ${name}:`, err);
+        }
       }
+
+      hideLoading();
+      btn.disabled = false;
+      const editedBase = editedFolder.split('/').pop() || 'folder_edited';
+      alert(`🎉 Batch Complete!\nSuccessfully saved ${completed} of ${photos.length} portraits into ${editedBase}/` + (errors > 0 ? `\n(${errors} items failed)` : ''));
     }
 
     function showOriginal(show) {
@@ -3005,6 +3052,13 @@ class StudioServerHandler(BaseHTTPRequestHandler):
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
 
+        if path == "/healthz" or path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
+
         if path == "/" or path == "/index.html":
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -3120,7 +3174,9 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             img_path = os.path.join(folder, name)
             if os.path.exists(img_path) and os.path.isfile(img_path):
                 try:
-                    data = compute_auto_framing(img_path)
+                    with AI_LOCK:
+                        data = compute_auto_framing(img_path)
+                    gc.collect()
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
@@ -3172,9 +3228,37 @@ class StudioServerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        params = urllib.parse.parse_qs(parsed.query)
         content_len = int(self.headers.get("Content-Length", 0))
+
+        # Handle raw binary photo uploads from browser (enables full AI functionality on Render)
+        if parsed.path == "/api/upload_single_file":
+            raw_folder = params.get("folder", ["Selected_Photos"])[0]
+            clean_folder = re.sub(r'[^a-zA-Z0-9_\-\s]', '', os.path.basename(raw_folder)).strip() or "Selected_Photos"
+            filename = params.get("name", ["photo.png"])[0]
+            clean_filename = os.path.basename(filename)
+
+            workspace_dir = os.path.dirname(os.path.abspath(__file__))
+            target_dir = os.path.join(workspace_dir, "input_photos", clean_folder)
+            os.makedirs(target_dir, exist_ok=True)
+            out_path = os.path.join(target_dir, clean_filename)
+
+            file_bytes = self.rfile.read(content_len) if content_len > 0 else b""
+            with open(out_path, "wb") as f:
+                f.write(file_bytes)
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "folder_path": target_dir,
+                "file_path": out_path
+            }).encode("utf-8"))
+            return
+
         body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
-        data = json.loads(body)
+        data = json.loads(body) if body else {}
 
         if parsed.path == "/api/resolve_folder_name":
             fname = data.get("folder_name", "")
@@ -3189,20 +3273,24 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             }).encode("utf-8"))
 
         elif parsed.path == "/api/preview_cutout":
-            folder = data.get("folder", ".")
+            raw_folder = data.get("folder", ".")
+            folder = resolve_input_path(raw_folder) or raw_folder
             photo = data.get("photo", "")
             scale = float(data.get("scale", 0.35))
             offset_x = float(data.get("offset_x", 0))
             offset_y = float(data.get("offset_y", 0))
 
             img_path = os.path.join(folder, photo)
-            canvas = process_custom_framed_portrait(
-                image_path=img_path,
-                scale=scale,
-                offset_x=offset_x,
-                offset_y=offset_y,
-                output_size=180,
-            )
+            with AI_LOCK:
+                canvas = process_custom_framed_portrait(
+                    image_path=img_path,
+                    scale=scale,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    output_size=180,
+                )
+            gc.collect()
+
             buf = io.BytesIO()
             canvas.save(buf, "PNG")
             img_bytes = buf.getvalue()
@@ -3213,7 +3301,8 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self.wfile.write(img_bytes)
 
         elif parsed.path == "/api/save_refined_data":
-            folder = data.get("folder", ".")
+            raw_folder = data.get("folder", ".")
+            folder = resolve_input_path(raw_folder) or raw_folder
             filename = data.get("filename", "")
             b64_data = data.get("image_base64", "")
 
@@ -3237,8 +3326,42 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 "folder_name": folder_display
             }).encode("utf-8"))
 
+        elif parsed.path == "/api/process_single_portrait":
+            raw_folder = data.get("folder", ".")
+            folder = resolve_input_path(raw_folder) or raw_folder
+            photo = data.get("photo", "")
+            scale = float(data.get("scale", 0.35))
+            offset_x = float(data.get("offset_x", 0))
+            offset_y = float(data.get("offset_y", 0))
+
+            out_dir = resolve_edited_dir(folder, create=True)
+            img_path = os.path.join(folder, photo)
+            out_name = f"{os.path.splitext(photo)[0]}.png"
+            out_path = os.path.join(out_dir, out_name)
+
+            with AI_LOCK:
+                process_custom_framed_portrait(
+                    image_path=img_path,
+                    scale=scale,
+                    offset_x=offset_x,
+                    offset_y=offset_y,
+                    output_path=out_path,
+                    output_size=180,
+                )
+            gc.collect()
+
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "filename": out_name,
+                "folder_name": os.path.basename(out_dir)
+            }).encode("utf-8"))
+
         elif parsed.path == "/api/save_batch":
-            folder = data.get("folder", ".")
+            raw_folder = data.get("folder", ".")
+            folder = resolve_input_path(raw_folder) or raw_folder
             items = data.get("items", [])
             out_dir = resolve_edited_dir(folder, create=True)
             saved_names = []
@@ -3253,15 +3376,17 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 out_name = f"{os.path.splitext(photo)[0]}.png"
                 out_path = os.path.join(out_dir, out_name)
 
-                process_custom_framed_portrait(
-                    image_path=img_path,
-                    scale=scale,
-                    offset_x=offset_x,
-                    offset_y=offset_y,
-                    output_path=out_path,
-                    output_size=180,
-                )
+                with AI_LOCK:
+                    process_custom_framed_portrait(
+                        image_path=img_path,
+                        scale=scale,
+                        offset_x=offset_x,
+                        offset_y=offset_y,
+                        output_path=out_path,
+                        output_size=180,
+                    )
                 saved_names.append(out_name)
+                gc.collect()
 
             folder_display = os.path.basename(out_dir)
             self.send_response(200)
@@ -3313,9 +3438,8 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 target_dir = os.path.join(workspace_dir, "input_photos", folder_name)
 
             os.makedirs(target_dir, exist_ok=True)
-            saved_files = []
 
-            for item in players:
+            def _download_worker(item):
                 p_name = item.get("name", "").strip()
                 assigned = item.get("assigned_number", "").strip()
                 img_url = item.get("image", "").strip()
@@ -3332,22 +3456,25 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 save_path = os.path.join(target_dir, out_filename)
                 try:
                     sp, sz = download_player_portrait(img_url, save_path, target_width=target_width)
-                    saved_files.append({
+                    return {
                         "name": p_name,
                         "filename": out_filename,
                         "type": used_type,
                         "dimensions": sz,
                         "path": sp,
                         "status": "ok"
-                    })
+                    }
                 except Exception as e:
-                    saved_files.append({
+                    return {
                         "name": p_name,
                         "filename": out_filename,
                         "type": used_type,
                         "status": "error",
                         "error": str(e)
-                    })
+                    }
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                saved_files = list(executor.map(_download_worker, players))
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -3377,7 +3504,8 @@ def launch_studio(port: int = None):
 
     for p in ports_to_try:
         try:
-            server = HTTPServer((host, p), StudioServerHandler)
+            server = ThreadingHTTPServer((host, p), StudioServerHandler)
+            server.daemon_threads = True
             print("=" * 66)
             print(f"🏀 Basketball Portrait Studio Pro running at: http://{host}:{p}")
             print("=" * 66)
