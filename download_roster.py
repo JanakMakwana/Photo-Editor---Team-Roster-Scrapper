@@ -23,15 +23,24 @@ if not os.environ.get("RENDER") and sys.prefix == sys.base_prefix and os.path.ex
 
 def scrape_roster(url: str):
     """
-    Fetches the roster page and extracts player names, jersey numbers, and photo URLs.
-    Supports Sidearm Sports and standard collegiate athletics sites.
+    Fetches roster and extracts player names, jerseys, positions, and photo URLs.
+    Supports UK EIHL & Sports teams, NHL, and NCAA/Sidearm collegiate athletics sites.
     """
+    try:
+        from studio import scrape_roster_data
+        res = scrape_roster_data(url)
+        if res.get("players") and len(res["players"]) > 0:
+            return res["players"]
+    except Exception as e:
+        print(f"[Notice] Routing through local collegiate scraper: {e}")
+
     req = urllib.request.Request(
         url,
         headers={
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
     )
+
     with urllib.request.urlopen(req) as resp:
         html = resp.read().decode("utf-8", errors="ignore")
 

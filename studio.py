@@ -218,7 +218,18 @@ def boost_image_url_width(img_url: str, target_width: int = 1200) -> str:
     """Modifies or appends width parameter in URL to fetch high-res image from athletics CDN."""
     if not img_url:
         return ""
-    # 1. If width=\d+ exists, replace it with target_width and quality=100
+
+    # 0. Unwrap Next.js image proxies (e.g. /_next/image?url=https%3A...)
+    if "/_next/image" in img_url and "url=" in img_url:
+        m = re.search(r'url=([^&]+)', img_url)
+        if m:
+            img_url = urllib.parse.unquote(m.group(1))
+
+    # 1. Strip WordPress/CMS dimension suffixes e.g. -600x800.jpg -> .jpg
+    if not any(k in img_url for k in ["_crop_", "/thumbnails/"]):
+        img_url = re.sub(r'-\d+x\d+(\.[a-zA-Z0-9]+)$', r'\1', img_url)
+
+    # 2. If width=\d+ exists, replace it with target_width and quality=100
     if re.search(r'[?&]width=\d+', img_url):
         new_url = re.sub(r'([?&]width=)\d+', r'\g<1>' + str(target_width), img_url)
         if 'quality=' in new_url:
@@ -227,12 +238,13 @@ def boost_image_url_width(img_url: str, target_width: int = 1200) -> str:
             new_url += '&quality=100'
         return new_url
 
-    # 2. If it's a known athletics image CDN (Sidearm / Presto / etc.) or contains /images/
+    # 3. If it's a known athletics image CDN (Sidearm / Presto / etc.) or contains /images/
     if any(k in img_url for k in ["/images/", "sidearm", "presto", "athletics"]):
         sep = '&' if '?' in img_url else '?'
         return f"{img_url}{sep}width={target_width}&quality=100"
 
     return img_url
+
 
 
 # NHL Teams database mapping slug / abbreviations to official 3-letter team code and full team name
@@ -508,14 +520,377 @@ def scrape_college_roster(url: str):
     }
 
 
+def clean_uk_team_folder(url: str, html: str) -> str:
+    """Extracts a clean, professional folder name for UK / EIHL teams and sports clubs."""
+    url_lower = url.lower()
+    if 'cardiffdevils.com' in url_lower: return 'Cardiff Devils'
+    if 'coventryblaze.co.uk' in url_lower: return 'Coventry Blaze'
+    if 'belfastgiants.com' in url_lower: return 'Belfast Giants'
+    if 'sheffieldsteelers.co.uk' in url_lower: return 'Sheffield Steelers'
+    if 'panthers.co.uk' in url_lower: return 'Nottingham Panthers'
+    if 'manchesterstorm.com' in url_lower: return 'Manchester Storm'
+    if 'clanihc.com' in url_lower: return 'Glasgow Clan'
+    if 'dundeestars.com' in url_lower: return 'Dundee Stars'
+    if 'fifeflyers.co.uk' in url_lower: return 'Fife Flyers'
+    if 'guildfordflames.com' in url_lower: return 'Guildford Flames'
+
+    # Try OpenGraph site_name or title
+    og = re.search(r'property=[\"\']og:site_name[\"\']\s+content=[\"\']([^\"\']+)[\"\']', html, re.I)
+    if og:
+        name = py_html.unescape(og.group(1).strip())
+        name = re.sub(r'\s*(Official|Website|Ice Hockey|Club|Team|Roster)\b', '', name, flags=re.I).strip()
+        if len(name) > 2:
+            return name
+
+    title = re.search(r'<title>(.*?)</title>', html, re.I | re.S)
+    if title:
+        t = py_html.unescape(title.group(1).strip())
+        for sep in [' | ', ' - ', ' – ', ' &#8211; ']:
+            if sep in t:
+                parts = [p.strip() for p in t.split(sep)]
+                cand = [p for p in parts if not any(w in p.lower() for w in ['roster', 'team', 'players', 'official', 'website'])]
+                if cand:
+                    return cand[0]
+                return parts[0]
+        return re.sub(r'\s*(Official|Website|Ice Hockey|Club|Team|Roster)\b', '', t, flags=re.I).strip() or "UK Team Roster"
+
+    return "UK Team Roster"
+
+
+def is_uk_sports_url(url: str) -> bool:
+    """Detects whether a URL belongs to a UK sports team or UK domain."""
+    url_lower = url.lower()
+    uk_keywords = [
+        "cardiffdevils.com", "coventryblaze.co.uk", "belfastgiants.com",
+        "sheffieldsteelers.co.uk", "panthers.co.uk", "manchesterstorm.com",
+        "clanihc.com", "dundeestars.com", "fifeflyers.co.uk", "guildfordflames.com",
+        ".co.uk", ".uk", ".scot", ".cymru"
+    ]
+    return any(k in url_lower for k in uk_keywords)
+
+
+def scrape_uk_roster(url: str):
+    """
+    Scrapes UK sports and EIHL hockey team rosters (Cardiff Devils, Coventry Blaze,
+    Belfast Giants, Sheffield Steelers, Nottingham Panthers, Manchester Storm, etc.)
+    extracting player names, jersey numbers, positions, vitals, and high-res headshot URLs.
+    """
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    suggested_folder = clean_uk_team_folder(url, html)
+    players = []
+
+    # 1. Inertia.js (Coventry Blaze and modern UK sports apps)
+    m_inertia = re.search(r'<script\s+[^>]*data-page=[\"\']app[\"\'][^>]*>(.*?)</script>', html, re.DOTALL)
+    if m_inertia:
+        try:
+            d = json.loads(m_inertia.group(1))
+            props = d.get("props", {})
+            plist = props.get("players") or props.get("roster") or props.get("team") or []
+            for p in plist:
+                name = p.get("name") or f"{p.get('firstName', '')} {p.get('lastName', '')}".strip()
+                jersey = str(p.get("number", "")).strip()
+                pos = p.get("positionLabel") or p.get("position") or ""
+                img = p.get("photoUrl") or p.get("image") or p.get("photo") or ""
+                vitals = p.get("vitals", "")
+                bio = p.get("bio", "")
+                if name and img:
+                    v_dict = {"shoots": "", "height": "", "weight": "", "born": "", "birthplace": ""}
+                    if vitals:
+                        parts = [x.strip() for x in vitals.split("|")]
+                        for pt in parts:
+                            if "age:" in pt.lower():
+                                v_dict["born"] = pt
+                            elif "cm" in pt.lower() or "'" in pt or '"' in pt:
+                                v_dict["height"] = pt
+                            elif len(pt) <= 4 or any(c in pt.lower() for c in ["can", "usa", "gbr", "fin", "swe", "den"]):
+                                v_dict["birthplace"] = pt
+
+                    full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                    players.append({
+                        "name": name.strip(),
+                        "jersey": jersey,
+                        "position": pos.capitalize(),
+                        "pos": pos.capitalize(),
+                        "image": full_img,
+                        "raw_image": full_img,
+                        "shoots": v_dict["shoots"],
+                        "height": v_dict["height"],
+                        "weight": v_dict["weight"],
+                        "born": v_dict["born"],
+                        "birthplace": v_dict["birthplace"],
+                        "details": vitals or (bio[:60] if bio else ""),
+                        "assigned_number": ""
+                    })
+        except Exception:
+            pass
+
+    # 2. Cardiff Devils & Belfast Giants (player-card pattern)
+    if not players:
+        # Check if page has category headings (Forwards, Defencemen, Netminders, Coaches)
+        heading_sections = re.split(r'<h[1-4][^>]*>(Forwards?|Defencemen|Defenders?|Defence|Netminders?|Goalies?|Goalkeepers?|Coaches?)</h[1-4]>', html, flags=re.I)
+        sections_to_process = []
+        if len(heading_sections) > 1:
+            for idx in range(1, len(heading_sections), 2):
+                h_name = heading_sections[idx]
+                h_content = heading_sections[idx + 1]
+                sections_to_process.append((h_name, h_content))
+        else:
+            sections_to_process.append(("", html))
+
+        for pos_label, sec_html in sections_to_process:
+            cards = re.findall(
+                r'<(?:div|a|article)[^>]*class=[\"\'][^\"\']*\bplayer-card\b(?![-_])[^\"\']*[\"\'][^>]*>(.*?)(?=<(?:div|a|article)[^>]*class=[\"\'][^\"\']*\bplayer-card\b(?![-_])[^\"\']*[\"\']|\Z)',
+                sec_html,
+                re.DOTALL | re.I
+            )
+            for c in cards:
+                # Jersey Number
+                num_m = re.search(r'player-card[_\-]*(?:number|squad-number)[^>]*>[\s\n]*<span[^>]*>[\s\n]*(\d+)', c, re.I)
+                if not num_m:
+                    num_m = re.search(r'player-card_squad-number[^>]*>[\s\n]*(\d+)', c, re.I)
+                if not num_m:
+                    num_m = re.search(r'(?:number|jersey)[^>]*>[\s\n]*<span>?(\d+)<?', c, re.I)
+                jersey = num_m.group(1).strip() if num_m else ""
+
+                # Name
+                name = ""
+                name_m = re.search(r'player-card__name[^>]*>(.*?)</div>', c, re.DOTALL | re.I)
+                if name_m:
+                    h_tags = re.findall(r'<h\d[^>]*>(.*?)</h\d>', name_m.group(1))
+                    if h_tags:
+                        name = " ".join(h_tags).strip()
+                    else:
+                        name = re.sub(r'<[^>]+>', ' ', name_m.group(1)).strip()
+                if not name:
+                    alt_m = re.search(r'<img[^>]+alt=[\"\']([^\"\']+)[\"\']', c)
+                    if alt_m and len(alt_m.group(1).strip()) > 2 and 'logo' not in alt_m.group(1).lower():
+                        name = alt_m.group(1).strip()
+
+                # Position (prioritize specific card position if present, then section heading)
+                pos = ""
+                pos_m = re.search(r'player-card__position[^>]*>(.*?)</div>', c, re.DOTALL | re.I)
+                if pos_m:
+                    pos = re.sub(r'<[^>]+>', ' ', pos_m.group(1)).strip()
+                if not pos:
+                    pos = pos_label
+
+                # Image URL - look for highest resolution in srcset or fallback to src
+                img = ""
+                srcset_m = re.search(r'srcset=[\"\']([^\"\']+)[\"\']', c, re.I)
+                if srcset_m:
+                    sources = [s.strip().split() for s in srcset_m.group(1).split(',') if s.strip()]
+                    def _get_w(s):
+                        if len(s) > 1 and s[1].endswith('w'):
+                            try:
+                                return int(s[1][:-1])
+                            except Exception:
+                                return 0
+                        return 0
+                    sources.sort(key=_get_w, reverse=True)
+                    if sources:
+                        img = sources[0][0]
+                if not img:
+                    src_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', c, re.I)
+                    if src_m:
+                        img = src_m.group(1)
+
+                if name and img and 'logo' not in img.lower() and 'facebook' not in img.lower() and 'icon' not in img.lower():
+                    full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                    players.append({
+                        "name": name.strip(),
+                        "jersey": jersey,
+                        "position": pos.capitalize() if pos else "",
+                        "pos": pos.capitalize() if pos else "",
+                        "image": full_img,
+                        "raw_image": full_img,
+                        "shoots": "",
+                        "height": "",
+                        "weight": "",
+                        "born": "",
+                        "birthplace": "",
+                        "details": "",
+                        "assigned_number": ""
+                    })
+
+    # 3. Next.js / Manchester Storm aria-label articles
+    if not players:
+        articles = re.findall(r'<article[^>]+aria-label=[\"\'](\d+),\s*([^,]+),\s*([^\"\']+)[\"\'][^>]*>(.*?)</article>', html, re.DOTALL | re.I)
+        for num, name, pos, art_html in articles:
+            next_m = re.search(r'/_next/image\?url=([^&\"\'\s]+)', art_html)
+            img = ""
+            if next_m:
+                img = urllib.parse.unquote(next_m.group(1))
+            else:
+                img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', art_html)
+                if img_m:
+                    img = img_m.group(1)
+            if name and img:
+                full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                players.append({
+                    "name": name.strip(),
+                    "jersey": num.strip(),
+                    "position": pos.strip().capitalize(),
+                    "pos": pos.strip().capitalize(),
+                    "image": full_img,
+                    "raw_image": full_img,
+                    "shoots": "",
+                    "height": "",
+                    "weight": "",
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": ""
+                })
+
+    # 4. Sheffield Steelers / SportsPress theme
+    if not players:
+        sp_items = re.findall(
+            r'<div[^>]*class=[\"\'][^\"\']*gdlr-core-(?:item-list|sp-player-item)[^\"\']*[\"\'][^>]*>(.*?)(?=<div[^>]*class=[\"\'][^\"\']*gdlr-core-(?:item-list|sp-player-item)[^\"\']*[\"\']|\Z)',
+            html,
+            re.DOTALL | re.I
+        )
+        for it in sp_items:
+            name_m = re.search(r'gdlr-core-sp-player-title[^>]*><a[^>]*>([^<]+)</a>', it)
+            name = name_m.group(1).strip() if name_m else ""
+            num_m = re.search(r'gdlr-core-sp-player-number[^>]*>(\d+)<', it)
+            jersey = num_m.group(1).strip() if num_m else ""
+            pos_m = re.search(r'gdlr-core-sp-player-position[^>]*>([^<]+)</div>', it)
+            pos = pos_m.group(1).strip() if pos_m else ""
+            img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', it)
+            img = img_m.group(1).strip() if img_m else ""
+            if name and img:
+                full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                players.append({
+                    "name": name.strip(),
+                    "jersey": jersey,
+                    "position": pos.capitalize() if pos else "",
+                    "pos": pos.capitalize() if pos else "",
+                    "image": full_img,
+                    "raw_image": full_img,
+                    "shoots": "",
+                    "height": "",
+                    "weight": "",
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": ""
+                })
+
+    # 5. Nottingham Panthers / team-member-grid-item
+    if not players:
+        items = re.findall(r'<li[^>]*class=[\"\'][^\"\']*team-member-grid-item[^\"\']*[\"\'][^>]*>(.*?)</li>', html, re.DOTALL | re.I)
+        for it in items:
+            name_m = re.search(r'<h3[^>]*class=[\"\'][^\"\']*heading[^\"\']*[\"\'][^>]*>([^<]+)</h3>', it)
+            name = name_m.group(1).strip() if name_m else ""
+            num_m = re.search(r'number-overlay[^>]*>(\d+)<', it)
+            jersey = num_m.group(1).strip() if num_m else ""
+            pos_m = re.search(r'<p[^>]*class=[\"\'][^\"\']*position[^\"\']*[\"\'][^>]*>([^<]+)</p>', it)
+            pos = pos_m.group(1).strip() if pos_m else ""
+            img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', it)
+            img = img_m.group(1).strip() if img_m else ""
+            if name and img:
+                full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
+                players.append({
+                    "name": name.strip(),
+                    "jersey": jersey,
+                    "position": pos.capitalize() if pos else "",
+                    "pos": pos.capitalize() if pos else "",
+                    "image": full_img,
+                    "raw_image": full_img,
+                    "shoots": "",
+                    "height": "",
+                    "weight": "",
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": ""
+                })
+
+    # 6. Generic schema.org SportsTeam/Person or Table fallback for other UK/European clubs
+    if not players:
+        json_matches = re.findall(r'<script type=\"application/ld\+json\">(.*?)</script>', html, re.DOTALL)
+        for block in json_matches:
+            try:
+                d = json.loads(block.strip())
+                items = d.get("item", []) if isinstance(d, dict) else (d if isinstance(d, list) else [])
+                for it in items:
+                    name = it.get("name")
+                    img = it.get("image")
+                    img_url = img.get("url") if isinstance(img, dict) else (img if isinstance(img, str) else "")
+                    if name and img_url:
+                        full_img = boost_image_url_width(urllib.parse.urljoin(url, img_url.strip()))
+                        players.append({
+                            "name": name.strip(),
+                            "jersey": "",
+                            "position": "",
+                            "pos": "",
+                            "image": full_img,
+                            "raw_image": full_img,
+                            "shoots": "",
+                            "height": "",
+                            "weight": "",
+                            "born": "",
+                            "birthplace": "",
+                            "details": "",
+                            "assigned_number": ""
+                        })
+            except Exception:
+                pass
+
+    # Deduplicate by player name
+    seen = set()
+    unique = []
+    for p in players:
+        clean_pname = re.sub(r'\s+', ' ', p["name"]).strip()
+        if clean_pname and clean_pname not in seen:
+            seen.add(clean_pname)
+            p["name"] = clean_pname
+            unique.append(p)
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": unique
+    }
+
+
 def scrape_roster_data(url: str):
     """
-    Dispatches to NHL scraper or College/NCAA athletics scraper based on the URL domain.
+    Intelligently routes roster URL to NHL, UK Teams, or College/NCAA athletics scrapers
+    with automatic fallbacks.
     """
     url_lower = url.lower()
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
         return scrape_nhl_roster(url)
-    return scrape_college_roster(url)
+
+    if is_uk_sports_url(url):
+        try:
+            res = scrape_uk_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] UK scraper notice: {e}, falling back to general athletics scraper...")
+
+    # College / NCAA / Sidearm athletics scraper
+    res = scrape_college_roster(url)
+    if not res.get("players") or len(res["players"]) == 0:
+        # Fallback to UK / general sports scraper if college returned no players
+        try:
+            uk_res = scrape_uk_roster(url)
+            if uk_res.get("players") and len(uk_res["players"]) > 0:
+                return uk_res
+        except Exception:
+            pass
+
+    return res
+
 
 
 def download_player_portrait(img_url: str, save_path: str, target_width: int = 800) -> tuple:
@@ -1459,12 +1834,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="roster-config-card">
         <div class="roster-input-grid">
           <div class="input-group">
-            <label class="input-label">Roster Website URL</label>
-            <input type="url" id="roster-url-input" class="roster-text-input" spellcheck="false" placeholder="https://www.nhl.com/sabres/roster or College Athletics URL" value="https://www.nhl.com/sabres/roster" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
+            <label class="input-label">Roster Website URL (UK Teams, NHL, NCAA/Sidearm)</label>
+            <input type="url" id="roster-url-input" class="roster-text-input" spellcheck="false" placeholder="https://www.cardiffdevils.com/team/ or https://coventryblaze.co.uk/roster" value="https://www.cardiffdevils.com/team/" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
           </div>
           <div class="input-group">
             <label class="input-label">Destination Folder Name</label>
-            <input type="text" id="roster-folder-input" class="roster-text-input" placeholder="Buffalo Sabres" value="Buffalo Sabres" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
+            <input type="text" id="roster-folder-input" class="roster-text-input" placeholder="Cardiff Devils" value="Cardiff Devils" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
           </div>
           <div>
             <button class="btn btn-primary" style="padding: 12px 20px; font-size: 0.9rem;" onclick="fetchRosterPlayers()">
@@ -1476,9 +1851,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Quick Presets -->
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px;">
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Quick Presets:</span>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">🇬🇧 Cardiff Devils (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">🇬🇧 Coventry Blaze (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">🇬🇧 Belfast Giants (EIHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/sabres/roster', 'Buffalo Sabres')">🏒 Buffalo Sabres (NHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/bruins/roster', 'Boston Bruins')">🏒 Boston Bruins (NHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/rangers/roster', 'New York Rangers')">🏒 NY Rangers (NHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://smcathletics.com/sports/mens-basketball/roster/2025-26', 'Saint Michael\'s College')">🏀 Saint Michael's (NCAA)</button>
         </div>
 
