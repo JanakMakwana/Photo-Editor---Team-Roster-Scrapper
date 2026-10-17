@@ -1129,6 +1129,89 @@ def scrape_uk_roster(url: str):
     }
 
 
+KOREAN_NAME_MAP = {
+    'Lee-Seul Kang': '강이슬',
+    'Ye-Eun Heo': '허예은',
+    'Li-Mi Go': '고리미',
+    'Min-Kyung Kim': '김민경',
+    'Min-Jung Kim': '김민정',
+    'Yoon-Mi Lee': '이윤미',
+    'Chae-Eun Lee': '이채은',
+    'CaiDeng Sakai': '사카이 사라',
+    'Yu-Na Yeom': '염윤아',
+    'Yun-Jeong Na': '나윤정',
+    'Hyun-Ji Koh': '고현지',
+    'Su-Yeon Seong': '성수연',
+    'Yoon-Ha Song': '송윤하',
+    'Yeo-Myeong Lee': '이여명',
+    'Hye-Kyung Noh': '노혜경',
+    'Eun-Sun Kim': '김은선',
+    'Ji-Soo Yang': '양지수',
+    'Ji-Su Park': '박지수',
+    'So-Dam Kim': '김소담',
+    'Dan-Bi Kim': '김단비',
+    'Hye-Jin Park': '박혜진',
+    'Ji-Hyun Shin': '신지현',
+    'An He-Ji': '안혜지',
+    'Jin-Hee Bae': '배혜윤',
+    'Lee So-Hee': '이소희',
+    'Kim Jin-Young': '김진영',
+    'Yoon Ye-Bin': '윤예빈',
+    'Shin Ye-Young': '신예영',
+    'Lee Hye-Joo': '이혜주',
+}
+
+KOREAN_FAMILY_NAMES = {
+    'kim': '김', 'lee': '이', 'yi': '이', 'rhee': '이', 'park': '박', 'pak': '박',
+    'choi': '최', 'jung': '정', 'jeong': '정', 'chung': '정', 'kang': '강', 'gang': '강',
+    'cho': '조', 'jo': '조', 'yoon': '윤', 'yun': '윤', 'jang': '장', 'chang': '장',
+    'lim': '임', 'im': '임', 'han': '한', 'oh': '오', 'seo': '서', 'suh': '서',
+    'shin': '신', 'kwon': '권', 'gwon': '권', 'hwang': '황', 'ahn': '안', 'an': '안',
+    'song': '송', 'ryu': '류', 'yoo': '유', 'hong': '홍', 'koh': '고', 'ko': '고',
+    'go': '고', 'moon': '문', 'yang': '양', 'son': '손', 'bae': '배', 'paik': '백',
+    'baek': '백', 'heo': '허', 'huh': '허', 'noh': '노', 'roh': '노', 'nam': '남',
+    'shim': '심', 'ha': '하', 'kwak': '곽', 'sung': '성', 'seong': '성', 'cha': '차',
+    'ju': '주', 'joo': '주', 'woo': '우', 'ku': '구', 'goo': '구', 'min': '민',
+    'jin': '진', 'ji': '지', 'eom': '엄', 'um': '엄', 'byun': '변', 'chae': '채',
+    'won': '원', 'yeom': '염', 'chun': '천'
+}
+
+KOREAN_SYLLABLES = {
+    'seul': '슬', 'ye': '예', 'eun': '은', 'jung': '정', 'jeong': '정', 'yoon': '윤',
+    'yun': '윤', 'mi': '미', 'chae': '채', 'na': '나', 'hyun': '현', 'hyeon': '현',
+    'ji': '지', 'su': '수', 'soo': '수', 'yeon': '연', 'ha': '하', 'kyung': '경',
+    'gyeong': '경', 'yeo': '여', 'myeong': '명', 'myung': '명', 'hye': '혜', 'sun': '선',
+    'min': '민', 'dan': '단', 'bi': '비', 'jin': '진', 'young': '영', 'bin': '빈',
+    'hee': '희', 'so': '소', 'dam': '담', 'ah': '아', 'ri': '리', 'joo': '주',
+    'ju': '주', 'won': '원', 'woo': '우', 'kyoung': '경'
+}
+
+
+def translate_korean_name(name_str: str) -> str:
+    """Translates romanized Korean basketball player names into official Korean Hangul."""
+    name_clean = name_str.strip()
+    if name_clean in KOREAN_NAME_MAP:
+        return KOREAN_NAME_MAP[name_clean]
+
+    parts = name_clean.split()
+    if len(parts) == 2:
+        # Given-Name Family (e.g. 'Lee-Seul Kang')
+        given, family = parts[0], parts[1]
+        fam_ko = KOREAN_FAMILY_NAMES.get(family.lower())
+        given_syls = given.lower().replace('-', ' ').split()
+        if fam_ko and all(s in KOREAN_SYLLABLES for s in given_syls):
+            return fam_ko + ''.join(KOREAN_SYLLABLES[s] for s in given_syls)
+
+        # Family Given-Name (e.g. 'Kang Lee-Seul')
+        family, given = parts[0], parts[1]
+        fam_ko = KOREAN_FAMILY_NAMES.get(family.lower())
+        given_syls = given.lower().replace('-', ' ').split()
+        if fam_ko and all(s in KOREAN_SYLLABLES for s in given_syls):
+            return fam_ko + ''.join(KOREAN_SYLLABLES[s] for s in given_syls)
+
+    return ''
+
+
 def is_eurobasket_url(url: str) -> bool:
     """Detects whether a URL belongs to Eurobasket, Asia-Basket, Latinbasket, etc."""
     u = url.lower()
@@ -1180,15 +1263,21 @@ def parse_eurobasket_single_player(url: str) -> dict:
     if not team:
         team = name or "Basketball"
 
+    native_name = translate_korean_name(name)
+    display_name = f"{name} ({native_name})" if native_name else name
+
     det_parts = []
     if pos: det_parts.append(f"Position: {pos}")
+    if native_name: det_parts.append(f"Korean: {native_name}")
     if born: det_parts.append(f"Born: {born}")
     if nat: det_parts.append(f"Nationality: {nat}")
     if ht: det_parts.append(f"Height: {ht}")
     details = " | ".join(det_parts)
 
     player = {
-        "name": name,
+        "name": display_name,
+        "name_en": name,
+        "native_name": native_name,
         "jersey": "",
         "pos": pos,
         "position": pos,
@@ -1275,8 +1364,13 @@ def scrape_eurobasket_roster(url: str) -> dict:
         clean_purl = purl.split("?")[0]
         img = featured_photos.get(clean_purl, "")
 
+        native_name = translate_korean_name(name)
+        display_name = f"{name} ({native_name})" if native_name else name
+
         players.append({
-            "name": name,
+            "name": display_name,
+            "name_en": name,
+            "native_name": native_name,
             "jersey": num,
             "pos": pos,
             "position": pos,
@@ -1316,6 +1410,7 @@ def scrape_eurobasket_roster(url: str) -> dict:
 
         v_parts = []
         if p.get("pos"): v_parts.append(f"Position: {p['pos']}")
+        if p.get("native_name"): v_parts.append(f"Korean: {p['native_name']}")
         if p.get("born"): v_parts.append(f"Born: {p['born']}")
         elif p.get("age"): v_parts.append(f"Age: {p['age']}")
         if p.get("nationality"): v_parts.append(f"Nationality: {p['nationality']}")
