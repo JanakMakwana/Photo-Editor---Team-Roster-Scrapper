@@ -685,6 +685,63 @@ def parse_coventry_single_player(url: str, html: str):
     return None
 
 
+def parse_panthers_single_player(url: str, html: str):
+    """Scrapes an individual Nottingham Panthers player profile page (e.g. /onice/202627-elite-league-roster/mat-robson)."""
+    h1_m = re.search(r'<h1[^>]*>([^<]+)</h1>', html)
+    name = h1_m.group(1).strip() if h1_m else ""
+    if not name:
+        title_m = re.search(r'<title>(.*?)(?:\s*-)?\s*Nottingham Panthers', html, re.I)
+        if title_m:
+            name = title_m.group(1).strip()
+
+    num_m = re.search(r'number-overlay[^>]*>(\d+)<', html)
+    jersey = num_m.group(1).strip() if num_m else ""
+
+    pairs = re.findall(r'<th[^>]*>([^<]+)</th>\s*<td[^>]*>([^<]+)</td>', html, re.I)
+    table = {k.strip().lower(): py_html.unescape(v.strip()) for k, v in pairs}
+
+    pos = table.get("position", "").capitalize()
+    shoots = table.get("shoots") or table.get("glove", "")
+    height = table.get("height", "")
+    weight = table.get("weight", "")
+    born = table.get("date of birth") or table.get("born", "")
+    birthplace = table.get("place of birth") or table.get("birthplace") or table.get("nationality", "")
+
+    img_m = re.search(r'<div class=[\"\']image-container[\"\'][^>]*>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.DOTALL)
+    if not img_m:
+        img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\'][^>]*alt=[\"\']' + re.escape(name) + r'[\"\']', html, re.I)
+    img = img_m.group(1).strip() if img_m else ""
+    full_img = boost_image_url_width(urllib.parse.urljoin(url, img))
+
+    v_parts = []
+    if pos: v_parts.append(f"Position: {pos}")
+    if born: v_parts.append(f"Born: {born}")
+    if birthplace: v_parts.append(f"Birthplace: {birthplace}")
+    if shoots: v_parts.append(f"Shoots/Glove: {shoots}")
+    if height: v_parts.append(f"Height: {height}")
+    if weight: v_parts.append(f"Weight: {weight}")
+    details = " | ".join(v_parts)
+
+    return {
+        "suggested_folder": "Nottingham Panthers",
+        "players": [{
+            "name": name,
+            "jersey": jersey,
+            "position": pos,
+            "pos": pos,
+            "image": full_img,
+            "raw_image": full_img,
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": birthplace,
+            "details": details,
+            "assigned_number": jersey or ""
+        }]
+    }
+
+
 def scrape_uk_roster(url: str):
     """
     Scrapes UK sports and EIHL hockey team rosters (Cardiff Devils, Coventry Blaze,
@@ -705,6 +762,9 @@ def scrape_uk_roster(url: str):
     u_lower = url.lower().rstrip('/')
     is_cardiff_single = "cardiffdevils.com/team/" in u_lower and u_lower.split("/team/")[-1] not in ("", "team")
     is_coventry_single = "coventryblaze.co.uk/player/" in u_lower and u_lower.split("/player/")[-1] not in ("", "player")
+    is_panthers_single = "panthers.co.uk" in u_lower and (
+        "/onice/" in u_lower and len(u_lower.split("/onice/")[-1].strip("/").split("/")) >= 2
+    )
 
     if is_cardiff_single:
         return parse_cardiff_single_player(url, html)
@@ -713,6 +773,9 @@ def scrape_uk_roster(url: str):
         single_res = parse_coventry_single_player(url, html)
         if single_res:
             return single_res
+
+    if is_panthers_single:
+        return parse_panthers_single_player(url, html)
 
     suggested_folder = clean_uk_team_folder(url, html)
     players = []
@@ -963,6 +1026,8 @@ def scrape_uk_roster(url: str):
             pos = pos_m.group(1).strip() if pos_m else ""
             img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', it)
             img = img_m.group(1).strip() if img_m else ""
+            link_m = re.search(r'<a[^>]+href=[\"\']([^\"\']+)[\"\']', it)
+            profile_url = urllib.parse.urljoin(url, link_m.group(1).strip()) if link_m else ""
             if name and img:
                 full_img = boost_image_url_width(urllib.parse.urljoin(url, img.strip()))
                 players.append({
@@ -978,8 +1043,43 @@ def scrape_uk_roster(url: str):
                     "born": "",
                     "birthplace": "",
                     "details": "",
-                    "assigned_number": ""
+                    "assigned_number": "",
+                    "profile_url": profile_url
                 })
+
+        # Enrich Nottingham Panthers players with individual profile details in parallel
+        if any(p.get("profile_url") for p in players):
+            def _enrich_panther(item):
+                purl = item.get("profile_url")
+                if not purl or "sponsor" in purl:
+                    return item
+                try:
+                    r = urllib.request.Request(purl, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
+                    with urllib.request.urlopen(r, timeout=5) as rp:
+                        h = rp.read().decode("utf-8")
+                        pairs = re.findall(r'<th[^>]*>([^<]+)</th>\s*<td[^>]*>([^<]+)</td>', h, re.I)
+                        table = {k.strip().lower(): py_html.unescape(v.strip()) for k, v in pairs}
+                        if table.get("position"):
+                            item["pos"] = table["position"].capitalize().strip()
+                            item["position"] = item["pos"]
+                        item["shoots"] = table.get("shoots") or table.get("glove", "")
+                        item["height"] = table.get("height", "")
+                        item["weight"] = table.get("weight", "")
+                        item["born"] = table.get("date of birth") or table.get("born", "")
+                        item["birthplace"] = table.get("place of birth") or table.get("birthplace") or table.get("nationality", "")
+                        v_parts = []
+                        if item.get("born"): v_parts.append(f"Born: {item['born']}")
+                        if item.get("birthplace"): v_parts.append(f"Birthplace: {item['birthplace']}")
+                        if item.get("shoots"): v_parts.append(f"Shoots/Glove: {item['shoots']}")
+                        if item.get("height"): v_parts.append(f"Height: {item['height']}")
+                        if item.get("weight"): v_parts.append(f"Weight: {item['weight']}")
+                        item["details"] = " | ".join(v_parts)
+                except Exception:
+                    pass
+                return item
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+                players = list(ex.map(_enrich_panther, players))
 
     # 6. Generic schema.org SportsTeam/Person or Table fallback for other UK/European clubs
     if not players:
