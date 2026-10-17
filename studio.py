@@ -16,6 +16,7 @@ import html as py_html
 import urllib.request
 import urllib.parse
 import zipfile
+import ssl
 import threading
 import concurrent.futures
 import gc
@@ -1128,14 +1129,289 @@ def scrape_uk_roster(url: str):
     }
 
 
+BCHL_TEAMS = {
+    '16': 'Alberni Valley Bulldogs', '82': 'Blackfalds Bulldogs', '81': 'Brooks Bandits',
+    '13': 'Chilliwack Chiefs', '9': 'Coquitlam Express', '10': 'Cowichan Valley Capitals',
+    '39': 'Cranbrook Bucks', '17': 'Langley Rivermen', '23': 'Nanaimo Clippers',
+    '87': 'Okotoks Oilers', '8': 'Powell River Kings', '14': 'Prince George Spruce Kings',
+    '20': 'Salmon Arm Silverbacks', '88': 'Sherwood Park Crusaders', '89': 'Spruce Grove Saints',
+    '11': 'Surrey Eagles', '22': 'Trail Smoke Eaters', '21': 'Vernon Vipers',
+    '18': 'Victoria Grizzlies', '19': 'West Kelowna Warriors'
+}
+
+BCHL_DOMAIN_TO_TEAM_ID = {
+    'cowichancapitals.com': '10',
+    'coquitlamexpress.ca': '9',
+    'albernivalleybulldogs.ca': '16',
+    'blackfaldsbulldogs.ca': '82',
+    'brooksbandits.ca': '81',
+    'chilliwackchiefs.net': '13',
+    'cranbrookbucks.ca': '39',
+    'langleyrivermen.com': '17',
+    'nanaimoclippers.com': '23',
+    'okotoksoilers.com': '87',
+    'powellriverkings.com': '8',
+    'sprucekings.bc.ca': '14',
+    'silverbacks.bc.ca': '20',
+    'sherwoodparkcrusaders.ca': '88',
+    'sprucegrovesaints.ca': '89',
+    'surreyeagles.ca': '11',
+    'trailsmokeeaters.com': '22',
+    'vernonvipers.com': '21',
+    'victoriagrizzlies.com': '18',
+    'westkelownawarriors.ca': '19',
+}
+
+
+def is_hockeytech_or_bchl_url(url: str) -> bool:
+    """Detects whether a URL belongs to a BCHL, LeagueStat, or HockeyTech roster page."""
+    u = url.lower()
+    bchl_domains = [
+        "cowichancapitals.com", "coquitlamexpress.ca", "albernivalleybulldogs.ca",
+        "blackfaldsbulldogs.ca", "brooksbandits.ca", "chilliwackchiefs.net",
+        "cranbrookbucks.ca", "langleyrivermen.com", "nanaimoclippers.com",
+        "okotoksoilers.com", "powellriverkings.com", "sprucekings.bc.ca",
+        "silverbacks.bc.ca", "sherwoodparkcrusaders.ca", "sprucegrovesaints.ca",
+        "surreyeagles.ca", "trailsmokeeaters.com", "vernonvipers.com",
+        "victoriagrizzlies.com", "westkelownawarriors.ca", "bchl.ca",
+        "hockeytech.com", "leaguestat.com"
+    ]
+    if any(d in u for d in bchl_domains):
+        return True
+    if "/stats/roster" in u or "/stats/player" in u:
+        return True
+    return False
+
+
+def parse_hockeytech_single_player(player_id: str, season_id: str = None, client_code: str = "bchl", key: str = "f3ed30007ad2124e") -> dict:
+    """Scrapes a single player profile from HockeyTech / LeagueStat API."""
+    feed_url = f"https://lscluster.hockeytech.com/feed/index.php?feed=statviewfeed&view=player&player_id={player_id}&key={key}&client_code={client_code}&lang=en"
+    if season_id:
+        feed_url += f"&season_id={season_id}"
+
+    ctx = ssl._create_unverified_context()
+    req = urllib.request.Request(
+        feed_url,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+    )
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        body = resp.read().decode("utf-8", errors="ignore").strip()
+
+    if body.startswith("(") and body.endswith(")"):
+        body = body[1:-1]
+    elif body.endswith(";"):
+        body = body[:-1]
+
+    data = json.loads(body)
+    info = data.get("info", {})
+
+    first = (info.get("firstName") or "").strip()
+    last = (info.get("lastName") or "").strip()
+    name = f"{first} {last}".strip()
+    jersey = str(info.get("jerseyNumber") or "").strip()
+    pos = (info.get("position") or "").strip()
+    shoots = (info.get("shoots") or info.get("catches") or "").strip()
+    ht = (info.get("height") or "").strip()
+    wt = (info.get("weight") or "").strip()
+    wt_str = f"{wt} lbs" if (wt and not wt.endswith("lbs")) else wt
+
+    bdate = (info.get("birthDate") or "").strip()
+    born_fmt = bdate
+    if bdate:
+        try:
+            dt = datetime.strptime(bdate, "%Y-%m-%d")
+            born_fmt = f"{dt.strftime('%b')} {dt.day}, {dt.year}"
+        except Exception:
+            born_fmt = bdate
+
+    hometown = (info.get("hometown") or "").strip()
+    team_name = (info.get("teamName") or "").strip() or "Hockey Team"
+    img = info.get("profileImage") or f"https://assets.leaguestat.com/{client_code}/240x240/{player_id}.jpg"
+
+    det_parts = []
+    if pos: det_parts.append(f"Position: {pos}")
+    if born_fmt: det_parts.append(f"Born: {born_fmt}")
+    if hometown: det_parts.append(f"Hometown: {hometown}")
+    if shoots: det_parts.append(f"Shoots/Catches: {shoots}")
+    if ht: det_parts.append(f"Height: {ht}")
+    if wt_str: det_parts.append(f"Weight: {wt_str}")
+    details = " | ".join(det_parts)
+
+    player = {
+        "name": name,
+        "jersey": jersey,
+        "pos": pos,
+        "position": pos,
+        "shoots": shoots,
+        "height": ht,
+        "weight": wt_str,
+        "born": born_fmt,
+        "birthplace": hometown,
+        "image": img,
+        "raw_image": img,
+        "details": details,
+        "assigned_number": jersey
+    }
+    return {"suggested_folder": team_name, "players": [player]}
+
+
+def parse_hockeytech_feed(team_id: str, season_id: str = None, client_code: str = "bchl", key: str = "f3ed30007ad2124e") -> dict:
+    """Scrapes a full team roster from HockeyTech / LeagueStat API."""
+    feed_url = f"https://lscluster.hockeytech.com/feed/index.php?feed=statviewfeed&view=roster&team_id={team_id}&key={key}&client_code={client_code}&lang=en"
+    if season_id:
+        feed_url += f"&season_id={season_id}"
+
+    ctx = ssl._create_unverified_context()
+    req = urllib.request.Request(
+        feed_url,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+    )
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        body = resp.read().decode("utf-8", errors="ignore").strip()
+
+    if body.startswith("(") and body.endswith(")"):
+        body = body[1:-1]
+    elif body.endswith(";"):
+        body = body[:-1]
+
+    data = json.loads(body)
+    suggested_folder = data.get("teamName") or BCHL_TEAMS.get(str(team_id)) or f"Team_{team_id}"
+
+    players = []
+    seen = set()
+    for sec_group in data.get("roster", []):
+        for sec in sec_group.get("sections", []):
+            sec_title = (sec.get("title") or "").lower()
+            if "coach" in sec_title or "staff" in sec_title:
+                continue
+            for item in sec.get("data", []):
+                row = item.get("row", {})
+                name = (row.get("name") or "").strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+
+                pid = str(row.get("player_id") or "").strip()
+                jersey = str(row.get("tp_jersey_number") or "").strip()
+                pos = (row.get("position") or "").strip()
+                shoots = (row.get("shoots") or row.get("catches") or "").strip()
+                ht = (row.get("h") or "").strip()
+                wt = (row.get("w") or "").strip()
+                wt_str = f"{wt} lbs" if (wt and not wt.endswith("lbs")) else wt
+
+                bdate = (row.get("birthdate") or "").strip()
+                born_fmt = bdate
+                if bdate:
+                    try:
+                        dt = datetime.strptime(bdate, "%Y-%m-%d")
+                        born_fmt = f"{dt.strftime('%b')} {dt.day}, {dt.year}"
+                    except Exception:
+                        born_fmt = bdate
+
+                hometown = (row.get("hometown") or "").strip()
+                img = f"https://assets.leaguestat.com/{client_code}/240x240/{pid}.jpg" if pid else ""
+
+                det_parts = []
+                if pos: det_parts.append(f"Position: {pos}")
+                if born_fmt: det_parts.append(f"Born: {born_fmt}")
+                if hometown: det_parts.append(f"Hometown: {hometown}")
+                if shoots: det_parts.append(f"Shoots/Catches: {shoots}")
+                if ht: det_parts.append(f"Height: {ht}")
+                if wt_str: det_parts.append(f"Weight: {wt_str}")
+                details = " | ".join(det_parts)
+
+                players.append({
+                    "name": name,
+                    "jersey": jersey,
+                    "pos": pos,
+                    "position": pos,
+                    "shoots": shoots,
+                    "height": ht,
+                    "weight": wt_str,
+                    "born": born_fmt,
+                    "birthplace": hometown,
+                    "image": img,
+                    "raw_image": img,
+                    "details": details,
+                    "assigned_number": jersey
+                })
+
+    return {"suggested_folder": suggested_folder, "players": players}
+
+
+def scrape_hockeytech_roster(url: str) -> dict:
+    """Intelligently detects parameters from URL or HTML and parses HockeyTech / BCHL roster."""
+    client_code = "bchl"
+    app_key = "f3ed30007ad2124e"
+
+    # 1. Check for single player profile pattern
+    m_p = re.search(r'/stats/player/(\d+)(?:/(\d+))?', url)
+    if m_p:
+        pid = m_p.group(1)
+        sid = m_p.group(2)
+        return parse_hockeytech_single_player(pid, season_id=sid, client_code=client_code, key=app_key)
+
+    # 2. Check for team roster pattern
+    m_r = re.search(r'/stats/roster/(\d+)(?:/(\d+))?', url)
+    if m_r:
+        tid = m_r.group(1)
+        sid = m_r.group(2)
+        return parse_hockeytech_feed(tid, season_id=sid, client_code=client_code, key=app_key)
+
+    # 3. Check domain mapping
+    u_lower = url.lower()
+    for domain, tid in BCHL_DOMAIN_TO_TEAM_ID.items():
+        if domain in u_lower:
+            return parse_hockeytech_feed(tid, client_code=client_code, key=app_key)
+
+    # 4. Fetch HTML page to inspect for site_id or embedded links
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            }
+        )
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        # Check for client_code in page
+        cc_m = re.search(r'client_code\s*=\s*[\'"](\w+)[\'"]', html)
+        if cc_m:
+            client_code = cc_m.group(1)
+
+        key_m = re.search(r'appKey\s*=\s*[\'"]([a-zA-Z0-9]+)[\'"]', html)
+        if key_m:
+            app_key = key_m.group(1)
+
+        # Check for roster links in HTML
+        m_r_html = re.search(r'/stats/roster/(\d+)(?:/(\d+))?', html)
+        if m_r_html:
+            return parse_hockeytech_feed(m_r_html.group(1), season_id=m_r_html.group(2), client_code=client_code, key=app_key)
+    except Exception as e:
+        print(f"[Studio] HockeyTech page fetch fallback note: {e}")
+
+    return {"suggested_folder": "Hockey Team", "players": []}
+
+
 def scrape_roster_data(url: str):
     """
-    Intelligently routes roster URL to NHL, UK Teams, or College/NCAA athletics scrapers
+    Intelligently routes roster URL to NHL, HockeyTech/BCHL, UK Teams, or College/NCAA athletics scrapers
     with automatic fallbacks.
     """
     url_lower = url.lower()
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
         return scrape_nhl_roster(url)
+
+    if is_hockeytech_or_bchl_url(url):
+        try:
+            res = scrape_hockeytech_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] HockeyTech / BCHL scraper notice: {e}, falling back...")
 
     if is_uk_sports_url(url):
         try:
@@ -1148,7 +1424,13 @@ def scrape_roster_data(url: str):
     # College / NCAA / Sidearm athletics scraper
     res = scrape_college_roster(url)
     if not res.get("players") or len(res["players"]) == 0:
-        # Fallback to UK / general sports scraper if college returned no players
+        # Fallback to HockeyTech / BCHL or UK / general sports scraper if college returned no players
+        try:
+            ht_res = scrape_hockeytech_roster(url)
+            if ht_res.get("players") and len(ht_res["players"]) > 0:
+                return ht_res
+        except Exception:
+            pass
         try:
             uk_res = scrape_uk_roster(url)
             if uk_res.get("players") and len(uk_res["players"]) > 0:
