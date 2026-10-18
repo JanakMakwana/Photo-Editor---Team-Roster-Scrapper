@@ -1907,13 +1907,328 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Basketball Portrait Studio | 180x180 Headshot Studio</title>
+  <title>Pro Portrait Studio | Enterprise 180×180 Headshot Automation</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     :root {
+      --bg-base: #060911;
+      --bg-surface: #0b101d;
+      --bg-card: #101728;
+      --bg-card-hover: #151f35;
+      --panel: #0d1322;
+      --panel-border: #1e293b;
+      --border-subtle: #1e293b;
+      --border-medium: #2a374f;
+      --border-highlight: #3b82f6;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-glow: rgba(37, 99, 235, 0.3);
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg-base);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* =========================================================================
+       ENTERPRISE AUTHENTICATION GATEWAY (STRICT LOCKOUT SCREEN)
+       ========================================================================= */
+    #page-enterprise-gateway {
+      display: flex;
+      min-height: 100vh;
+      width: 100%;
+      background: radial-gradient(circle at 50% 5%, #172554 0%, #060911 65%);
+      padding: 40px 24px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow-y: auto;
+      position: relative;
+      z-index: 9999;
+    }
+    .gateway-container {
+      width: 100%;
+      max-width: 1060px;
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 48px;
+      align-items: center;
+      margin: auto;
+    }
+    @media (max-width: 900px) {
+      .gateway-container {
+        grid-template-columns: 1fr;
+        gap: 32px;
+      }
+    }
+    .gateway-brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      color: #60a5fa;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+    .gateway-hero-title {
+      font-size: 2.5rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 16px;
+    }
+    .gateway-hero-title span {
+      background: linear-gradient(135deg, #60a5fa, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .gateway-hero-desc {
+      font-size: 0.98rem;
+      color: #94a3b8;
+      line-height: 1.6;
+      margin-bottom: 28px;
+      max-width: 520px;
+    }
+    .gateway-features-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .gateway-feature-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .gateway-feature-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .gateway-feature-title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .gateway-feature-desc {
+      font-size: 0.8rem;
+      color: #64748b;
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    /* Gateway Auth Card */
+    .gateway-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      padding: 32px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+    }
+    .gateway-card-header {
+      margin-bottom: 22px;
+    }
+    .gateway-card-title {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.02em;
+    }
+    .gateway-card-sub {
+      font-size: 0.84rem;
+      color: #94a3b8;
+      margin-top: 4px;
+    }
+    .gateway-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: #090e1a;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 4px;
+      gap: 4px;
+      margin-bottom: 22px;
+    }
+    .gateway-tab-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      padding: 8px 12px;
+      border-radius: 7px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+    .gateway-tab-btn.active {
+      background: #1e293b;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .input-icon-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .input-icon {
+      position: absolute;
+      left: 12px;
+      color: #64748b;
+      pointer-events: none;
+    }
+    .saas-input.with-icon {
+      padding-left: 36px;
+    }
+    .saas-alert-danger {
+      color: #fca5a5;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      margin-bottom: 14px;
+      line-height: 1.4;
+    }
+    .saas-alert-info {
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      color: #7dd3fc;
+      margin-bottom: 16px;
+      line-height: 1.4;
+    }
+    .btn-demo-fill {
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      color: #93c5fd;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.74rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .btn-demo-fill:hover {
+      background: rgba(37, 99, 235, 0.25);
+      color: #fff;
+    }
+
+    /* User Avatar Chip in Navbar */
+    .user-avatar-chip {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #2563eb, #38bdf8);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.68rem;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: -0.02em;
+    }
+    .seat-mini-progress {
+      width: 44px;
+      height: 6px;
+      background: #1e293b;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-right: 2px;
+    }
+    .seat-mini-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981, #38bdf8);
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+    .seat-quota-pill.warning .seat-mini-fill {
+      background: #f59e0b;
+    }
+    .seat-quota-pill.full .seat-mini-fill {
+      background: #ef4444;
+    }
+    .drop-zone-icon {
+      color: #64748b;
+      margin-bottom: 16px;
+      transition: color 0.2s, transform 0.2s;
+    }
+    .folder-action-card:hover .drop-zone-icon {
+      color: var(--primary);
+      transform: translateY(-2px);
+    }
+    .select-files-link {
+      font-size: 0.83rem;
+      color: var(--accent);
+      cursor: pointer;
+      text-decoration: underline;
+      transition: color 0.15s;
+    }
+    .select-files-link:hover {
+      color: #fff;
+    }
+    .drop-zone-subtitle {
+      margin-top: 14px;
+      font-size: 0.84rem;
+      color: var(--text-muted);
+    }
+    .presets-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 14px;
+    }
+    .presets-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
       --bg: #090d16;
       --panel: #111827;
       --panel-border: #1f293d;
@@ -3105,21 +3420,174 @@ HTML_PAGE = r"""<!DOCTYPE html>
   </style>
 </head>
 <body>
+  <!-- ENTERPRISE AUTHENTICATION GATEWAY (STRICT NO-FREE-SERVICE LOCKOUT) -->
+  <div id="page-enterprise-gateway" style="display:flex;">
+    <div class="gateway-container">
+      <!-- Left Hero Column -->
+      <div class="gateway-hero-col">
+        <div class="gateway-brand-badge">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>Enterprise Access Restricted</span>
+        </div>
+        <h1 class="gateway-hero-title">
+          Professional Headshot Intelligence for <span>Sports Organizations</span>
+        </h1>
+        <p class="gateway-hero-desc">
+          Automated 180×180 facial centering, neural background separation, and team roster synchronization with zero cloud storage footprint. All services require an authorized company seat.
+        </p>
+
+        <div class="gateway-features-list">
+          <div class="gateway-feature-item">
+            <div class="gateway-feature-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div class="gateway-feature-title">Standardized 180×180 Facial Centering</div>
+              <div class="gateway-feature-desc">AI landmark alignment guarantees consistent chin-to-forehead framing across your entire athletic roster.</div>
+            </div>
+          </div>
+          <div class="gateway-feature-item">
+            <div class="gateway-feature-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div class="gateway-feature-title">Zero Cloud Disk Footprint (Direct PC Processing)</div>
+              <div class="gateway-feature-desc">Photos process directly in browser memory and export to your computer storage without filling server space.</div>
+            </div>
+          </div>
+          <div class="gateway-feature-item">
+            <div class="gateway-feature-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div class="gateway-feature-title">Official League Roster Ingestion</div>
+              <div class="gateway-feature-desc">Instantly import players from UK EIHL, NHL, and NCAA teams with automatic jersey number file mapping.</div>
+            </div>
+          </div>
+          <div class="gateway-feature-item">
+            <div class="gateway-feature-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div>
+              <div class="gateway-feature-title">Multi-Tenant Company Governance</div>
+              <div class="gateway-feature-desc">Enterprise seat allocations, bulk CSV team onboarding, and role-based permissions.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Auth Card Column -->
+      <div class="gateway-auth-col">
+        <div class="gateway-card">
+          <div class="gateway-card-header">
+            <div class="gateway-card-title">Organization Portal</div>
+            <div class="gateway-card-sub">Sign in with your corporate account or activate an invited seat</div>
+          </div>
+
+          <div class="gateway-tabs">
+            <button class="gateway-tab-btn active" id="gateway-tab-login-btn" onclick="switchGatewayTab('login')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <span>Sign In</span>
+            </button>
+            <button class="gateway-tab-btn" id="gateway-tab-activate-btn" onclick="switchGatewayTab('activate')">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+              <span>Activate Seat</span>
+            </button>
+          </div>
+
+          <!-- View 1: Sign In -->
+          <div id="gateway-view-login">
+            <form onsubmit="handleGatewayLoginSubmit(event)">
+              <div class="saas-form-group">
+                <label class="saas-form-label">Corporate Email Address</label>
+                <div class="input-icon-wrapper">
+                  <svg class="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+                  <input type="email" id="gateway-login-email" class="saas-input with-icon" placeholder="name@company.com" required autocomplete="username">
+                </div>
+              </div>
+              <div class="saas-form-group">
+                <label class="saas-form-label">Password</label>
+                <div class="input-icon-wrapper">
+                  <svg class="input-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                  <input type="password" id="gateway-login-password" class="saas-input with-icon" placeholder="••••••••" required autocomplete="current-password">
+                </div>
+              </div>
+
+              <div id="gateway-login-error" class="saas-alert-danger" style="display:none;"></div>
+
+              <button type="submit" class="btn btn-primary" id="btn-gateway-login" style="width:100%; padding:12px; margin-top:8px; font-size:0.9rem;">
+                <span>Sign In to Workspace</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+
+              <div style="margin-top:16px; padding-top:14px; border-top:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:var(--text-muted);">Evaluation Demo Access:</span>
+                <button type="button" class="btn-demo-fill" onclick="fillDemoGatewayCredentials()">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                  <span>Fill SuperAdmin</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- View 2: Activate Token -->
+          <div id="gateway-view-activate" style="display:none;">
+            <div class="saas-alert-info">
+              Enter your invitation token and set a password to activate your company seat.
+            </div>
+            <form onsubmit="handleGatewayActivationSubmit(event)">
+              <div class="saas-form-group">
+                <label class="saas-form-label">Invitation Token</label>
+                <input type="text" id="gateway-activate-token" class="saas-input" placeholder="Paste 32-character token" required>
+              </div>
+              <div class="saas-form-group">
+                <label class="saas-form-label">Your Full Name</label>
+                <input type="text" id="gateway-activate-name" class="saas-input" placeholder="e.g. Jordan Miller" required>
+              </div>
+              <div class="saas-form-group">
+                <label class="saas-form-label">Create Password</label>
+                <input type="password" id="gateway-activate-password" class="saas-input" placeholder="Minimum 6 characters" required minlength="6">
+              </div>
+              <div class="saas-form-group">
+                <label class="saas-form-label">Confirm Password</label>
+                <input type="password" id="gateway-activate-confirm" class="saas-input" placeholder="Repeat password" required minlength="6">
+              </div>
+
+              <div id="gateway-activate-error" class="saas-alert-danger" style="display:none;"></div>
+
+              <button type="submit" class="btn btn-primary" id="btn-gateway-activate" style="width:100%; padding:12px; margin-top:8px; font-size:0.9rem;">
+                <span>Activate Seat & Open Studio</span>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- GLOBAL SAAS TOP NAVIGATION BAR -->
-  <div id="saas-top-navbar" class="saas-navbar">
+  <div id="saas-top-navbar" class="saas-navbar" style="display:none;">
     <div class="saas-nav-left">
-      <div class="saas-brand-title">
-        <span>🏀</span> Portrait Studio <span>Pro</span>
-        <span class="saas-saas-tag">Multi-Tenant SaaS</span>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:32px; height:32px; border-radius:8px; background:linear-gradient(135deg, #2563eb, #38bdf8); display:flex; align-items:center; justify-content:center; box-shadow:0 0 14px rgba(37,99,235,0.4);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="4.93" y1="4.93" x2="9.17" y2="9.17"/><line x1="14.83" y1="14.83" x2="19.07" y2="19.07"/><line x1="14.83" y1="9.17" x2="19.07" y2="4.93"/><line x1="4.93" y1="19.07" x2="9.17" y2="14.83"/></svg>
+        </div>
+        <div style="display:flex; flex-direction:column; line-height:1.2;">
+          <div style="font-weight:800; font-size:0.95rem; letter-spacing:-0.02em; color:#fff;">PRO ATHLETIC STUDIO</div>
+          <div style="font-size:0.65rem; color:#60a5fa; font-weight:700; letter-spacing:0.04em;">ENTERPRISE SUITE</div>
+        </div>
       </div>
       <div id="nav-company-wrapper" style="display:none; align-items:center; gap:8px;">
         <div class="saas-company-badge">
-          <span>🏢</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/><line x1="9" y1="6" x2="9.01" y2="6"/><line x1="15" y1="6" x2="15.01" y2="6"/></svg>
           <span id="nav-company-name">Athletics Media Group</span>
           <span id="nav-company-plan" class="saas-plan-pill plan-team">Team</span>
         </div>
         <div id="nav-seat-quota-pill" class="seat-quota-pill" onclick="openTeamModal('members')" title="Click to view team members & subscription quota">
-          <span>👥</span>
+          <div class="seat-mini-progress">
+            <div id="nav-seat-mini-fill" class="seat-mini-fill" style="width: 7%;"></div>
+          </div>
           <span id="nav-seat-quota-text">1 / 15 Seats</span>
         </div>
       </div>
@@ -3129,25 +3597,29 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <!-- State 1: Logged Out -->
       <div id="nav-auth-logged-out" style="display:flex; align-items:center; gap:8px;">
         <button class="btn btn-primary" onclick="showAuthModal('login')" style="padding: 7px 16px; font-size: 0.82rem;">
-          <span>🔐 Sign In</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <span>Sign In</span>
         </button>
       </div>
 
       <!-- State 2: Logged In -->
       <div id="nav-auth-logged-in" style="display:none; align-items:center; gap:10px;">
         <div class="user-profile-pill">
-          <span id="nav-user-avatar">👤</span>
+          <div class="user-avatar-chip" id="nav-user-avatar">AD</div>
           <span id="nav-user-name" style="font-weight:700;">Admin</span>
           <span id="nav-user-role" class="user-role-tag role-superadmin">SuperAdmin</span>
         </div>
         <button class="btn btn-secondary" id="btn-nav-team" onclick="openTeamModal('bulk')" title="Manage company users, seats, and invitations" style="border-color:#38bdf8; color:#38bdf8; font-size:0.8rem; padding:6px 12px;">
-          <span>👥 Manage Team</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Manage Team</span>
         </button>
         <button class="btn btn-secondary" id="btn-nav-superadmin" onclick="openSuperAdminModal()" title="Manage all tenant organizations & subscriptions" style="border-color:#a855f7; color:#c084fc; font-size:0.8rem; padding:6px 12px; display:none;">
-          <span>🏢 Companies</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
+          <span>Organizations</span>
         </button>
         <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of Portrait Studio Pro" style="font-size:0.8rem; padding:6px 12px;">
-          <span>🚪 Logout</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span>Sign Out</span>
         </button>
       </div>
     </div>
@@ -3159,17 +3631,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <!-- PAGE 1: FOLDER SELECTION & ROSTER DOWNLOAD LANDING SCREEN -->
   <div id="page-folder-select">
     <div class="landing-hero">
-      <div class="hero-badge">🏀 Automated Headshot Processor</div>
-      <h1 class="landing-title">Basketball <span>Portrait Studio</span></h1>
+      <div class="hero-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Standardized 180×180 Portrait Intelligence</div>
+      <h1 class="landing-title">Standardized <span>Portrait Studio</span></h1>
       <p class="landing-subtitle">
         Download high-resolution roster portraits with custom player ID assignment, or select an existing local folder to crop into standardized 180×180 transparent headshots.
       </p>
       <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
         <span style="font-size:0.75rem; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.35); color:#34d399; padding:5px 12px; border-radius:20px; font-weight:700; display:inline-flex; align-items:center; gap:5px;">
-          <span>⚡ Zero Render Storage Mode (Direct PC Downloads)</span>
+          <span style="width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block; margin-right:4px;"></span><span>Client Direct Processing (Zero Server Storage)</span>
         </span>
         <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(239, 68, 68, 0.4); color:#fca5a5; font-weight:700;">
-          <span>🧹 Free Server Storage & Memory</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Server RAM</span>
         </button>
       </div>
     </div>
@@ -3177,10 +3649,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <!-- Mode Selector Tabs -->
     <div class="landing-tabs-bar">
       <button class="landing-tab active" id="tab-btn-local" onclick="switchLandingTab('local')">
-        <span>📂 Open Local Folder</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>Local Folder Studio</span>
       </button>
       <button class="landing-tab" id="tab-btn-roster" onclick="switchLandingTab('roster')">
-        <span>📥 Download Roster & Assign Numbers</span>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>Team Roster Scraper</span>
       </button>
     </div>
 
@@ -3188,8 +3662,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div id="view-local-folder" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center;">
       <!-- Folder Action Box -->
       <div class="folder-action-card" id="folder-drop-zone">
+        <div class="drop-zone-icon">
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </div>
         <label for="native-folder-picker" class="browse-btn-big" style="cursor: pointer;">
-          <span>📂 Browse & Choose Local Folder...</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Choose Local Photo Folder</span>
         </label>
         <input type="file" id="native-folder-picker" webkitdirectory directory multiple style="display:none;" onchange="onNativeFolderPicked(event)">
         <input type="file" id="native-files-picker" multiple accept="image/*" style="display:none;" onchange="onNativeFilesPicked(event)">
@@ -3213,7 +3691,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <!-- Detected Team Folders Section -->
       <div class="detected-section">
         <div class="detected-heading">
-          <span>📁 Detected Photo Folders in Downloads</span>
+          <div style="display:inline-flex; align-items:center; gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>Detected Photo Folders in Downloads</span></div>
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">Click any folder to open</span>
         </div>
         <div class="detected-grid" id="detected-folders-grid">
@@ -3235,8 +3713,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <input type="text" id="roster-folder-input" class="roster-text-input" placeholder="Cardiff Devils" value="Cardiff Devils" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
           </div>
           <div>
-            <button class="btn btn-primary" style="padding: 12px 20px; font-size: 0.9rem;" onclick="fetchRosterPlayers()">
-              <span>🔍 Fetch Players</span>
+            <button class="btn btn-primary" style="padding: 12px 22px; font-size: 0.88rem;" onclick="fetchRosterPlayers()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>Fetch Roster</span>
             </button>
           </div>
         </div>
@@ -3244,16 +3723,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Quick Presets -->
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px;">
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Quick Presets:</span>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">🇬🇧 Cardiff Devils (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">🇬🇧 Coventry Blaze (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">🇬🇧 Belfast Giants (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/sabres/roster', 'Buffalo Sabres')">🏒 Buffalo Sabres (NHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://smcathletics.com/sports/mens-basketball/roster/2025-26', 'Saint Michael\'s College')">🏀 Saint Michael's (NCAA)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">Cardiff Devils (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">Coventry Blaze (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">Belfast Giants (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/sabres/roster', 'Buffalo Sabres')">Buffalo Sabres (NHL)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://smcathletics.com/sports/mens-basketball/roster/2025-26', 'Saint Michael\'s College')">Saint Michael's (NCAA)</button>
         </div>
 
         <div class="quality-boost-tag">
-          <span>⚡</span>
-          <span><strong>Automatic High Quality:</strong> High-res transparent headshots standardized with Lanczos downsampling to width 800px.</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span><strong>Production Quality Standard:</strong> High-res transparent headshots standardized with Lanczos-3 downsampling to 800px source canvas.</span>
         </div>
       </div>
 
@@ -3266,19 +3745,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
             <button class="btn btn-primary btn-sheet-copy" onclick="copyRosterForSheets()" title="Copy entire table to clipboard formatted for instant paste into Google Sheets or Excel">
-              <span>📋 Copy for Sheets / Excel</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy for Sheets</span>
             </button>
             <button class="btn btn-secondary" onclick="exportRosterToCSV()" title="Download full roster as CSV spreadsheet">
-              <span>📥 Export CSV</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Export CSV</span>
             </button>
             <button class="btn btn-secondary" onclick="useJerseyNumbersAsAssigned()" title="Assign every player's jersey number as their file ID">
-              <span>🔢 Use Jersey # as File ID</span>
+              <span># Use Jersey Numbers</span>
             </button>
             <button class="btn btn-secondary" onclick="toggleBulkPasteDrawer()">
-              <span>📋 Bulk Paste IDs</span>
+              <span>Bulk Paste IDs</span>
             </button>
             <button class="btn btn-secondary" onclick="clearAllAssignedNumbers()">
-              <span>🔄 Clear IDs</span>
+              <span>Reset IDs</span>
             </button>
           </div>
         </div>
@@ -3328,10 +3807,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
           <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
             <button class="btn btn-secondary" style="padding: 10px 20px; font-size: 0.92rem; background:#0284c7; border-color:#38bdf8; color:#fff; font-weight:700;" onclick="openRosterInStudioDirectly()" title="Load photos directly into studio workbench without writing to Render storage">
-              <span>🎨 Open Directly in Studio</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span>Open in Studio</span>
             </button>
             <button class="btn btn-primary" id="btn-download-roster" style="padding: 10px 24px; font-size: 0.92rem;" onclick="downloadAllRosterPhotos()">
-              <span>🚀 Download All Photos (ZIP to PC)</span>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download All Photos (ZIP)</span>
             </button>
           </div>
         </div>
@@ -3339,20 +3818,20 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       <!-- Success Card -->
       <div class="roster-results-card" id="roster-success-card" style="display: none; text-align: center; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
-        <div style="font-size: 2.2rem; margin-bottom: 8px;">🎉</div>
+        <div style="width:48px; height:48px; border-radius:50%; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); display:inline-flex; align-items:center; justify-content:center; color:#34d399; margin:0 auto 12px auto;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
         <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 6px;">Photos Downloaded to Your PC!</h3>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;" id="roster-success-desc">
           All portraits were downloaded directly to your computer's Downloads as a standardized ZIP (0 bytes stored on Render).
         </p>
         <div style="display:flex; justify-content:center; gap:12px; margin-top:8px; flex-wrap:wrap;">
           <button class="btn btn-primary" style="padding: 12px 28px; font-size: 1rem; font-weight:700;" onclick="openDownloadedFolderInStudio()">
-            <span>🎨 Open Directly in Studio Workbench</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span>Open in Studio Workbench</span>
           </button>
           <button class="btn btn-secondary" style="padding: 12px 24px; font-size: 0.95rem; font-weight:700; background:#0284c7; border-color:#38bdf8; color:#fff;" onclick="downloadAllRosterPhotos()">
-            <span>📦 Re-download ZIP to PC</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Re-download ZIP</span>
           </button>
           <button class="btn btn-secondary" style="padding: 12px 20px; font-size: 0.9rem;" onclick="backToRosterView()">
-            <span>📋 Back to Roster List</span>
+            <span>Back to Roster</span>
           </button>
         </div>
       </div>
@@ -3364,7 +3843,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <header>
       <div class="header-left">
         <button class="btn btn-secondary" onclick="showFolderSelectPage()">
-          <span>⬅️ Change Folder</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg><span>Change Folder</span>
         </button>
         <div style="display:flex; flex-direction:column;">
           <div style="font-size:0.88rem; font-weight:800;" id="active-folder-name">Folder Name</div>
@@ -3374,22 +3853,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       <div class="header-actions">
         <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge server temporary files and clear RAM" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 0.8rem; padding: 6px 12px;">
-          <span>🧹 Free RAM</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Free RAM</span>
         </button>
         <button class="btn btn-secondary" id="btn-cutout" onclick="triggerCutout()">
-          <span>✨ AI Cutout</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg><span>AI Cutout</span>
         </button>
         <button class="btn btn-secondary" onclick="saveActivePhoto()">
-          <span>💾 Save Headshot</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Save Headshot</span>
         </button>
         <button class="btn btn-primary" id="btn-batch-all" onclick="batchProcessFolder()">
-          <span>⚡ Process All (ZIP)</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span>Process All (ZIP)</span>
         </button>
         <button class="btn btn-secondary" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;" onclick="downloadActiveEditedZip()" title="Download all edited headshots as a ZIP file">
-          <span>📦 Download ZIP</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download ZIP</span>
         </button>
         <button class="btn btn-secondary" onclick="openTeamModal('bulk')" title="Team & Subscription Seats" style="font-size:0.8rem; padding:6px 12px; border-color:rgba(56,189,248,0.4); color:#7dd3fc;">
-          <span>👥 Team</span>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Team</span>
         </button>
       </div>
     </header>
@@ -3399,9 +3878,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="sidebar">
         <div class="section-label">Tool Mode</div>
         <div class="tool-tabs">
-          <button class="tool-tab active" id="tab-frame" onclick="setMode('frame')">🖐️ Pan & Zoom</button>
-          <button class="tool-tab" id="tab-recover" onclick="setMode('recover')">🖌️ Recover</button>
-          <button class="tool-tab" id="tab-erase" onclick="setMode('erase')">🧹 Erase</button>
+          <button class="tool-tab active" id="tab-frame" onclick="setMode('frame')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg><span>Pan & Zoom</span></button>
+          <button class="tool-tab" id="tab-recover" onclick="setMode('recover')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m14 12-8.5 8.5a2.12 2.12 0 1 1-3-3L11 9"/><path d="M18 11l-4-4"/><path d="m19 7 2-2"/></svg><span>Recover</span></button>
+          <button class="tool-tab" id="tab-erase" onclick="setMode('erase')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/><path d="M22 21H7"/></svg><span>Erase</span></button>
         </div>
 
         <!-- Mode 1: Pan & Zoom -->
@@ -3414,10 +3893,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
             <input type="range" id="zoom-slider" min="10" max="150" value="40" oninput="onZoomSlider(this.value)">
             <div class="btn-grid">
-              <button class="btn-sm" onclick="autoAlignCurrent()">🎯 Auto-Align Face</button>
-              <button class="btn-sm" onclick="fitWidth()">↔️ Fit Width</button>
-              <button class="btn-sm" onclick="fitHeight()">↕️ Fit Height</button>
-              <button class="btn-sm" onclick="centerPhoto()">📍 Center</button>
+              <button class="btn-sm" onclick="autoAlignCurrent()">Auto-Align Face</button>
+              <button class="btn-sm" onclick="fitWidth()">Fit Width</button>
+              <button class="btn-sm" onclick="fitHeight()">Fit Height</button>
+              <button class="btn-sm" onclick="centerPhoto()">Center</button>
             </div>
           </div>
 
@@ -3427,7 +3906,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               Apply this portrait's exact scale & position across all photos in folder:
             </p>
             <button class="btn btn-secondary" style="width:100%; justify-content:center; font-size:0.75rem;" onclick="applyFramingToAll()">
-              <span>📋 Apply Framing to All</span>
+              <span>Apply Framing to All</span>
             </button>
           </div>
         </div>
@@ -3443,12 +3922,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <input type="range" id="brush-size-slider" min="4" max="70" value="24" oninput="setBrushSize(this.value)">
 
             <div style="display:flex; gap:8px; margin-top:12px;">
-              <button class="btn-sm" style="flex:1;" onclick="undoMask()">↩️ Undo</button>
-              <button class="btn-sm" style="flex:1;" onclick="resetMaskToCutout()">🔄 Reset Cutout</button>
+              <button class="btn-sm" style="flex:1;" onclick="undoMask()">Undo</button>
+              <button class="btn-sm" style="flex:1;" onclick="resetMaskToCutout()">Reset Cutout</button>
             </div>
             <p style="font-size:0.72rem; color:var(--text-muted); margin-top:8px; line-height:1.4;">
-              💡 <strong>Recover</strong> restores lost hair/collar from original photo.<br>
-              💡 <strong>Erase</strong> cleans up leftover background fragments.
+              <strong>Recover:</strong> Restores lost hair/collar from original photo.<br>
+              <strong>Erase:</strong> Cleans up leftover background fragments.
             </p>
           </div>
         </div>
@@ -3465,12 +3944,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <!-- Center Stage -->
       <div class="stage">
         <div class="stage-toolbar">
-          <button class="chip active" id="chip-check" onclick="setBg('checker')">🏁 Transparent</button>
-          <button class="chip" id="chip-dark" onclick="setBg('dark')">⬛ Dark</button>
-          <button class="chip" id="chip-white" onclick="setBg('white')">⬜ White</button>
-          <button class="chip" id="chip-team" onclick="setBg('team')">🏀 Team Navy</button>
+          <button class="chip active" id="chip-check" onclick="setBg('checker')">Transparent</button>
+          <button class="chip" id="chip-dark" onclick="setBg('dark')">Dark</button>
+          <button class="chip" id="chip-white" onclick="setBg('white')">White</button>
+          <button class="chip" id="chip-team" onclick="setBg('team')">Team Navy</button>
           <span style="width:1px; height:14px; background:#28354f; align-self:center;"></span>
-          <button class="chip" id="chip-compare" onmousedown="showOriginal(true)" onmouseup="showOriginal(false)" onmouseleave="showOriginal(false)">👁️ Hold: View Original</button>
+          <button class="chip" id="chip-compare" onmousedown="showOriginal(true)" onmouseup="showOriginal(false)" onmouseleave="showOriginal(false)">Hold: View Original</button>
         </div>
 
         <div class="viewport-outer">
@@ -3481,7 +3960,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
 
         <div class="stage-hint">
-          <span id="hint-text">🖐️ Drag photo to position • Wheel to zoom</span>
+          <span id="hint-text">Drag photo to position • Wheel to zoom</span>
           <span>•</span>
           <span id="pos-info" style="font-family:'JetBrains Mono', monospace; color:var(--accent);">x: 0, y: 0</span>
         </div>
@@ -3535,14 +4014,26 @@ HTML_PAGE = r"""<!DOCTYPE html>
     async function init() {
       setupDragAndDrop();
       setupEvents();
-      checkAuthStatus();
-      // Load suggested folders on first page
+      await checkAuthStatus();
+      // Only load folders if strictly authenticated
+      if (currentUser) {
+        loadSuggestedFolders();
+      }
+    }
+
+    async function loadSuggestedFolders() {
       try {
         const res = await fetch('/api/suggested_folders');
+        if (res.status === 401) {
+          currentUser = null;
+          currentCompany = null;
+          renderAuthUI();
+          return;
+        }
         const data = await res.json();
         renderDetectedFolders(data.suggestions_data || []);
       } catch (e) {
-        console.error(e);
+        console.error("Failed to load suggested folders:", e);
       }
     }
 
@@ -3558,7 +4049,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         card.className = 'folder-card';
         card.onclick = () => openFolder(f.path);
         card.innerHTML = `
-          <div class="folder-icon">🏀</div>
+          <div class="folder-icon" style="color:var(--accent);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
           <div class="folder-info">
             <div class="folder-card-name">${f.name}</div>
             <div class="folder-card-sub">
@@ -3633,7 +4124,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       try {
         const res = await fetch('/api/clear_server_storage', { method: 'POST' });
         const data = await res.json();
-        showToast(`🧹 Freed ${data.freed_mb || 0} MB server disk & cleared RAM!`);
+        showToast(`Freed ${data.freed_mb || 0} MB server temporary disk & RAM!`);
       } catch (e) {
         showToast("Storage cleanup error: " + e.message, "error");
       } finally {
@@ -4214,13 +4705,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       const hintEl = document.getElementById('hint-text');
       if (mode === 'frame') {
-        hintEl.textContent = '🖐️ Drag photo freely to position • Wheel to zoom';
+        hintEl.textContent = 'Drag photo freely to position • Wheel to zoom';
         viewport.style.cursor = 'grab';
       } else if (mode === 'recover') {
-        hintEl.textContent = '🖌️ Painting with RECOVER brush (restores original photo)';
+        hintEl.textContent = 'Painting with RECOVER brush (restoring original portrait)';
         viewport.style.cursor = 'crosshair';
       } else {
-        hintEl.textContent = '🧹 Painting with ERASE brush (removes background)';
+        hintEl.textContent = 'Painting with ERASE brush (removing background)';
         viewport.style.cursor = 'crosshair';
       }
     }
@@ -4350,7 +4841,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       photoData[name].savedB64 = b64;
       document.getElementById(`dot-${currentIndex}`).className = 'status-dot saved';
       hideLoading();
-      showToast(`✅ Saved & downloaded: ${cleanName} directly to your PC! (0 Render storage)`);
+      showToast(`Saved & downloaded ${cleanName} directly to your PC!`);
     }
 
     async function batchProcessFolder() {
@@ -4777,7 +5268,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast(`📥 Exported ${teamName}_Roster.csv successfully!`);
+      showToast(`Exported ${teamName}_Roster.csv successfully!`);
     }
 
     function showToast(msg) {
@@ -4839,7 +5330,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       const val = (p.assigned_number || '').trim();
       if (val) {
         const cleanVal = val.replace(/[\\/*?:"<>|]/g, '').trim();
-        cell.innerHTML = `<span class="filename-preview-badge badge-assigned">📄 ${cleanVal}.png</span>`;
+        cell.innerHTML = `<span class="filename-preview-badge badge-assigned">${cleanVal}.png</span>`;
       } else {
         const cleanName = p.name.replace(/[\\/*?:"<>|]/g, '').trim();
         cell.innerHTML = `<span class="filename-preview-badge badge-default-name" title="No number assigned: using player name">📄 ${cleanName}.png <span style="font-size:0.65rem; opacity:0.8;">(name)</span></span>`;
@@ -5046,7 +5537,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           link.click();
           document.body.removeChild(link);
           hideLoading();
-          showToast(`📦 Downloaded ${count} headshots in ZIP directly to your PC!`);
+          showToast(`Downloaded ${count} headshots in ZIP directly to your PC!`);
           return;
         }
       }
@@ -5086,17 +5577,43 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     function renderAuthUI() {
+      const gatewayEl = document.getElementById('page-enterprise-gateway');
+      const folderSelectEl = document.getElementById('page-folder-select');
+      const workbenchEl = document.getElementById('page-workbench');
+      const topNavEl = document.getElementById('saas-top-navbar');
       const loggedOutDiv = document.getElementById('nav-auth-logged-out');
       const loggedInDiv = document.getElementById('nav-auth-logged-in');
       const companyWrapper = document.getElementById('nav-company-wrapper');
 
       if (currentUser) {
+        // Authenticated Enterprise Session: Unlock studio
+        if (gatewayEl) gatewayEl.style.display = 'none';
+        if (topNavEl) topNavEl.style.display = 'flex';
+
+        if (workbenchEl && workbenchEl.style.display === 'flex') {
+          if (folderSelectEl) folderSelectEl.style.display = 'none';
+        } else {
+          if (folderSelectEl) folderSelectEl.style.display = 'flex';
+        }
+
         if (loggedOutDiv) loggedOutDiv.style.display = 'none';
         if (loggedInDiv) loggedInDiv.style.display = 'flex';
 
         const nameEl = document.getElementById('nav-user-name');
         const roleEl = document.getElementById('nav-user-role');
+        const avatarEl = document.getElementById('nav-user-avatar');
         if (nameEl) nameEl.textContent = currentUser.full_name || currentUser.email;
+
+        if (avatarEl) {
+          const initials = (currentUser.full_name || currentUser.email || 'U')
+            .trim()
+            .split(' ')
+            .map(n => n[0])
+            .slice(0, 2)
+            .join('')
+            .toUpperCase();
+          avatarEl.textContent = initials;
+        }
 
         if (roleEl) {
           const role = currentUser.role || 'member';
@@ -5120,6 +5637,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           const compPlanEl = document.getElementById('nav-company-plan');
           const quotaTextEl = document.getElementById('nav-seat-quota-text');
           const quotaPill = document.getElementById('nav-seat-quota-pill');
+          const quotaFill = document.getElementById('nav-seat-mini-fill');
 
           if (compNameEl) compNameEl.textContent = currentCompany.name;
           if (compPlanEl) {
@@ -5129,13 +5647,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
           const used = currentCompany.used_seats || 0;
           const maxSeats = currentCompany.max_seats || 10;
+          const pct = Math.min(100, Math.round((used / maxSeats) * 100));
           if (quotaTextEl) quotaTextEl.textContent = `${used} / ${maxSeats} Seats`;
+          if (quotaFill) quotaFill.style.width = pct + '%';
 
           if (quotaPill) {
             quotaPill.className = 'seat-quota-pill';
             if (used >= maxSeats) {
               quotaPill.classList.add('full');
-            } else if (used / maxSeats >= 0.8) {
+            } else if (pct >= 80) {
               quotaPill.classList.add('warning');
             }
           }
@@ -5143,9 +5663,132 @@ HTML_PAGE = r"""<!DOCTYPE html>
           if (companyWrapper) companyWrapper.style.display = 'none';
         }
       } else {
+        // Unauthenticated: STRICT ACCESS LOCKOUT - Zero services accessible
+        if (gatewayEl) gatewayEl.style.display = 'flex';
+        if (topNavEl) topNavEl.style.display = 'none';
+        if (folderSelectEl) folderSelectEl.style.display = 'none';
+        if (workbenchEl) workbenchEl.style.display = 'none';
         if (loggedOutDiv) loggedOutDiv.style.display = 'flex';
         if (loggedInDiv) loggedInDiv.style.display = 'none';
         if (companyWrapper) companyWrapper.style.display = 'none';
+      }
+    }
+
+    // =========================================================================
+    // GATEWAY AUTHENTICATION HANDLERS
+    // =========================================================================
+    function switchGatewayTab(tab) {
+      const loginTabBtn = document.getElementById('gateway-tab-login-btn');
+      const activateTabBtn = document.getElementById('gateway-tab-activate-btn');
+      const loginView = document.getElementById('gateway-view-login');
+      const activateView = document.getElementById('gateway-view-activate');
+
+      if (tab === 'login') {
+        if (loginTabBtn) loginTabBtn.classList.add('active');
+        if (activateTabBtn) activateTabBtn.classList.remove('active');
+        if (loginView) loginView.style.display = 'block';
+        if (activateView) activateView.style.display = 'none';
+      } else {
+        if (activateTabBtn) activateTabBtn.classList.add('active');
+        if (loginTabBtn) loginTabBtn.classList.remove('active');
+        if (activateView) activateView.style.display = 'block';
+        if (loginView) loginView.style.display = 'none';
+      }
+    }
+
+    function fillDemoGatewayCredentials() {
+      const emailInput = document.getElementById('gateway-login-email');
+      const passInput = document.getElementById('gateway-login-password');
+      if (emailInput) emailInput.value = 'admin@athletics.com';
+      if (passInput) passInput.value = 'admin';
+    }
+
+    async function handleGatewayLoginSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('gateway-login-email').value.trim();
+      const password = document.getElementById('gateway-login-password').value;
+      const btn = document.getElementById('btn-gateway-login');
+      const errAlert = document.getElementById('gateway-login-error');
+      if (errAlert) errAlert.style.display = 'none';
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Authenticating...</span>';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast(`Welcome back, ${data.user.full_name}!`);
+          await checkAuthStatus();
+          loadSuggestedFolders();
+        } else {
+          if (errAlert) {
+            errAlert.textContent = data.message || 'Authentication failed. Please verify company credentials.';
+            errAlert.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errAlert) {
+          errAlert.textContent = 'Server connection error. Please try again.';
+          errAlert.style.display = 'block';
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Sign In to Workspace</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+      }
+    }
+
+    async function handleGatewayActivationSubmit(e) {
+      e.preventDefault();
+      const token = document.getElementById('gateway-activate-token').value.trim();
+      const fullName = document.getElementById('gateway-activate-name').value.trim();
+      const password = document.getElementById('gateway-activate-password').value;
+      const confirm = document.getElementById('gateway-activate-confirm').value;
+      const btn = document.getElementById('btn-gateway-activate');
+      const errAlert = document.getElementById('gateway-activate-error');
+      if (errAlert) errAlert.style.display = 'none';
+
+      if (password !== confirm) {
+        if (errAlert) {
+          errAlert.textContent = 'Passwords do not match.';
+          errAlert.style.display = 'block';
+        }
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Activating Seat...</span>';
+
+      try {
+        const res = await fetch('/api/auth/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, password, full_name: fullName })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          window.location.hash = '';
+          showToast(`Seat activated! Welcome, ${data.user.full_name}.`);
+          await checkAuthStatus();
+          loadSuggestedFolders();
+        } else {
+          if (errAlert) {
+            errAlert.textContent = data.message || 'Activation failed or invitation expired.';
+            errAlert.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errAlert) {
+          errAlert.textContent = 'Server connection error. Please try again.';
+          errAlert.style.display = 'block';
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Activate Seat & Open Studio</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
       }
     }
 
@@ -5155,6 +5798,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         const tokenMatch = hash.match(/token=([^&]+)/);
         if (tokenMatch && tokenMatch[1]) {
           const token = tokenMatch[1];
+          // Pre-fill both gateway and modal activation inputs
+          const gwToken = document.getElementById('gateway-activate-token');
+          if (gwToken) gwToken.value = token;
+          switchGatewayTab('activate');
           showAuthModal('activate', token);
         }
       }
@@ -5227,7 +5874,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
           hideAuthModal();
-          showToast(`👋 Welcome back, ${data.user.full_name}!`);
+          showToast(`Welcome back, ${data.user.full_name}!`);
           await checkAuthStatus();
         } else {
           if (errAlert) {
@@ -5277,7 +5924,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         if (res.ok && data.status === 'ok') {
           hideAuthModal();
           window.location.hash = '';
-          showToast(`🎉 Welcome to Portrait Studio Pro, ${data.user.full_name}!`);
+          showToast(`Welcome to Pro Portrait Studio, ${data.user.full_name}!`);
           await checkAuthStatus();
         } else {
           if (errAlert) {
@@ -5292,7 +5939,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>Complete Setup & Launch Studio 🚀</span>';
+        btn.innerHTML = '<span>Activate Account & Enter Studio</span>';
       }
     }
 
@@ -5302,7 +5949,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         currentUser = null;
         currentCompany = null;
         renderAuthUI();
-        showToast('👋 You have been logged out.');
+        showToast('You have been logged out.');
       } catch (e) {
         console.error(e);
       }
@@ -5399,7 +6046,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
         let actionHtml = '';
         if (m.activation_url) {
-          actionHtml += `<button class="btn-copy-link" onclick="copyActivationUrl('${m.activation_url}')" title="Copy password activation link to clipboard">📋 Copy Invite Link</button> `;
+          actionHtml += `<button class="btn-copy-link" onclick="copyActivationUrl('${m.activation_url}')" title="Copy password activation link to clipboard">Copy Invite Link</button> `;
           actionHtml += `<button class="btn btn-secondary" onclick="resendMemberInvite('${m.id}')" style="font-size:0.72rem; padding:4px 8px;" title="Resend invitation email">🔄 Resend</button> `;
         }
         if (!isSelf && m.role !== 'superadmin') {
@@ -5458,12 +6105,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
             div.className = 'result-pill-added';
             div.innerHTML = `
               <div>
-                <strong>✅ ${escapeHtml(u.full_name)}</strong> &lt;${escapeHtml(u.email)}&gt;
+                <strong>${escapeHtml(u.full_name)}</strong> &lt;${escapeHtml(u.email)}&gt;
                 <span style="font-size:0.7rem; opacity:0.8; margin-left:6px;">(${u.role})</span>
                 ${u.email_simulated ? '<span style="font-size:0.68rem; background:rgba(56,189,248,0.2); padding:1px 6px; border-radius:6px; margin-left:6px; color:#38bdf8;">Dev Mode Link</span>' : '<span style="font-size:0.68rem; color:#34d399; margin-left:6px;">📧 Email Sent</span>'}
               </div>
               <div>
-                <button class="btn-copy-link" onclick="copyActivationUrl('${u.activation_url}')">📋 Copy Invite Link</button>
+                <button class="btn-copy-link" onclick="copyActivationUrl('${u.activation_url}')">Copy Invite Link</button>
               </div>
             `;
             resultsList.appendChild(div);
@@ -5475,14 +6122,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
             div.className = 'result-pill-skipped';
             div.innerHTML = `
               <div>
-                <strong>⚠️ ${escapeHtml(s.name || s.email)}</strong> &lt;${escapeHtml(s.email)}&gt;
+                <strong>${escapeHtml(s.name || s.email)}</strong> &lt;${escapeHtml(s.email)}&gt;
               </div>
               <div style="font-size:0.75rem; font-weight:700;">${escapeHtml(s.reason)}</div>
             `;
             resultsList.appendChild(div);
           });
 
-          showToast(`⚡ Processed bulk invite: ${(data.added || []).length} users invited!`);
+          showToast(`Processed bulk invite: ${(data.added || []).length} users invited.`);
           textarea.value = '';
           await loadTeamData();
           await checkAuthStatus();
@@ -5493,7 +6140,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         showToast('Server connection failed.', 'error');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>🚀 Send Bulk Invites & Allocate Seats</span>';
+        btn.innerHTML = '<span>Send Bulk Invites & Allocate Seats</span>';
       }
     }
 
@@ -5517,7 +6164,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         });
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
-          showToast(`✉️ Invitation sent to ${email}!`);
+          showToast(`Invitation sent to ${email}.`);
           document.getElementById('single-email').value = '';
           document.getElementById('single-name').value = '';
 
@@ -5527,7 +6174,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             alertBox.style.color = '#34d399';
             alertBox.style.border = '1px solid rgba(16,185,129,0.3)';
             alertBox.innerHTML = `
-              <div>✅ Invitation sent to <strong>${escapeHtml(email)}</strong>!</div>
+              <div>Invitation sent to <strong>${escapeHtml(email)}</strong>!</div>
               <div style="margin-top:6px; font-size:0.75rem;">
                 Direct activation link: <a href="${data.activation_url}" target="_blank" style="color:#38bdf8;">${data.activation_url}</a>
                 <button class="btn-copy-link" style="margin-left:8px;" onclick="copyActivationUrl('${data.activation_url}')">📋 Copy</button>
@@ -5549,7 +6196,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         showToast('Server error.', 'error');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>✉️ Send Invitation Email</span>';
+        btn.innerHTML = '<span>Send Invitation Email</span>';
       }
     }
 
@@ -5586,7 +6233,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           showToast('Invitation email resent!');
           if (data.activation_url) {
             navigator.clipboard.writeText(data.activation_url);
-            showToast('📋 Copied new activation link to clipboard!');
+            showToast('Copied activation link to clipboard.');
           }
           await loadTeamData();
         } else {
@@ -5600,7 +6247,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     function copyActivationUrl(url) {
       if (!url) return;
       navigator.clipboard.writeText(url).then(() => {
-        showToast('📋 Copied activation link to clipboard!');
+        showToast('Copied activation link to clipboard.');
       }).catch(() => {
         prompt('Copy activation link:', url);
       });
@@ -5642,7 +6289,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <td><span style="font-size:0.7rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:2px 7px; border-radius:10px;">${escapeHtml(c.status || 'active')}</span></td>
             <td style="text-align:right;">
               <button class="btn btn-secondary" onclick="promptUpdateCompanyPlan('${c.id}', '${c.plan || 'team'}', ${c.max_seats || 10})" style="font-size:0.72rem; padding:4px 10px;">
-                ⚙️ Adjust Plan & Seats
+                Adjust Plan & Seats
               </button>
             </td>
           `;
@@ -5681,7 +6328,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         });
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
-          showToast(`🏢 Company '${name}' created with ${maxSeats} seats!`);
+          showToast(`Company '${name}' created with ${maxSeats} seats.`);
           document.getElementById('new-comp-name').value = '';
           document.getElementById('new-comp-admin-email').value = '';
           document.getElementById('new-comp-admin-name').value = '';
@@ -5745,14 +6392,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="saas-modal-card">
       <div class="saas-modal-header">
         <div class="saas-modal-title">
-          <span>🏀</span> Portrait Studio Pro
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg> Pro Portrait Studio
         </div>
         <button class="saas-modal-close" onclick="hideAuthModal()">&times;</button>
       </div>
       <div class="saas-modal-body">
         <div class="saas-tabs">
-          <button class="saas-tab-btn active" id="tab-auth-login" onclick="switchAuthTab('login')">🔐 Sign In</button>
-          <button class="saas-tab-btn" id="tab-auth-activate" onclick="switchAuthTab('activate')">✨ Activate Account</button>
+          <button class="saas-tab-btn active" id="tab-auth-login" onclick="switchAuthTab('login')">Sign In</button>
+          <button class="saas-tab-btn" id="tab-auth-activate" onclick="switchAuthTab('activate')">Activate Seat</button>
         </div>
 
         <!-- Tab 1: Login Form -->
@@ -5769,7 +6416,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <div id="login-error-alert" style="display:none; color:#fca5a5; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; gap:12px;">
               <button type="button" class="btn btn-secondary" onclick="fillDemoCredentials()" style="font-size:0.78rem; padding:8px 12px; color:#cbd5e1;">
-                <span>⚡ Fill Demo SuperAdmin</span>
+                <span>Fill Demo SuperAdmin</span>
               </button>
               <button type="submit" class="btn btn-primary" id="btn-login-submit" style="padding:10px 24px;">
                 <span>Sign In ➔</span>
@@ -5781,7 +6428,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Tab 2: Activation Form -->
         <div id="view-auth-activate" style="display:none;">
           <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:12px 14px; border-radius:8px; font-size:0.82rem; color:#7dd3fc; margin-bottom:18px;">
-            🎉 Welcome! Set your account password to activate your company membership.
+            Set your account password to activate your enterprise company membership.
           </div>
           <form onsubmit="handleActivationSubmit(event)">
             <input type="hidden" id="activate-token">
@@ -5799,7 +6446,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
             <div id="activate-error-alert" style="display:none; color:#fca5a5; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
             <button type="submit" class="btn btn-primary" id="btn-activate-submit" style="width:100%; padding:12px; margin-top:10px;">
-              <span>Complete Setup & Launch Studio 🚀</span>
+              <span>Activate Account & Enter Studio</span>
             </button>
           </form>
         </div>
@@ -5812,7 +6459,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="saas-modal-card wide">
       <div class="saas-modal-header">
         <div class="saas-modal-title">
-          <span>👥</span> <span id="team-modal-company-title">Athletics Media Group</span> — Team & Subscriptions
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg> <span id="team-modal-company-title">Athletics Media Group</span> — Team & Subscriptions
         </div>
         <button class="saas-modal-close" onclick="hideTeamModal()">&times;</button>
       </div>
@@ -5832,9 +6479,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
 
         <div class="saas-tabs">
-          <button class="saas-tab-btn active" id="tab-team-bulk" onclick="switchTeamTab('bulk')">📋 Bulk Add Users</button>
-          <button class="saas-tab-btn" id="tab-team-single" onclick="switchTeamTab('single')">👤 Single Invite</button>
-          <button class="saas-tab-btn" id="tab-team-members" onclick="switchTeamTab('members')">👥 Members Directory (<span id="tab-member-count">0</span>)</button>
+          <button class="saas-tab-btn active" id="tab-team-bulk" onclick="switchTeamTab('bulk')">Bulk Add Users</button>
+          <button class="saas-tab-btn" id="tab-team-single" onclick="switchTeamTab('single')">Single Invite</button>
+          <button class="saas-tab-btn" id="tab-team-members" onclick="switchTeamTab('members')">Members Directory (<span id="tab-member-count">0</span>)</button>
         </div>
 
         <!-- TAB 1: BULK ADD USERS -->
@@ -5845,7 +6492,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
             <span class="saas-form-label" style="margin:0;">User List (One per line)</span>
             <button type="button" class="btn btn-secondary" onclick="insertBulkSample()" style="font-size:0.73rem; padding:4px 10px;">
-              <span>📋 Paste Example Team</span>
+              <span>Paste Example Team</span>
             </button>
           </div>
           <textarea id="bulk-invite-text" class="saas-textarea" placeholder="sarah.connor@athletics.com, Sarah Connor, company_admin&#10;john.smith@athletics.com, John Smith, member&#10;coach.carter@athletics.com"></textarea>
@@ -5855,7 +6502,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               ⚡ Each user will be registered and receive an email with their password activation link.
             </div>
             <button type="button" class="btn btn-primary" id="btn-submit-bulk" onclick="handleBulkInviteSubmit()" style="padding:10px 22px;">
-              <span>🚀 Send Bulk Invites & Allocate Seats</span>
+              <span>Send Bulk Invites & Allocate Seats</span>
             </button>
           </div>
 
@@ -5888,7 +6535,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             </div>
             <div id="single-invite-alert" style="display:none; padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
             <button type="submit" class="btn btn-primary" id="btn-submit-single" style="padding:10px 24px;">
-              <span>✉️ Send Invitation Email</span>
+              <span>Send Invitation Email</span>
             </button>
           </form>
         </div>
@@ -5920,14 +6567,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <div class="saas-modal-card wide">
       <div class="saas-modal-header">
         <div class="saas-modal-title">
-          <span>🏢</span> Multi-Tenant Company Distributions & Subscriptions
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg> Multi-Tenant Company Distributions
         </div>
         <button class="saas-modal-close" onclick="hideSuperAdminModal()">&times;</button>
       </div>
       <div class="saas-modal-body">
         <!-- Create New Tenant Company -->
         <div style="background:#0b0f19; border:1px solid #1f293d; border-radius:12px; padding:18px; margin-bottom:24px;">
-          <div style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:14px;">➕ Create New Tenant Company / Organization</div>
+          <div style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:14px;">Create New Tenant Company / Organization</div>
           <form onsubmit="handleCreateCompanySubmit(event)">
             <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:12px; margin-bottom:12px;">
               <div>
@@ -6011,6 +6658,17 @@ class StudioServerHandler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "localhost:8080")
         return f"{proto}://{host}"
 
+    def _require_auth(self):
+        user = self._get_current_user()
+        if not user:
+            self._send_json({
+                "status": "error",
+                "code": "AUTH_REQUIRED",
+                "message": "Authentication required. Please sign in with your enterprise company account to access studio services."
+            }, status=401)
+            return None
+        return user
+
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -6066,7 +6724,12 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self._send_json({"logged_in": True, "user": safe_user})
             return
 
-        elif path == "/api/company/details":
+        # Strict authentication gate: all services require an authenticated active company account
+        user = self._require_auth()
+        if not user:
+            return
+
+        if path == "/api/company/details":
             user = self._get_current_user()
             if not user or not user.get("company_id"):
                 self._send_json({"error": "Unauthorized"}, status=401)
@@ -6320,6 +6983,12 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
             content_len = int(self.headers.get("Content-Length", 0))
+
+            # Strict authentication gate: All POST endpoints require active company login except auth login and invite activation
+            if parsed.path not in ("/api/auth/login", "/api/auth/activate"):
+                user = self._require_auth()
+                if not user:
+                    return
 
             # Handle raw binary photo uploads from browser (enables full AI functionality on Render)
             if parsed.path == "/api/upload_single_file":
