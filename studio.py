@@ -20,6 +20,8 @@ import ssl
 import threading
 import concurrent.futures
 import gc
+import time
+import shutil
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from PIL import Image
@@ -56,6 +58,74 @@ def get_services():
         print(f"[Studio] Initializing Rembg Engine ({model_name})...")
         REMBG_SESSION = rembg.new_session(model_name)
     return DETECTOR, REMBG_SESSION
+
+
+def clean_server_storage(max_age_minutes: int = 15) -> dict:
+    """Purges temporary photos and output folders to prevent Render disk space exhaustion and 502 errors."""
+    workspace_dir = os.path.dirname(os.path.abspath(__file__))
+    dirs_to_check = [
+        os.path.join(workspace_dir, "input_photos"),
+        os.path.join(workspace_dir, "output_photos"),
+    ]
+    now = time.time()
+    deleted_files = 0
+    freed_bytes = 0
+
+    for base_dir in dirs_to_check:
+        if not os.path.exists(base_dir):
+            continue
+        for item in os.listdir(base_dir):
+            if item.startswith(".") or item == "models":
+                continue
+            item_path = os.path.join(base_dir, item)
+            try:
+                mtime = os.path.getmtime(item_path)
+                age_minutes = (now - mtime) / 60.0
+                if max_age_minutes <= 0 or age_minutes >= max_age_minutes:
+                    if os.path.isdir(item_path):
+                        for root, _, files in os.walk(item_path):
+                            for f in files:
+                                fp = os.path.join(root, f)
+                                try:
+                                    freed_bytes += os.path.getsize(fp)
+                                    os.remove(fp)
+                                    deleted_files += 1
+                                except Exception:
+                                    pass
+                        shutil.rmtree(item_path, ignore_errors=True)
+                    else:
+                        freed_bytes += os.path.getsize(item_path)
+                        os.remove(item_path)
+                        deleted_files += 1
+            except Exception:
+                pass
+
+    # Clear face detection cache and collect memory
+    FACE_CACHE.clear()
+    gc.collect()
+
+    freed_mb = round(freed_bytes / (1024 * 1024), 2)
+    return {
+        "status": "ok",
+        "deleted_files": deleted_files,
+        "freed_mb": freed_mb,
+        "freed_bytes": freed_bytes,
+        "face_cache_cleared": True
+    }
+
+
+def _background_storage_janitor():
+    """Background janitor thread that cleans up any stale photos every 10 minutes."""
+    while True:
+        try:
+            time.sleep(600)
+            clean_server_storage(max_age_minutes=15)
+        except Exception:
+            pass
+
+
+_janitor_thread = threading.Thread(target=_background_storage_janitor, daemon=True)
+_janitor_thread.start()
 
 
 def resolve_edited_dir(folder_path: str, create: bool = False) -> str:
@@ -117,13 +187,20 @@ def resolve_input_path(raw_path: str) -> str:
     return None
 
 
-def compute_auto_framing(image_path: str):
-    """Calculates optimal default framing using MediaPipe face detection."""
-    if image_path in FACE_CACHE:
-        return FACE_CACHE[image_path]
+def compute_auto_framing(image_path: str = None, image_bytes: bytes = None, cache_key: str = None):
+    """Calculates optimal default framing using MediaPipe face detection, supporting disk files or in-memory bytes."""
+    key = cache_key or image_path
+    if key and key in FACE_CACHE:
+        return FACE_CACHE[key]
 
     detector, _ = get_services()
-    orig = Image.open(image_path).convert("RGB")
+    if image_bytes:
+        orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    elif image_path and os.path.exists(image_path):
+        orig = Image.open(image_path).convert("RGB")
+    else:
+        raise ValueError(f"Valid image_path or image_bytes required (got path={image_path})")
+
     w_orig, h_orig = orig.size
     box = detector.detect_face(orig)
     fx, fy, fw, fh = box
@@ -156,21 +233,31 @@ def compute_auto_framing(image_path: str):
         "orig_height": h_orig,
         "face": [fx, fy, fw, fh],
     }
-    FACE_CACHE[image_path] = result
+    if key:
+        if len(FACE_CACHE) > 200:
+            FACE_CACHE.clear()
+        FACE_CACHE[key] = result
     return result
 
 
 def process_custom_framed_portrait(
-    image_path: str,
-    scale: float,
-    offset_x: float,
-    offset_y: float,
+    image_path: str = None,
+    image_bytes: bytes = None,
+    scale: float = 0.35,
+    offset_x: float = 0,
+    offset_y: float = 0,
     output_path: str = None,
     output_size: int = 180,
 ) -> Image.Image:
-    """Crops the framed region, runs rembg, and fits to 180x180 RGBA canvas."""
+    """Crops the framed region, runs rembg, and fits to 180x180 RGBA canvas directly in-memory or to disk."""
     _, rembg_session = get_services()
-    orig = Image.open(image_path).convert("RGB")
+    if image_bytes:
+        orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    elif image_path and os.path.exists(image_path):
+        orig = Image.open(image_path).convert("RGB")
+    else:
+        raise ValueError(f"Valid image_path or image_bytes required (got path={image_path})")
+
     w_orig, h_orig = orig.size
 
     scale_factor = scale * (output_size / 180.0)
@@ -1752,12 +1839,14 @@ def scrape_roster_data(url: str):
 
 
 
-def download_player_portrait(img_url: str, save_path: str, target_width: int = 800) -> tuple:
-    """Downloads photo with boosted URL width and standardizes width to target_width with Lanczos."""
+def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tuple:
+    """Downloads photo with boosted URL width and standardizes width to target_width with Lanczos in-memory."""
     high_res_url = boost_image_url_width(img_url, target_width=1200)
     raw_bytes = None
 
     for u in [high_res_url, img_url]:
+        if not u:
+            continue
         try:
             req = urllib.request.Request(
                 u,
@@ -1787,12 +1876,21 @@ def download_player_portrait(img_url: str, save_path: str, target_width: int = 8
     else:
         resized = im
 
-    os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-    if not save_path.lower().endswith(".png"):
-        save_path = os.path.splitext(save_path)[0] + ".png"
+    buf = io.BytesIO()
+    resized.save(buf, "PNG")
+    return buf.getvalue(), resized.size
 
-    resized.save(save_path, "PNG")
-    return save_path, resized.size
+
+def download_player_portrait(img_url: str, save_path: str = None, target_width: int = 800) -> tuple:
+    """Downloads photo with boosted URL width and standardizes width to target_width with Lanczos."""
+    png_bytes, sz = download_player_portrait_bytes(img_url, target_width=target_width)
+    if save_path:
+        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
+        if not save_path.lower().endswith(".png"):
+            save_path = os.path.splitext(save_path)[0] + ".png"
+        with open(save_path, "wb") as f:
+            f.write(png_bytes)
+    return save_path, sz
 
 
 HTML_PAGE = r"""<!DOCTYPE html>
@@ -1804,6 +1902,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
     :root {
       --bg: #090d16;
@@ -2638,6 +2737,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <p class="landing-subtitle">
         Download high-resolution roster portraits with custom player ID assignment, or select an existing local folder to crop into standardized 180×180 transparent headshots.
       </p>
+      <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
+        <span style="font-size:0.75rem; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.35); color:#34d399; padding:5px 12px; border-radius:20px; font-weight:700; display:inline-flex; align-items:center; gap:5px;">
+          <span>⚡ Zero Render Storage Mode (Direct PC Downloads)</span>
+        </span>
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(239, 68, 68, 0.4); color:#fca5a5; font-weight:700;">
+          <span>🧹 Free Server Storage & Memory</span>
+        </button>
+      </div>
     </div>
 
     <!-- Mode Selector Tabs -->
@@ -2792,25 +2899,30 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div class="roster-summary-text" id="roster-summary-text">
             Ready to download
           </div>
-          <button class="btn btn-primary" id="btn-download-roster" style="padding: 10px 24px; font-size: 0.92rem;" onclick="downloadAllRosterPhotos()">
-            <span>🚀 Download All Photos (Width 800)</span>
-          </button>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-secondary" style="padding: 10px 20px; font-size: 0.92rem; background:#0284c7; border-color:#38bdf8; color:#fff; font-weight:700;" onclick="openRosterInStudioDirectly()" title="Load photos directly into studio workbench without writing to Render storage">
+              <span>🎨 Open Directly in Studio</span>
+            </button>
+            <button class="btn btn-primary" id="btn-download-roster" style="padding: 10px 24px; font-size: 0.92rem;" onclick="downloadAllRosterPhotos()">
+              <span>🚀 Download All Photos (ZIP to PC)</span>
+            </button>
+          </div>
         </div>
       </div>
 
       <!-- Success Card -->
       <div class="roster-results-card" id="roster-success-card" style="display: none; text-align: center; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
         <div style="font-size: 2.2rem; margin-bottom: 8px;">🎉</div>
-        <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 6px;">Photos Downloaded & Standardized!</h3>
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 6px;">Photos Downloaded to Your PC!</h3>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;" id="roster-success-desc">
-          All portraits were downloaded at high resolution (width 800) with their assigned numbers and names.
+          All portraits were downloaded directly to your computer's Downloads as a standardized ZIP (0 bytes stored on Render).
         </p>
         <div style="display:flex; justify-content:center; gap:12px; margin-top:8px; flex-wrap:wrap;">
           <button class="btn btn-primary" style="padding: 12px 28px; font-size: 1rem; font-weight:700;" onclick="openDownloadedFolderInStudio()">
             <span>🎨 Open Directly in Studio Workbench</span>
           </button>
-          <button class="btn btn-secondary" style="padding: 12px 24px; font-size: 0.95rem; font-weight:700; background:#0284c7; border-color:#38bdf8; color:#fff;" onclick="downloadRosterZip()">
-            <span>📦 Download All as ZIP</span>
+          <button class="btn btn-secondary" style="padding: 12px 24px; font-size: 0.95rem; font-weight:700; background:#0284c7; border-color:#38bdf8; color:#fff;" onclick="downloadAllRosterPhotos()">
+            <span>📦 Re-download ZIP to PC</span>
           </button>
           <button class="btn btn-secondary" style="padding: 12px 20px; font-size: 0.9rem;" onclick="backToRosterView()">
             <span>📋 Back to Roster List</span>
@@ -2834,6 +2946,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
 
       <div class="header-actions">
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge server temporary files and clear RAM" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 0.8rem; padding: 6px 12px;">
+          <span>🧹 Free RAM</span>
+        </button>
         <button class="btn btn-secondary" id="btn-cutout" onclick="triggerCutout()">
           <span>✨ AI Cutout</span>
         </button>
@@ -2841,7 +2956,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <span>💾 Save Headshot</span>
         </button>
         <button class="btn btn-primary" id="btn-batch-all" onclick="batchProcessFolder()">
-          <span>⚡ Process All</span>
+          <span>⚡ Process All (ZIP)</span>
         </button>
         <button class="btn btn-secondary" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;" onclick="downloadActiveEditedZip()" title="Download all edited headshots as a ZIP file">
           <span>📦 Download ZIP</span>
@@ -3071,6 +3186,96 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       await loadFromBrowserFiles(imageFiles, 'Selected_Photos');
       e.target.value = '';
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function freeServerStorageAndMemory() {
+      showLoading("Cleaning server storage & clearing Python RAM...");
+      try {
+        const res = await fetch('/api/clear_server_storage', { method: 'POST' });
+        const data = await res.json();
+        showToast(`🧹 Freed ${data.freed_mb || 0} MB server disk & cleared RAM!`);
+      } catch (e) {
+        showToast("Storage cleanup error: " + e.message, "error");
+      } finally {
+        hideLoading();
+      }
+    }
+
+    async function loadRosterDirectlyIntoStudio(players, folderName) {
+      if (!players || players.length === 0) return;
+      showLoading(`Loading ${players.length} roster players directly into Studio (0 server storage)...`);
+      try {
+        currentFolder = folderName || 'Roster_Photos';
+        editedFolder = currentFolder + '_edited';
+
+        const currentFolderDisplay = currentFolder.replaceAll('\\', '/').split('/').filter(Boolean).pop() || currentFolder;
+        const editedFolderDisplay = editedFolder.replaceAll('\\', '/').split('/').filter(Boolean).pop() || editedFolder;
+
+        document.getElementById('active-folder-name').textContent = currentFolderDisplay;
+        document.getElementById('active-output-name').textContent = '→ ' + editedFolderDisplay + '/';
+
+        photoData = {};
+        photos = [];
+        const carousel = document.getElementById('carousel');
+        carousel.innerHTML = '';
+
+        players.forEach((p, idx) => {
+          const pName = p.name || `Player_${idx + 1}`;
+          const assigned = p.assigned_number ? p.assigned_number.trim() : '';
+          const cleanAssigned = assigned.replace(/[\\/*?:"<>|]/g, '').trim();
+          const cleanPName = pName.replace(/[\\/*?:"<>|]/g, '').trim();
+          const filename = cleanAssigned ? `${cleanAssigned}.png` : `${cleanPName}.png`;
+          const proxiedUrl = `/api/proxy_photo?url=${encodeURIComponent(p.image)}&width=800`;
+
+          photos.push(filename);
+          photoData[filename] = {
+            name: filename,
+            player_name: pName,
+            assigned_id: cleanAssigned,
+            url: p.image,
+            proxiedUrl: proxiedUrl,
+            scale: 0.35,
+            offset_x: 0,
+            offset_y: 0,
+            img: null,
+            blobFile: null,
+            cutoutImg: null,
+            hasCutout: false,
+            maskReady: false,
+            saved: false,
+            savedB64: null
+          };
+
+          const item = document.createElement('div');
+          item.className = 'carousel-item' + (idx === 0 ? ' active' : '');
+          item.id = 'thumb-' + idx;
+          item.onclick = () => selectPhoto(idx);
+          item.innerHTML = `
+            <div class="status-dot" id="dot-${idx}"></div>
+            <img src="${proxiedUrl}" onerror="this.src='${p.image}'" crossorigin="anonymous">
+            <span>${filename}</span>
+          `;
+          carousel.appendChild(item);
+        });
+
+        showWorkbenchPage();
+        hideLoading();
+        await selectPhoto(0);
+      } catch (err) {
+        console.error('Error loading roster into studio:', err);
+        alert('Error loading into studio: ' + err.message);
+      } finally {
+        hideLoading();
+      }
     }
 
     async function loadFromBrowserFiles(imageFiles, folderName) {
@@ -3352,6 +3557,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
         if (data.blobUrl) {
           img.src = data.blobUrl;
+        } else if (data.proxiedUrl) {
+          img.crossOrigin = 'anonymous';
+          img.src = data.proxiedUrl;
+        } else if (data.url) {
+          img.crossOrigin = 'anonymous';
+          img.src = `/api/proxy_photo?url=${encodeURIComponent(data.url)}&width=800`;
         } else {
           img.src = `/api/photo_raw?folder=${encodeURIComponent(currentFolder)}&name=${encodeURIComponent(name)}`;
         }
@@ -3366,8 +3577,25 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
 
         try {
-          const autoRes = await fetch(`/api/auto_align?folder=${encodeURIComponent(currentFolder)}&name=${encodeURIComponent(name)}`);
-          if (autoRes.ok) {
+          let autoRes;
+          if (data.url) {
+            autoRes = await fetch('/api/auto_align', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: data.url })
+            });
+          } else if (data.blobFile) {
+            const b64 = await fileToBase64(data.blobFile);
+            autoRes = await fetch('/api/auto_align', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image_base64: b64 })
+            });
+          } else {
+            autoRes = await fetch(`/api/auto_align?folder=${encodeURIComponent(currentFolder)}&name=${encodeURIComponent(name)}`);
+          }
+
+          if (autoRes && autoRes.ok) {
             const autoData = await autoRes.json();
             data.scale = autoData.scale;
             data.offset_x = autoData.offset_x;
@@ -3620,17 +3848,31 @@ HTML_PAGE = r"""<!DOCTYPE html>
       showLoading(`Running AI background removal for ${name}...`);
 
       try {
+        let payload = {
+          folder: currentFolder,
+          photo: name,
+          scale: data.scale,
+          offset_x: data.offset_x,
+          offset_y: data.offset_y
+        };
+
+        if (data.url) {
+          payload.url = data.url;
+        } else if (data.blobFile) {
+          payload.image_base64 = await fileToBase64(data.blobFile);
+        } else if (data.img && data.img.src && data.img.src.startsWith('data:')) {
+          payload.image_base64 = data.img.src;
+        }
+
         const res = await fetch('/api/preview_cutout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            folder: currentFolder,
-            photo: name,
-            scale: data.scale,
-            offset_x: data.offset_x,
-            offset_y: data.offset_y
-          })
+          body: JSON.stringify(payload)
         });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(`HTTP ${res.status}: ${errText.substring(0, 100)}`);
+        }
         const blob = await res.blob();
         const img = new Image();
         img.src = URL.createObjectURL(blob);
@@ -3644,7 +3886,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         setMode('recover');
         render();
       } catch (e) {
-        alert('Cutout failed: ' + e);
+        alert('Cutout failed: ' + (e.message || e));
       } finally {
         hideLoading();
       }
@@ -3663,38 +3905,29 @@ HTML_PAGE = r"""<!DOCTYPE html>
       oCtx.drawImage(canvas, 0, 0, 180, 180);
       const b64 = outC.toDataURL('image/png');
 
-      try {
-        const res = await fetch('/api/save_refined_data', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            folder: currentFolder,
-            filename: name,
-            image_base64: b64
-          })
-        });
-        if (!res.ok) {
-          const errText = await res.text();
-          try {
-            const errJson = JSON.parse(errText);
-            throw new Error(errJson.message || errText);
-          } catch (_) {
-            throw new Error(`HTTP ${res.status}: ${errText.substring(0, 100)}`);
-          }
-        }
-        const json = await res.json();
-        photoData[name].saved = true;
-        document.getElementById(`dot-${currentIndex}`).className = 'status-dot saved';
-        alert(`✅ Saved: ${json.output_name} to ${json.folder_name}/`);
-      } catch (e) {
-        alert('Save error: ' + (e.message || e));
-      } finally {
-        hideLoading();
-      }
+      // Download directly to user's PC storage (zero Render storage!)
+      const dlLink = document.createElement('a');
+      const cleanName = name.toLowerCase().endsWith('.png') ? name : `${name}.png`;
+      dlLink.download = cleanName;
+      dlLink.href = b64;
+      document.body.appendChild(dlLink);
+      dlLink.click();
+      document.body.removeChild(dlLink);
+
+      // Cache in browser memory for batch zip downloads
+      photoData[name].saved = true;
+      photoData[name].savedB64 = b64;
+      document.getElementById(`dot-${currentIndex}`).className = 'status-dot saved';
+      hideLoading();
+      showToast(`✅ Saved & downloaded: ${cleanName} directly to your PC! (0 Render storage)`);
     }
 
     async function batchProcessFolder() {
-      if (!confirm(`Process and export all ${photos.length} portraits into ${editedFolder.split('/').pop()}?`)) return;
+      if (photos.length === 0) {
+        showToast("No photos loaded to process", "error");
+        return;
+      }
+      if (!confirm(`Process and export all ${photos.length} portraits as a ZIP directly to your PC?`)) return;
       const btn = document.getElementById('btn-batch-all');
       btn.disabled = true;
       let completed = 0;
@@ -3702,23 +3935,35 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       showLoading(`Starting batch export for ${photos.length} portraits...`);
 
+      const zip = (typeof JSZip !== 'undefined') ? new JSZip() : null;
+
       for (let i = 0; i < photos.length; i++) {
         const name = photos[i];
         const pct = Math.round(((i + 1) / photos.length) * 100);
         showLoading(`Processing ${i + 1} of ${photos.length}: ${name} (${pct}%)...`);
 
         const pData = photoData[name] || { scale: 0.35, offset_x: 0, offset_y: 0 };
+        let payload = {
+          folder: currentFolder,
+          photo: name,
+          scale: pData.scale,
+          offset_x: pData.offset_x,
+          offset_y: pData.offset_y
+        };
+
+        if (pData.url) {
+          payload.url = pData.url;
+        } else if (pData.blobFile) {
+          payload.image_base64 = await fileToBase64(pData.blobFile);
+        } else if (pData.img && pData.img.src && pData.img.src.startsWith('data:')) {
+          payload.image_base64 = pData.img.src;
+        }
+
         try {
           const res = await fetch('/api/process_single_portrait', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              folder: currentFolder,
-              photo: name,
-              scale: pData.scale,
-              offset_x: pData.offset_x,
-              offset_y: pData.offset_y
-            })
+            body: JSON.stringify(payload)
           });
           if (!res.ok) {
             const errText = await res.text();
@@ -3730,6 +3975,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
             const dot = document.getElementById(`dot-${i}`);
             if (dot) dot.className = 'status-dot saved';
             photoData[name].saved = true;
+
+            if (json.image_base64) {
+              photoData[name].savedB64 = json.image_base64;
+              if (zip) {
+                const rawB64 = json.image_base64.split(',')[1] || json.image_base64;
+                const outName = json.filename || (name.replace(/\.[^/.]+$/, "") + ".png");
+                zip.file(outName, rawB64, { base64: true });
+              }
+            }
           } else {
             errors++;
           }
@@ -3739,10 +3993,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
       }
 
+      // Download ZIP to user's PC storage if JSZip is active
+      if (zip && completed > 0) {
+        showLoading("Generating ZIP file in browser memory...");
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const folderBase = (currentFolder || 'headshots').replaceAll('\\', '/').split('/').filter(Boolean).pop() || 'headshots';
+        const dlLink = document.createElement('a');
+        dlLink.href = URL.createObjectURL(zipBlob);
+        dlLink.download = `${folderBase}_edited.zip`;
+        document.body.appendChild(dlLink);
+        dlLink.click();
+        document.body.removeChild(dlLink);
+      }
+
       hideLoading();
       btn.disabled = false;
-      const editedBase = editedFolder.split('/').pop() || 'folder_edited';
-      alert(`🎉 Batch Complete!\nSuccessfully saved ${completed} of ${photos.length} portraits into ${editedBase}/` + (errors > 0 ? `\n(${errors} items failed)` : ''));
+      alert(`🎉 Batch Complete!\nSuccessfully processed ${completed} of ${photos.length} portraits and downloaded directly to your PC!` + (errors > 0 ? `\n(${errors} items failed)` : ''));
     }
 
     function showOriginal(show) {
@@ -3773,16 +4039,39 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     async function autoAlignCurrent() {
       const name = photos[currentIndex];
-      showLoading('Auto-aligning face...');
-      const res = await fetch(`/api/auto_align?folder=${encodeURIComponent(currentFolder)}&name=${encodeURIComponent(name)}`);
-      const autoData = await res.json();
       const data = photoData[name];
-      data.scale = autoData.scale;
-      data.offset_x = autoData.offset_x;
-      data.offset_y = autoData.offset_y;
-      hideLoading();
-      syncZoomSlider();
-      render();
+      showLoading('Auto-aligning face...');
+      try {
+        let autoRes;
+        if (data && data.url) {
+          autoRes = await fetch('/api/auto_align', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: data.url })
+          });
+        } else if (data && data.blobFile) {
+          const b64 = await fileToBase64(data.blobFile);
+          autoRes = await fetch('/api/auto_align', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_base64: b64 })
+          });
+        } else {
+          autoRes = await fetch(`/api/auto_align?folder=${encodeURIComponent(currentFolder)}&name=${encodeURIComponent(name)}`);
+        }
+        if (autoRes && autoRes.ok) {
+          const autoData = await autoRes.json();
+          data.scale = autoData.scale;
+          data.offset_x = autoData.offset_x;
+          data.offset_y = autoData.offset_y;
+          syncZoomSlider();
+          render();
+        }
+      } catch (e) {
+        console.warn("Auto-align error:", e);
+      } finally {
+        hideLoading();
+      }
     }
 
     function fitWidth() {
@@ -4241,50 +4530,101 @@ HTML_PAGE = r"""<!DOCTYPE html>
         target_width: 800
       };
 
-      showLoading(`Downloading & standardizing ${fetchedRosterPlayers.length} photos at width=800...`);
+      showLoading(`Downloading & standardizing ${fetchedRosterPlayers.length} photos directly to your PC as ZIP (0 Render storage)...`);
       try {
-        const res = await fetch('/api/download_roster_players', {
+        const res = await fetch('/api/download_roster_zip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
-        if (data.status !== 'ok') {
-          alert('Download error: ' + (data.message || 'Unknown error'));
-          return;
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ message: 'Download failed' }));
+          throw new Error(err.message || `HTTP ${res.status}`);
         }
 
-        currentRosterTargetDir = data.target_dir;
+        const blob = await res.blob();
+        const downloadUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `${folderName}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(downloadUrl);
+
+        currentRosterTargetDir = folderName;
         document.getElementById('roster-results-card').style.display = 'none';
         document.getElementById('roster-success-card').style.display = 'block';
-        document.getElementById('roster-success-desc').textContent = 
-          `Saved ${data.saved_count} photos to "${data.folder_name}" in Downloads (scaled to width 800 with Lanczos).`;
+        document.getElementById('roster-success-desc').innerHTML = 
+          `🎉 <strong>${fetchedRosterPlayers.length} photos</strong> downloaded directly to your PC storage as <code>${folderName}.zip</code>.<br><span style="color:#10b981; font-weight:600;">0 bytes consumed on Render!</span>`;
       } catch (e) {
-        alert('Error downloading: ' + e);
+        alert('Error downloading ZIP: ' + e.message);
       } finally {
         hideLoading();
       }
     }
 
+    function openRosterInStudioDirectly() {
+      if (fetchedRosterPlayers && fetchedRosterPlayers.length > 0) {
+        const folderName = document.getElementById('roster-folder-input').value.trim() || 'Downloaded_Roster';
+        loadRosterDirectlyIntoStudio(fetchedRosterPlayers, folderName);
+      } else {
+        alert('No roster players loaded to open.');
+      }
+    }
+
     function openDownloadedFolderInStudio() {
-      if (currentRosterTargetDir) {
+      if (fetchedRosterPlayers && fetchedRosterPlayers.length > 0) {
+        const folderName = document.getElementById('roster-folder-input').value.trim() || 'Downloaded_Roster';
+        loadRosterDirectlyIntoStudio(fetchedRosterPlayers, folderName);
+      } else if (currentRosterTargetDir) {
         openFolder(currentRosterTargetDir);
       }
     }
 
     function downloadRosterZip() {
-      if (currentRosterTargetDir) {
-        window.location.href = '/api/export_folder_zip?folder=' + encodeURIComponent(currentRosterTargetDir);
-      }
+      downloadAllRosterPhotos();
     }
 
-    function downloadActiveEditedZip() {
-      if (!currentFolder) {
-        showToast("No active folder loaded", "error");
+    async function downloadActiveEditedZip() {
+      if (photos.length === 0) {
+        showToast("No photos loaded", "error");
         return;
       }
-      const target = editedFolder || (currentFolder + '_edited');
-      window.location.href = '/api/export_folder_zip?folder=' + encodeURIComponent(target);
+      if (typeof JSZip !== 'undefined') {
+        const zip = new JSZip();
+        let count = 0;
+        photos.forEach(name => {
+          const data = photoData[name];
+          if (data && data.savedB64) {
+            const rawB64 = data.savedB64.split(',')[1] || data.savedB64;
+            const outName = name.replace(/\.[^/.]+$/, "") + ".png";
+            zip.file(outName, rawB64, { base64: true });
+            count++;
+          }
+        });
+        if (count > 0) {
+          showLoading(`Creating ZIP with ${count} edited portraits...`);
+          const zipBlob = await zip.generateAsync({ type: 'blob' });
+          const folderBase = (currentFolder || 'edited_headshots').replaceAll('\\', '/').split('/').filter(Boolean).pop() || 'edited_headshots';
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(zipBlob);
+          link.download = `${folderBase}_edited.zip`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          hideLoading();
+          showToast(`📦 Downloaded ${count} headshots in ZIP directly to your PC!`);
+          return;
+        }
+      }
+      if (currentFolder) {
+        const target = editedFolder || (currentFolder + '_edited');
+        window.location.href = '/api/export_folder_zip?folder=' + encodeURIComponent(target);
+      } else {
+        showToast("Please save at least one headshot first, or run Batch Export", "error");
+      }
     }
 
     window.onload = init;
@@ -4444,6 +4784,35 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "error", "message": "Photo not found"}).encode("utf-8"))
+
+        elif path == "/api/proxy_photo":
+            img_url = params.get("url", [""])[0]
+            width_param = params.get("width", ["800"])[0]
+            try:
+                tw = int(width_param)
+            except Exception:
+                tw = 800
+            if not img_url:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"error","message":"Missing url"}')
+            else:
+                try:
+                    png_bytes, _ = download_player_portrait_bytes(img_url, target_width=tw)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.send_header("Content-Length", str(len(png_bytes)))
+                    self.end_headers()
+                    self.wfile.write(png_bytes)
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+
         elif path == "/api/export_folder_zip":
             raw_folder = params.get("folder", ["."])[0]
             folder = resolve_input_path(raw_folder) or raw_folder
@@ -4529,14 +4898,100 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     "path": found_path
                 }).encode("utf-8"))
 
-            elif parsed.path == "/api/preview_cutout":
+            elif parsed.path == "/api/clear_server_storage":
+                result = clean_server_storage(max_age_minutes=0)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "status": "ok",
+                    "deleted_files": result["deleted_files"],
+                    "freed_mb": result["freed_mb"],
+                    "message": f"Successfully freed {result['freed_mb']} MB disk space and cleared RAM cache."
+                }).encode("utf-8"))
+
+            elif parsed.path == "/api/auto_align":
+                b64_data = data.get("image_base64", "")
+                photo_url = data.get("url", "")
+                img_bytes = None
+                if b64_data:
+                    if "," in b64_data:
+                        b64_data = b64_data.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64_data)
+                elif photo_url:
+                    try:
+                        img_bytes, _ = download_player_portrait_bytes(photo_url, target_width=800)
+                    except Exception:
+                        pass
+
+                if img_bytes:
+                    with AI_LOCK:
+                        result = compute_auto_framing(image_bytes=img_bytes)
+                    gc.collect()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode("utf-8"))
+                    return
+
                 raw_folder = data.get("folder", ".")
                 folder = resolve_input_path(raw_folder) or raw_folder
-                photo = data.get("photo", "")
+                name = data.get("name", data.get("photo", ""))
+                img_path = os.path.join(folder, name)
+                if os.path.exists(img_path) and os.path.isfile(img_path):
+                    with AI_LOCK:
+                        result = compute_auto_framing(img_path)
+                    gc.collect()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode("utf-8"))
+                else:
+                    self.send_response(404)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": "Photo not found"}).encode("utf-8"))
+
+            elif parsed.path == "/api/preview_cutout":
+                b64_data = data.get("image_base64", "")
+                photo_url = data.get("url", "")
                 scale = float(data.get("scale", 0.35))
                 offset_x = float(data.get("offset_x", 0))
                 offset_y = float(data.get("offset_y", 0))
 
+                img_bytes = None
+                if b64_data:
+                    if "," in b64_data:
+                        b64_data = b64_data.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64_data)
+                elif photo_url:
+                    try:
+                        img_bytes, _ = download_player_portrait_bytes(photo_url, target_width=800)
+                    except Exception:
+                        pass
+
+                if img_bytes:
+                    with AI_LOCK:
+                        canvas = process_custom_framed_portrait(
+                            image_bytes=img_bytes,
+                            scale=scale,
+                            offset_x=offset_x,
+                            offset_y=offset_y,
+                            output_size=180,
+                        )
+                    gc.collect()
+                    buf = io.BytesIO()
+                    canvas.save(buf, "PNG")
+                    img_bytes_out = buf.getvalue()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.end_headers()
+                    self.wfile.write(img_bytes_out)
+                    return
+
+                raw_folder = data.get("folder", ".")
+                folder = resolve_input_path(raw_folder) or raw_folder
+                photo = data.get("photo", "")
                 img_path = os.path.join(folder, photo)
                 if not os.path.exists(img_path):
                     workspace_dir = os.path.dirname(os.path.abspath(__file__))
@@ -4601,15 +5056,53 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 }).encode("utf-8"))
 
             elif parsed.path == "/api/process_single_portrait":
+                b64_data = data.get("image_base64", "")
+                photo_url = data.get("url", "")
+                scale = float(data.get("scale", 0.35))
+                offset_x = float(data.get("offset_x", 0))
+                offset_y = float(data.get("offset_y", 0))
+                photo = data.get("photo", "headshot.png")
+                clean_name = os.path.splitext(os.path.basename(photo))[0] + ".png"
+
+                img_bytes = None
+                if b64_data:
+                    if "," in b64_data:
+                        b64_data = b64_data.split(",", 1)[1]
+                    img_bytes = base64.b64decode(b64_data)
+                elif photo_url:
+                    try:
+                        img_bytes, _ = download_player_portrait_bytes(photo_url, target_width=800)
+                    except Exception:
+                        pass
+
+                if img_bytes:
+                    with AI_LOCK:
+                        canvas = process_custom_framed_portrait(
+                            image_bytes=img_bytes,
+                            scale=scale,
+                            offset_x=offset_x,
+                            offset_y=offset_y,
+                            output_size=180,
+                        )
+                    gc.collect()
+                    buf = io.BytesIO()
+                    canvas.save(buf, "PNG")
+                    out_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        "status": "ok",
+                        "filename": clean_name,
+                        "image_base64": out_b64
+                    }).encode("utf-8"))
+                    return
+
                 raw_folder = data.get("folder", ".")
                 folder = resolve_input_path(raw_folder)
                 if not folder:
                     workspace_dir = os.path.dirname(os.path.abspath(__file__))
                     folder = os.path.join(workspace_dir, "input_photos", os.path.basename(raw_folder))
-                photo = data.get("photo", "")
-                scale = float(data.get("scale", 0.35))
-                offset_x = float(data.get("offset_x", 0))
-                offset_y = float(data.get("offset_y", 0))
 
                 out_dir = resolve_edited_dir(folder, create=True)
                 clean_name = os.path.splitext(os.path.basename(photo))[0] + ".png"
@@ -4643,13 +5136,18 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     )
                 gc.collect()
 
+                buf = io.BytesIO()
+                canvas.save(buf, "PNG")
+                out_b64 = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     "status": "ok",
                     "filename": clean_name,
-                    "folder_name": os.path.basename(out_dir)
+                    "folder_name": os.path.basename(out_dir),
+                    "image_base64": out_b64
                 }).encode("utf-8"))
 
             elif parsed.path == "/api/save_batch":
@@ -4727,6 +5225,61 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                         "status": "error",
                         "message": str(e)
                     }).encode("utf-8"))
+
+            elif parsed.path == "/api/download_roster_zip":
+                folder_name = data.get("folder_name", "Downloaded_Roster").strip()
+                clean_folder = re.sub(r'[^a-zA-Z0-9_\-\s]', '', folder_name).strip() or "Downloaded_Roster"
+                players = data.get("players", [])
+                target_width = int(data.get("target_width", 800))
+
+                zip_buf = io.BytesIO()
+                seen_filenames = set()
+
+                def _fetch_player_bytes(item):
+                    p_name = item.get("name", "").strip()
+                    assigned = item.get("assigned_number", "").strip()
+                    img_url = item.get("image", "").strip()
+
+                    clean_name = re.sub(r'[\\/*?:"<>|]', '', p_name).strip()
+                    if assigned:
+                        clean_assigned = re.sub(r'[\\/*?:"<>|]', '', assigned).strip()
+                        out_filename = f"{clean_assigned}.png"
+                    else:
+                        out_filename = f"{clean_name}.png"
+
+                    base_out = out_filename
+                    counter = 2
+                    while out_filename in seen_filenames:
+                        root, ext = os.path.splitext(base_out)
+                        out_filename = f"{root}_{counter}{ext}"
+                        counter += 1
+                    seen_filenames.add(out_filename)
+
+                    try:
+                        png_bytes, sz = download_player_portrait_bytes(img_url, target_width=target_width)
+                        return (out_filename, png_bytes, "ok", None)
+                    except Exception as e:
+                        return (out_filename, None, "error", str(e))
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                    results = list(executor.map(_fetch_player_bytes, players))
+
+                with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                    for filename, png_bytes, status, err in results:
+                        if status == "ok" and png_bytes:
+                            zf.writestr(filename, png_bytes)
+
+                zip_bytes = zip_buf.getvalue()
+                gc.collect()
+
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", f'attachment; filename="{clean_folder}.zip"')
+                self.send_header("Content-Length", str(len(zip_bytes)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.end_headers()
+                self.wfile.write(zip_bytes)
+                return
 
             elif parsed.path == "/api/download_roster_players":
                 folder_name = data.get("folder_name", "Downloaded_Roster").strip()
@@ -4815,6 +5368,13 @@ def launch_studio(port: int = None):
     env_port = os.environ.get("PORT")
     target_port = int(env_port) if env_port else (port or 8080)
     host = "0.0.0.0"
+
+    # Clean any stale temporary files and release RAM on startup
+    try:
+        startup_clean = clean_server_storage(max_age_minutes=0)
+        print(f"[Studio] Startup cleanup complete: freed {startup_clean.get('freed_mb', 0)} MB disk space & RAM cache.")
+    except Exception as e:
+        print(f"[Studio] Startup cleanup note: {e}")
 
     ports_to_try = [target_port] if env_port else [target_port, 8081, 8082, 8888, 5050]
 
