@@ -24,21 +24,30 @@ import time
 import shutil
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
-from PIL import Image
 
 # Optimize thread allocation for low-resource cloud environments (Render Free tier)
 os.environ.setdefault("OMP_NUM_THREADS", "2")
 os.environ.setdefault("MKL_NUM_THREADS", "2")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "2")
 
-# Auto-activate local .venv if not in virtualenv
+# Auto-activate local .venv if not running inside a virtualenv
 script_dir = os.path.dirname(os.path.abspath(__file__))
-venv_python = os.path.join(script_dir, ".venv", "bin", "python3")
-if not os.environ.get("RENDER") and sys.prefix == sys.base_prefix and os.path.exists(venv_python) and sys.executable != venv_python:
-    os.execv(venv_python, [venv_python] + sys.argv)
+venv_candidates = [
+    os.path.join(script_dir, ".venv", "bin", "python"),
+    os.path.join(script_dir, ".venv", "bin", "python3"),
+    "/Users/janakmakwana/Downloads/Photo Editor for HUDL/.venv/bin/python",
+]
+if not os.environ.get("RENDER") and sys.prefix == sys.base_prefix:
+    for vp in venv_candidates:
+        if os.path.exists(vp) and sys.executable != vp:
+            os.execv(vp, [vp] + sys.argv)
 
+from PIL import Image
 import rembg
 from process_portraits import FaceDetectorWrapper, find_input_images
+import saas_db
+import saas_email
+import saas_auth
 
 DETECTOR = None
 REMBG_SESSION = None
@@ -2723,9 +2732,427 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .roster-summary-text strong {
       color: #fff;
     }
+
+    /* SAAS TOP NAVIGATION & AUTH BAR */
+    .saas-navbar {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--panel-border);
+      padding: 10px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+      z-index: 90;
+      flex-shrink: 0;
+    }
+    .saas-nav-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .saas-brand-title {
+      font-weight: 800;
+      font-size: 1.05rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      letter-spacing: -0.02em;
+    }
+    .saas-brand-title span { color: var(--primary); }
+    .saas-saas-tag {
+      font-size: 0.65rem;
+      background: rgba(249, 115, 22, 0.15);
+      border: 1px solid rgba(249, 115, 22, 0.35);
+      color: #fb923c;
+      padding: 2px 7px;
+      border-radius: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .saas-company-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #f1f5f9;
+    }
+    .saas-plan-pill {
+      font-size: 0.68rem;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .plan-team { background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); }
+    .plan-enterprise { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+    .plan-free { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
+
+    .seat-quota-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #34d399;
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .seat-quota-pill:hover {
+      background: rgba(16, 185, 129, 0.25);
+      transform: translateY(-1px);
+    }
+    .seat-quota-pill.warning {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+    .seat-quota-pill.full {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    .saas-nav-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .user-profile-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid rgba(51, 65, 85, 0.8);
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      color: #f8fafc;
+    }
+    .user-role-tag {
+      font-size: 0.68rem;
+      padding: 2px 7px;
+      border-radius: 8px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .role-superadmin { background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .role-admin { background: rgba(249, 115, 22, 0.2); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.4); }
+    .role-member { background: rgba(56, 189, 248, 0.2); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.4); }
+
+    /* SAAS MODALS */
+    .saas-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(4, 7, 15, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 10000;
+      padding: 20px;
+      overflow-y: auto;
+      animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .saas-modal-card {
+      background: #111827;
+      border: 1px solid #1f293d;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 620px;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.85);
+      position: relative;
+      overflow: hidden;
+    }
+    .saas-modal-card.wide { max-width: 900px; }
+    .saas-modal-header {
+      padding: 18px 24px;
+      border-bottom: 1px solid #1f293d;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #0f172a;
+    }
+    .saas-modal-title {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .saas-modal-close {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 1.3rem;
+      cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 6px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+    .saas-modal-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
+    }
+    .saas-modal-body {
+      padding: 24px;
+      overflow-y: auto;
+      flex: 1;
+    }
+    .saas-tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid #1f293d;
+      margin-bottom: 20px;
+      padding-bottom: 2px;
+    }
+    .saas-tab-btn {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      font-weight: 700;
+      font-size: 0.86rem;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .saas-tab-btn.active {
+      color: var(--primary);
+      border-bottom-color: var(--primary);
+    }
+    .saas-form-group {
+      margin-bottom: 16px;
+    }
+    .saas-form-label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .saas-input {
+      width: 100%;
+      background: #0b0f19;
+      border: 1px solid #1f293d;
+      color: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      outline: none;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
+    .saas-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+    }
+    .saas-textarea {
+      width: 100%;
+      background: #0b0f19;
+      border: 1px solid #1f293d;
+      color: #e2e8f0;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      outline: none;
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 140px;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    .saas-textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+    }
+    .seat-meter-card {
+      background: #0b0f19;
+      border: 1px solid #1f293d;
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .seat-meter-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 0.85rem;
+    }
+    .seat-bar-track {
+      background: #1e293b;
+      height: 8px;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+    .seat-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #10b981 0%, #38bdf8 70%, #f97316 100%);
+      transition: width 0.3s ease;
+    }
+    .saas-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.84rem;
+    }
+    .saas-table th {
+      text-align: left;
+      padding: 10px 12px;
+      background: #0b0f19;
+      color: #94a3b8;
+      font-weight: 700;
+      border-bottom: 1px solid #1f293d;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .saas-table td {
+      padding: 12px;
+      border-bottom: 1px solid rgba(31, 41, 61, 0.6);
+      color: #e2e8f0;
+      vertical-align: middle;
+    }
+    .saas-table tr:hover td {
+      background: rgba(30, 41, 59, 0.4);
+    }
+    .btn-copy-link {
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: #38bdf8;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s;
+    }
+    .btn-copy-link:hover {
+      background: rgba(56, 189, 248, 0.25);
+    }
+    .btn-revoke-user {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      color: #f87171;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-revoke-user:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+    .result-pill-added {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #34d399;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .result-pill-skipped {
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: #fbbf24;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
   </style>
 </head>
 <body>
+  <!-- GLOBAL SAAS TOP NAVIGATION BAR -->
+  <div id="saas-top-navbar" class="saas-navbar">
+    <div class="saas-nav-left">
+      <div class="saas-brand-title">
+        <span>🏀</span> Portrait Studio <span>Pro</span>
+        <span class="saas-saas-tag">Multi-Tenant SaaS</span>
+      </div>
+      <div id="nav-company-wrapper" style="display:none; align-items:center; gap:8px;">
+        <div class="saas-company-badge">
+          <span>🏢</span>
+          <span id="nav-company-name">Athletics Media Group</span>
+          <span id="nav-company-plan" class="saas-plan-pill plan-team">Team</span>
+        </div>
+        <div id="nav-seat-quota-pill" class="seat-quota-pill" onclick="openTeamModal('members')" title="Click to view team members & subscription quota">
+          <span>👥</span>
+          <span id="nav-seat-quota-text">1 / 15 Seats</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="saas-nav-right">
+      <!-- State 1: Logged Out -->
+      <div id="nav-auth-logged-out" style="display:flex; align-items:center; gap:8px;">
+        <button class="btn btn-primary" onclick="showAuthModal('login')" style="padding: 7px 16px; font-size: 0.82rem;">
+          <span>🔐 Sign In</span>
+        </button>
+      </div>
+
+      <!-- State 2: Logged In -->
+      <div id="nav-auth-logged-in" style="display:none; align-items:center; gap:10px;">
+        <div class="user-profile-pill">
+          <span id="nav-user-avatar">👤</span>
+          <span id="nav-user-name" style="font-weight:700;">Admin</span>
+          <span id="nav-user-role" class="user-role-tag role-superadmin">SuperAdmin</span>
+        </div>
+        <button class="btn btn-secondary" id="btn-nav-team" onclick="openTeamModal('bulk')" title="Manage company users, seats, and invitations" style="border-color:#38bdf8; color:#38bdf8; font-size:0.8rem; padding:6px 12px;">
+          <span>👥 Manage Team</span>
+        </button>
+        <button class="btn btn-secondary" id="btn-nav-superadmin" onclick="openSuperAdminModal()" title="Manage all tenant organizations & subscriptions" style="border-color:#a855f7; color:#c084fc; font-size:0.8rem; padding:6px 12px; display:none;">
+          <span>🏢 Companies</span>
+        </button>
+        <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of Portrait Studio Pro" style="font-size:0.8rem; padding:6px 12px;">
+          <span>🚪 Logout</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Native Folder Picker Input -->
   <input type="file" id="native-folder-picker" webkitdirectory directory multiple style="display:none;" onchange="onNativeFolderPicked(event)">
 
@@ -2961,6 +3388,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <button class="btn btn-secondary" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;" onclick="downloadActiveEditedZip()" title="Download all edited headshots as a ZIP file">
           <span>📦 Download ZIP</span>
         </button>
+        <button class="btn btn-secondary" onclick="openTeamModal('bulk')" title="Team & Subscription Seats" style="font-size:0.8rem; padding:6px 12px; border-color:rgba(56,189,248,0.4); color:#7dd3fc;">
+          <span>👥 Team</span>
+        </button>
       </div>
     </header>
 
@@ -3105,6 +3535,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     async function init() {
       setupDragAndDrop();
       setupEvents();
+      checkAuthStatus();
       // Load suggested folders on first page
       try {
         const res = await fetch('/api/suggested_folders');
@@ -4627,14 +5058,959 @@ HTML_PAGE = r"""<!DOCTYPE html>
       }
     }
 
+    // =========================================================================
+    // MULTI-TENANT SAAS AUTHENTICATION & TEAM MANAGEMENT
+    // =========================================================================
+    let currentUser = null;
+    let currentCompany = null;
+    let cachedTeamData = null;
+
+    async function checkAuthStatus() {
+      try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.logged_in && data.user) {
+          currentUser = data.user;
+          currentCompany = data.user.company;
+        } else {
+          currentUser = null;
+          currentCompany = null;
+        }
+      } catch (e) {
+        console.error("Auth check failed:", e);
+        currentUser = null;
+        currentCompany = null;
+      }
+      renderAuthUI();
+      checkInviteUrlHash();
+    }
+
+    function renderAuthUI() {
+      const loggedOutDiv = document.getElementById('nav-auth-logged-out');
+      const loggedInDiv = document.getElementById('nav-auth-logged-in');
+      const companyWrapper = document.getElementById('nav-company-wrapper');
+
+      if (currentUser) {
+        if (loggedOutDiv) loggedOutDiv.style.display = 'none';
+        if (loggedInDiv) loggedInDiv.style.display = 'flex';
+
+        const nameEl = document.getElementById('nav-user-name');
+        const roleEl = document.getElementById('nav-user-role');
+        if (nameEl) nameEl.textContent = currentUser.full_name || currentUser.email;
+
+        if (roleEl) {
+          const role = currentUser.role || 'member';
+          roleEl.textContent = role === 'superadmin' ? 'SuperAdmin' : (role === 'company_admin' ? 'Admin' : 'Member');
+          roleEl.className = 'user-role-tag ' + (role === 'superadmin' ? 'role-superadmin' : (role === 'company_admin' ? 'role-admin' : 'role-member'));
+        }
+
+        const teamBtn = document.getElementById('btn-nav-team');
+        if (teamBtn) {
+          teamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
+        }
+
+        const superAdminBtn = document.getElementById('btn-nav-superadmin');
+        if (superAdminBtn) {
+          superAdminBtn.style.display = (currentUser.role === 'superadmin') ? 'inline-flex' : 'none';
+        }
+
+        if (currentCompany) {
+          if (companyWrapper) companyWrapper.style.display = 'inline-flex';
+          const compNameEl = document.getElementById('nav-company-name');
+          const compPlanEl = document.getElementById('nav-company-plan');
+          const quotaTextEl = document.getElementById('nav-seat-quota-text');
+          const quotaPill = document.getElementById('nav-seat-quota-pill');
+
+          if (compNameEl) compNameEl.textContent = currentCompany.name;
+          if (compPlanEl) {
+            compPlanEl.textContent = (currentCompany.plan || 'team').toUpperCase();
+            compPlanEl.className = 'saas-plan-pill plan-' + (currentCompany.plan || 'team');
+          }
+
+          const used = currentCompany.used_seats || 0;
+          const maxSeats = currentCompany.max_seats || 10;
+          if (quotaTextEl) quotaTextEl.textContent = `${used} / ${maxSeats} Seats`;
+
+          if (quotaPill) {
+            quotaPill.className = 'seat-quota-pill';
+            if (used >= maxSeats) {
+              quotaPill.classList.add('full');
+            } else if (used / maxSeats >= 0.8) {
+              quotaPill.classList.add('warning');
+            }
+          }
+        } else {
+          if (companyWrapper) companyWrapper.style.display = 'none';
+        }
+      } else {
+        if (loggedOutDiv) loggedOutDiv.style.display = 'flex';
+        if (loggedInDiv) loggedInDiv.style.display = 'none';
+        if (companyWrapper) companyWrapper.style.display = 'none';
+      }
+    }
+
+    function checkInviteUrlHash() {
+      const hash = window.location.hash || '';
+      if (hash.includes('token=')) {
+        const tokenMatch = hash.match(/token=([^&]+)/);
+        if (tokenMatch && tokenMatch[1]) {
+          const token = tokenMatch[1];
+          showAuthModal('activate', token);
+        }
+      }
+    }
+
+    // Modal Control: Auth
+    function showAuthModal(tab = 'login', token = '') {
+      const modal = document.getElementById('modal-auth');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      switchAuthTab(tab);
+      if (token) {
+        const tokenInput = document.getElementById('activate-token');
+        if (tokenInput) tokenInput.value = token;
+      }
+    }
+
+    function hideAuthModal() {
+      const modal = document.getElementById('modal-auth');
+      if (modal) modal.style.display = 'none';
+      const errAlert1 = document.getElementById('login-error-alert');
+      if (errAlert1) errAlert1.style.display = 'none';
+      const errAlert2 = document.getElementById('activate-error-alert');
+      if (errAlert2) errAlert2.style.display = 'none';
+    }
+
+    function switchAuthTab(tab) {
+      const loginTabBtn = document.getElementById('tab-auth-login');
+      const activateTabBtn = document.getElementById('tab-auth-activate');
+      const loginView = document.getElementById('view-auth-login');
+      const activateView = document.getElementById('view-auth-activate');
+
+      if (tab === 'login') {
+        if (loginTabBtn) loginTabBtn.classList.add('active');
+        if (activateTabBtn) activateTabBtn.classList.remove('active');
+        if (loginView) loginView.style.display = 'block';
+        if (activateView) activateView.style.display = 'none';
+      } else {
+        if (activateTabBtn) activateTabBtn.classList.add('active');
+        if (loginTabBtn) loginTabBtn.classList.remove('active');
+        if (activateView) activateView.style.display = 'block';
+        if (loginView) loginView.style.display = 'none';
+      }
+    }
+
+    function fillDemoCredentials() {
+      const emailInput = document.getElementById('login-email');
+      const passInput = document.getElementById('login-password');
+      if (emailInput) emailInput.value = 'admin@athletics.com';
+      if (passInput) passInput.value = 'admin';
+    }
+
+    async function handleLoginSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('login-email').value.trim();
+      const password = document.getElementById('login-password').value;
+      const btn = document.getElementById('btn-login-submit');
+      const errAlert = document.getElementById('login-error-alert');
+      if (errAlert) errAlert.style.display = 'none';
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Signing in...</span>';
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          hideAuthModal();
+          showToast(`👋 Welcome back, ${data.user.full_name}!`);
+          await checkAuthStatus();
+        } else {
+          if (errAlert) {
+            errAlert.textContent = data.message || 'Login failed. Please check your credentials.';
+            errAlert.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errAlert) {
+          errAlert.textContent = 'Server connection error. Please try again.';
+          errAlert.style.display = 'block';
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Sign In ➔</span>';
+      }
+    }
+
+    async function handleActivationSubmit(e) {
+      e.preventDefault();
+      const token = document.getElementById('activate-token').value.trim();
+      const fullName = document.getElementById('activate-name').value.trim();
+      const password = document.getElementById('activate-password').value;
+      const confirm = document.getElementById('activate-confirm').value;
+      const btn = document.getElementById('btn-activate-submit');
+      const errAlert = document.getElementById('activate-error-alert');
+      if (errAlert) errAlert.style.display = 'none';
+
+      if (password !== confirm) {
+        if (errAlert) {
+          errAlert.textContent = 'Passwords do not match.';
+          errAlert.style.display = 'block';
+        }
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Activating Account...</span>';
+
+      try {
+        const res = await fetch('/api/auth/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, password, full_name: fullName })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          hideAuthModal();
+          window.location.hash = '';
+          showToast(`🎉 Welcome to Portrait Studio Pro, ${data.user.full_name}!`);
+          await checkAuthStatus();
+        } else {
+          if (errAlert) {
+            errAlert.textContent = data.message || 'Activation failed or invitation expired.';
+            errAlert.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errAlert) {
+          errAlert.textContent = 'Server connection error. Please try again.';
+          errAlert.style.display = 'block';
+        }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Complete Setup & Launch Studio 🚀</span>';
+      }
+    }
+
+    async function logoutUser() {
+      try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        currentUser = null;
+        currentCompany = null;
+        renderAuthUI();
+        showToast('👋 You have been logged out.');
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Modal Control: Team Management & Bulk Invites
+    async function openTeamModal(tab = 'bulk') {
+      const modal = document.getElementById('modal-team-mgmt');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      switchTeamTab(tab);
+      await loadTeamData();
+    }
+
+    function hideTeamModal() {
+      const modal = document.getElementById('modal-team-mgmt');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function switchTeamTab(tab) {
+      const tabs = ['bulk', 'single', 'members'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-team-${t}`);
+        const view = document.getElementById(`view-team-${t}`);
+        if (btn) btn.classList.toggle('active', t === tab);
+        if (view) view.style.display = (t === tab) ? 'block' : 'none';
+      });
+    }
+
+    async function loadTeamData() {
+      try {
+        const res = await fetch('/api/company/users');
+        if (!res.ok) throw new Error('Could not load company members');
+        const data = await res.json();
+        cachedTeamData = data;
+
+        const compTitle = document.getElementById('team-modal-company-title');
+        const meterComp = document.getElementById('meter-company-name');
+        const meterPlan = document.getElementById('meter-plan-tag');
+        const meterText = document.getElementById('meter-seat-text');
+        const meterBar = document.getElementById('meter-bar-fill');
+        const countSpan = document.getElementById('tab-member-count');
+
+        if (data.company) {
+          if (compTitle) compTitle.textContent = data.company.name;
+          if (meterComp) meterComp.textContent = data.company.name;
+          if (meterPlan) {
+            meterPlan.textContent = `${(data.company.plan || 'team').toUpperCase()} PLAN`;
+            meterPlan.className = 'saas-plan-pill plan-' + (data.company.plan || 'team');
+          }
+        }
+
+        const used = data.used_seats || 0;
+        const max = data.max_seats || 10;
+        const remaining = data.remaining_seats || 0;
+        const pct = Math.min(100, Math.round((used / max) * 100));
+
+        if (meterText) meterText.textContent = `${used} / ${max} Seats Used (${remaining} Remaining)`;
+        if (meterBar) meterBar.style.width = `${pct}%`;
+        if (countSpan) countSpan.textContent = (data.users || []).length;
+
+        // Render member directory table
+        renderTeamMembersTable(data.users || []);
+
+        // Also update navbar quota pill
+        const quotaTextEl = document.getElementById('nav-seat-quota-text');
+        if (quotaTextEl) quotaTextEl.textContent = `${used} / ${max} Seats`;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderTeamMembersTable(members) {
+      const tbody = document.getElementById('team-members-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      if (members.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">No members found in this company.</td></tr>';
+        return;
+      }
+
+      members.forEach(m => {
+        const tr = document.createElement('tr');
+        const isSelf = currentUser && currentUser.id === m.id;
+        const isPending = !m.password_hash && m.invite_token;
+        const roleBadge = m.role === 'superadmin' ? '<span class="user-role-tag role-superadmin">SuperAdmin</span>'
+          : (m.role === 'company_admin' ? '<span class="user-role-tag role-admin">Admin</span>'
+          : '<span class="user-role-tag role-member">Member</span>');
+
+        const statusBadge = isPending
+          ? '<span style="font-size:0.7rem; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; padding:2px 8px; border-radius:10px; font-weight:700;">⏳ Pending Invite</span>'
+          : '<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:2px 8px; border-radius:10px; font-weight:700;">✅ Active</span>';
+
+        let actionHtml = '';
+        if (m.activation_url) {
+          actionHtml += `<button class="btn-copy-link" onclick="copyActivationUrl('${m.activation_url}')" title="Copy password activation link to clipboard">📋 Copy Invite Link</button> `;
+          actionHtml += `<button class="btn btn-secondary" onclick="resendMemberInvite('${m.id}')" style="font-size:0.72rem; padding:4px 8px;" title="Resend invitation email">🔄 Resend</button> `;
+        }
+        if (!isSelf && m.role !== 'superadmin') {
+          actionHtml += `<button class="btn-revoke-user" onclick="revokeCompanyMember('${m.id}', '${m.email}')" title="Revoke membership and free seat">❌ Remove</button>`;
+        }
+
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:700; color:#fff;">${escapeHtml(m.full_name || m.email)} ${isSelf ? '<span style="font-size:0.7rem; color:var(--primary);">(You)</span>' : ''}</div>
+            <div style="font-size:0.74rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(m.email)}</div>
+          </td>
+          <td>${roleBadge}</td>
+          <td>${statusBadge}</td>
+          <td style="text-align:right;">${actionHtml}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function insertBulkSample() {
+      const textarea = document.getElementById('bulk-invite-text');
+      if (textarea) {
+        textarea.value = `sarah.connor@athletics.com, Sarah Connor, company_admin\njohn.smith@athletics.com, John Smith, member\ncoach.carter@athletics.com, Coach Carter, member\nassistant.coach@athletics.com`;
+      }
+    }
+
+    async function handleBulkInviteSubmit() {
+      const textarea = document.getElementById('bulk-invite-text');
+      const rawText = textarea.value.trim();
+      const btn = document.getElementById('btn-submit-bulk');
+      const resultsBox = document.getElementById('bulk-results-box');
+      const resultsList = document.getElementById('bulk-results-list');
+
+      if (!rawText) {
+        showToast('Please enter at least one user email to invite.', 'error');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Inviting & Sending Emails...</span>';
+
+      try {
+        const res = await fetch('/api/company/users/bulk_invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ raw_text: rawText })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          resultsBox.style.display = 'block';
+          resultsList.innerHTML = '';
+
+          // Show added
+          (data.added || []).forEach(u => {
+            const div = document.createElement('div');
+            div.className = 'result-pill-added';
+            div.innerHTML = `
+              <div>
+                <strong>✅ ${escapeHtml(u.full_name)}</strong> &lt;${escapeHtml(u.email)}&gt;
+                <span style="font-size:0.7rem; opacity:0.8; margin-left:6px;">(${u.role})</span>
+                ${u.email_simulated ? '<span style="font-size:0.68rem; background:rgba(56,189,248,0.2); padding:1px 6px; border-radius:6px; margin-left:6px; color:#38bdf8;">Dev Mode Link</span>' : '<span style="font-size:0.68rem; color:#34d399; margin-left:6px;">📧 Email Sent</span>'}
+              </div>
+              <div>
+                <button class="btn-copy-link" onclick="copyActivationUrl('${u.activation_url}')">📋 Copy Invite Link</button>
+              </div>
+            `;
+            resultsList.appendChild(div);
+          });
+
+          // Show skipped
+          (data.skipped || []).forEach(s => {
+            const div = document.createElement('div');
+            div.className = 'result-pill-skipped';
+            div.innerHTML = `
+              <div>
+                <strong>⚠️ ${escapeHtml(s.name || s.email)}</strong> &lt;${escapeHtml(s.email)}&gt;
+              </div>
+              <div style="font-size:0.75rem; font-weight:700;">${escapeHtml(s.reason)}</div>
+            `;
+            resultsList.appendChild(div);
+          });
+
+          showToast(`⚡ Processed bulk invite: ${(data.added || []).length} users invited!`);
+          textarea.value = '';
+          await loadTeamData();
+          await checkAuthStatus();
+        } else {
+          showToast(data.message || 'Bulk invite error occurred.', 'error');
+        }
+      } catch (err) {
+        showToast('Server connection failed.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🚀 Send Bulk Invites & Allocate Seats</span>';
+      }
+    }
+
+    async function handleSingleInviteSubmit(e) {
+      e.preventDefault();
+      const email = document.getElementById('single-email').value.trim();
+      const fullName = document.getElementById('single-name').value.trim();
+      const role = document.getElementById('single-role').value;
+      const btn = document.getElementById('btn-submit-single');
+      const alertBox = document.getElementById('single-invite-alert');
+      if (alertBox) alertBox.style.display = 'none';
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Sending Invitation...</span>';
+
+      try {
+        const res = await fetch('/api/company/users/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, full_name: fullName, role })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast(`✉️ Invitation sent to ${email}!`);
+          document.getElementById('single-email').value = '';
+          document.getElementById('single-name').value = '';
+
+          if (alertBox) {
+            alertBox.style.display = 'block';
+            alertBox.style.background = 'rgba(16,185,129,0.15)';
+            alertBox.style.color = '#34d399';
+            alertBox.style.border = '1px solid rgba(16,185,129,0.3)';
+            alertBox.innerHTML = `
+              <div>✅ Invitation sent to <strong>${escapeHtml(email)}</strong>!</div>
+              <div style="margin-top:6px; font-size:0.75rem;">
+                Direct activation link: <a href="${data.activation_url}" target="_blank" style="color:#38bdf8;">${data.activation_url}</a>
+                <button class="btn-copy-link" style="margin-left:8px;" onclick="copyActivationUrl('${data.activation_url}')">📋 Copy</button>
+              </div>
+            `;
+          }
+          await loadTeamData();
+          await checkAuthStatus();
+        } else {
+          if (alertBox) {
+            alertBox.style.display = 'block';
+            alertBox.style.background = 'rgba(239,68,68,0.15)';
+            alertBox.style.color = '#fca5a5';
+            alertBox.style.border = '1px solid rgba(239,68,68,0.3)';
+            alertBox.textContent = data.message || 'Failed to send invite.';
+          }
+        }
+      } catch (err) {
+        showToast('Server error.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>✉️ Send Invitation Email</span>';
+      }
+    }
+
+    async function revokeCompanyMember(userId, email) {
+      if (!confirm(`Are you sure you want to remove ${email} from your company team? This will free 1 subscription seat.`)) return;
+      try {
+        const res = await fetch('/api/company/users/revoke', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast(`Seat freed: ${email} removed.`);
+          await loadTeamData();
+          await checkAuthStatus();
+        } else {
+          showToast(data.message || 'Could not remove member.', 'error');
+        }
+      } catch (e) {
+        showToast('Server error.', 'error');
+      }
+    }
+
+    async function resendMemberInvite(userId) {
+      try {
+        const res = await fetch('/api/company/users/resend_invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user_id: userId })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast('Invitation email resent!');
+          if (data.activation_url) {
+            navigator.clipboard.writeText(data.activation_url);
+            showToast('📋 Copied new activation link to clipboard!');
+          }
+          await loadTeamData();
+        } else {
+          showToast(data.message || 'Failed to resend invite.', 'error');
+        }
+      } catch (e) {
+        showToast('Server error.', 'error');
+      }
+    }
+
+    function copyActivationUrl(url) {
+      if (!url) return;
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('📋 Copied activation link to clipboard!');
+      }).catch(() => {
+        prompt('Copy activation link:', url);
+      });
+    }
+
+    // Modal Control: SuperAdmin All Companies
+    async function openSuperAdminModal() {
+      const modal = document.getElementById('modal-superadmin');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      await loadAllCompanies();
+    }
+
+    function hideSuperAdminModal() {
+      const modal = document.getElementById('modal-superadmin');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function loadAllCompanies() {
+      try {
+        const res = await fetch('/api/admin/companies');
+        if (!res.ok) throw new Error('Unauthorized');
+        const data = await res.json();
+        const tbody = document.getElementById('companies-tbody');
+        if (!tbody) return;
+        tbody.innerHTML = '';
+
+        (data.companies || []).forEach(c => {
+          const tr = document.createElement('tr');
+          const planTag = `<span class="saas-plan-pill plan-${c.plan || 'team'}">${(c.plan || 'team').toUpperCase()}</span>`;
+          const quota = `${c.used_seats || 0} / ${c.max_seats || 10} Seats`;
+          tr.innerHTML = `
+            <td>
+              <div style="font-weight:700; color:#fff;">${escapeHtml(c.name)}</div>
+              <div style="font-size:0.73rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(c.slug)}</div>
+            </td>
+            <td>${planTag}</td>
+            <td style="font-weight:700; color:#38bdf8;">${quota}</td>
+            <td><span style="font-size:0.7rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:2px 7px; border-radius:10px;">${escapeHtml(c.status || 'active')}</span></td>
+            <td style="text-align:right;">
+              <button class="btn btn-secondary" onclick="promptUpdateCompanyPlan('${c.id}', '${c.plan || 'team'}', ${c.max_seats || 10})" style="font-size:0.72rem; padding:4px 10px;">
+                ⚙️ Adjust Plan & Seats
+              </button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function autoFillPlanSeats() {
+      const plan = document.getElementById('new-comp-plan').value;
+      const seatsInput = document.getElementById('new-comp-seats');
+      if (plan === 'free') seatsInput.value = 3;
+      else if (plan === 'team') seatsInput.value = 15;
+      else if (plan === 'enterprise') seatsInput.value = 100;
+    }
+
+    async function handleCreateCompanySubmit(e) {
+      e.preventDefault();
+      const name = document.getElementById('new-comp-name').value.trim();
+      const plan = document.getElementById('new-comp-plan').value;
+      const maxSeats = parseInt(document.getElementById('new-comp-seats').value, 10);
+      const adminEmail = document.getElementById('new-comp-admin-email').value.trim();
+      const adminName = document.getElementById('new-comp-admin-name').value.trim();
+      const btn = document.getElementById('btn-create-comp');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Creating Company...</span>';
+
+      try {
+        const res = await fetch('/api/admin/companies/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, plan, max_seats: maxSeats, admin_email: adminEmail, admin_name: adminName })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast(`🏢 Company '${name}' created with ${maxSeats} seats!`);
+          document.getElementById('new-comp-name').value = '';
+          document.getElementById('new-comp-admin-email').value = '';
+          document.getElementById('new-comp-admin-name').value = '';
+          await loadAllCompanies();
+        } else {
+          showToast(data.message || 'Could not create company.', 'error');
+        }
+      } catch (err) {
+        showToast('Server error.', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Create Company & Provision Seats</span>';
+      }
+    }
+
+    async function promptUpdateCompanyPlan(companyId, currentPlan, currentSeats) {
+      const newPlan = prompt(`Enter subscription plan tier ('free', 'team', 'enterprise'):`, currentPlan);
+      if (!newPlan) return;
+      const newSeatsStr = prompt(`Enter maximum seats for this company:`, currentSeats);
+      if (!newSeatsStr) return;
+      const newSeats = parseInt(newSeatsStr, 10);
+      if (isNaN(newSeats) || newSeats < 1) {
+        alert('Invalid seat count.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/companies/update_plan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, plan: newPlan.toLowerCase().trim(), max_seats: newSeats })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast('Updated company subscription & seat quota!');
+          await loadAllCompanies();
+          await checkAuthStatus();
+        } else {
+          showToast(data.message || 'Update failed.', 'error');
+        }
+      } catch (e) {
+        showToast('Server error.', 'error');
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
     window.onload = init;
   </script>
+
+  <!-- MODAL 1: AUTHENTICATION (LOGIN & INVITE ACTIVATION) -->
+  <div id="modal-auth" class="saas-modal-backdrop" onclick="if(event.target===this) hideAuthModal()">
+    <div class="saas-modal-card">
+      <div class="saas-modal-header">
+        <div class="saas-modal-title">
+          <span>🏀</span> Portrait Studio Pro
+        </div>
+        <button class="saas-modal-close" onclick="hideAuthModal()">&times;</button>
+      </div>
+      <div class="saas-modal-body">
+        <div class="saas-tabs">
+          <button class="saas-tab-btn active" id="tab-auth-login" onclick="switchAuthTab('login')">🔐 Sign In</button>
+          <button class="saas-tab-btn" id="tab-auth-activate" onclick="switchAuthTab('activate')">✨ Activate Account</button>
+        </div>
+
+        <!-- Tab 1: Login Form -->
+        <div id="view-auth-login">
+          <form onsubmit="handleLoginSubmit(event)">
+            <div class="saas-form-group">
+              <label class="saas-form-label">Email Address</label>
+              <input type="email" id="login-email" class="saas-input" placeholder="name@company.com" required autocomplete="username">
+            </div>
+            <div class="saas-form-group">
+              <label class="saas-form-label">Password</label>
+              <input type="password" id="login-password" class="saas-input" placeholder="••••••••" required autocomplete="current-password">
+            </div>
+            <div id="login-error-alert" style="display:none; color:#fca5a5; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px; gap:12px;">
+              <button type="button" class="btn btn-secondary" onclick="fillDemoCredentials()" style="font-size:0.78rem; padding:8px 12px; color:#cbd5e1;">
+                <span>⚡ Fill Demo SuperAdmin</span>
+              </button>
+              <button type="submit" class="btn btn-primary" id="btn-login-submit" style="padding:10px 24px;">
+                <span>Sign In ➔</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Tab 2: Activation Form -->
+        <div id="view-auth-activate" style="display:none;">
+          <div style="background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.3); padding:12px 14px; border-radius:8px; font-size:0.82rem; color:#7dd3fc; margin-bottom:18px;">
+            🎉 Welcome! Set your account password to activate your company membership.
+          </div>
+          <form onsubmit="handleActivationSubmit(event)">
+            <input type="hidden" id="activate-token">
+            <div class="saas-form-group">
+              <label class="saas-form-label">Your Full Name</label>
+              <input type="text" id="activate-name" class="saas-input" placeholder="e.g. Jordan Miller" required>
+            </div>
+            <div class="saas-form-group">
+              <label class="saas-form-label">Create Password (Min 6 chars)</label>
+              <input type="password" id="activate-password" class="saas-input" placeholder="••••••••" required minlength="6">
+            </div>
+            <div class="saas-form-group">
+              <label class="saas-form-label">Confirm Password</label>
+              <input type="password" id="activate-confirm" class="saas-input" placeholder="••••••••" required minlength="6">
+            </div>
+            <div id="activate-error-alert" style="display:none; color:#fca5a5; background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
+            <button type="submit" class="btn btn-primary" id="btn-activate-submit" style="width:100%; padding:12px; margin-top:10px;">
+              <span>Complete Setup & Launch Studio 🚀</span>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 2: COMPANY TEAM & BULK USER ADDITION -->
+  <div id="modal-team-mgmt" class="saas-modal-backdrop" onclick="if(event.target===this) hideTeamModal()">
+    <div class="saas-modal-card wide">
+      <div class="saas-modal-header">
+        <div class="saas-modal-title">
+          <span>👥</span> <span id="team-modal-company-title">Athletics Media Group</span> — Team & Subscriptions
+        </div>
+        <button class="saas-modal-close" onclick="hideTeamModal()">&times;</button>
+      </div>
+      <div class="saas-modal-body">
+        <!-- Live Seat Meter Card -->
+        <div class="seat-meter-card">
+          <div class="seat-meter-header">
+            <div>
+              <span style="font-weight:800; color:#fff;" id="meter-company-name">Athletics Media Group</span>
+              <span id="meter-plan-tag" class="saas-plan-pill plan-team" style="margin-left:8px;">Team Plan</span>
+            </div>
+            <div style="font-weight:700; color:#38bdf8;" id="meter-seat-text">1 / 15 Seats Used (14 Available)</div>
+          </div>
+          <div class="seat-bar-track">
+            <div id="meter-bar-fill" class="seat-bar-fill" style="width: 7%;"></div>
+          </div>
+        </div>
+
+        <div class="saas-tabs">
+          <button class="saas-tab-btn active" id="tab-team-bulk" onclick="switchTeamTab('bulk')">📋 Bulk Add Users</button>
+          <button class="saas-tab-btn" id="tab-team-single" onclick="switchTeamTab('single')">👤 Single Invite</button>
+          <button class="saas-tab-btn" id="tab-team-members" onclick="switchTeamTab('members')">👥 Members Directory (<span id="tab-member-count">0</span>)</button>
+        </div>
+
+        <!-- TAB 1: BULK ADD USERS -->
+        <div id="view-team-bulk">
+          <div style="margin-bottom:12px; font-size:0.83rem; color:var(--text-muted); line-height:1.5;">
+            Paste multiple user emails below. Supports CSV, TSV, or email lines with optional Name and Role (<code>member</code> or <code>company_admin</code>).
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span class="saas-form-label" style="margin:0;">User List (One per line)</span>
+            <button type="button" class="btn btn-secondary" onclick="insertBulkSample()" style="font-size:0.73rem; padding:4px 10px;">
+              <span>📋 Paste Example Team</span>
+            </button>
+          </div>
+          <textarea id="bulk-invite-text" class="saas-textarea" placeholder="sarah.connor@athletics.com, Sarah Connor, company_admin&#10;john.smith@athletics.com, John Smith, member&#10;coach.carter@athletics.com"></textarea>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:14px; flex-wrap:wrap; gap:10px;">
+            <div style="font-size:0.75rem; color:var(--text-muted);">
+              ⚡ Each user will be registered and receive an email with their password activation link.
+            </div>
+            <button type="button" class="btn btn-primary" id="btn-submit-bulk" onclick="handleBulkInviteSubmit()" style="padding:10px 22px;">
+              <span>🚀 Send Bulk Invites & Allocate Seats</span>
+            </button>
+          </div>
+
+          <!-- Bulk Invite Results Box -->
+          <div id="bulk-results-box" style="display:none; margin-top:18px; border-top:1px solid #1f293d; padding-top:16px;">
+            <div style="font-size:0.85rem; font-weight:800; color:#fff; margin-bottom:10px;">Invitation Dispatch Results:</div>
+            <div id="bulk-results-list" style="max-height:220px; overflow-y:auto;"></div>
+          </div>
+        </div>
+
+        <!-- TAB 2: SINGLE USER INVITE -->
+        <div id="view-team-single" style="display:none;">
+          <form onsubmit="handleSingleInviteSubmit(event)">
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px;">
+              <div class="saas-form-group">
+                <label class="saas-form-label">Full Name</label>
+                <input type="text" id="single-name" class="saas-input" placeholder="e.g. Alex Johnson" required>
+              </div>
+              <div class="saas-form-group">
+                <label class="saas-form-label">Email Address</label>
+                <input type="email" id="single-email" class="saas-input" placeholder="alex@athletics.com" required>
+              </div>
+            </div>
+            <div class="saas-form-group">
+              <label class="saas-form-label">Role</label>
+              <select id="single-role" class="saas-input" style="cursor:pointer;">
+                <option value="member">Member (Can edit portraits & scrape rosters)</option>
+                <option value="company_admin">Company Admin (Can invite users & manage team)</option>
+              </select>
+            </div>
+            <div id="single-invite-alert" style="display:none; padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:14px;"></div>
+            <button type="submit" class="btn btn-primary" id="btn-submit-single" style="padding:10px 24px;">
+              <span>✉️ Send Invitation Email</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- TAB 3: MEMBERS DIRECTORY -->
+        <div id="view-team-members" style="display:none;">
+          <div style="max-height:360px; overflow-y:auto; border:1px solid #1f293d; border-radius:10px;">
+            <table class="saas-table">
+              <thead>
+                <tr>
+                  <th>Member</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th style="text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="team-members-tbody">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 3: SUPERADMIN COMPANIES & SUBSCRIPTIONS -->
+  <div id="modal-superadmin" class="saas-modal-backdrop" onclick="if(event.target===this) hideSuperAdminModal()">
+    <div class="saas-modal-card wide">
+      <div class="saas-modal-header">
+        <div class="saas-modal-title">
+          <span>🏢</span> Multi-Tenant Company Distributions & Subscriptions
+        </div>
+        <button class="saas-modal-close" onclick="hideSuperAdminModal()">&times;</button>
+      </div>
+      <div class="saas-modal-body">
+        <!-- Create New Tenant Company -->
+        <div style="background:#0b0f19; border:1px solid #1f293d; border-radius:12px; padding:18px; margin-bottom:24px;">
+          <div style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:14px;">➕ Create New Tenant Company / Organization</div>
+          <form onsubmit="handleCreateCompanySubmit(event)">
+            <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:12px; margin-bottom:12px;">
+              <div>
+                <label class="saas-form-label">Company Name</label>
+                <input type="text" id="new-comp-name" class="saas-input" placeholder="e.g. Manchester Storm Media" required>
+              </div>
+              <div>
+                <label class="saas-form-label">Plan Tier</label>
+                <select id="new-comp-plan" class="saas-input" onchange="autoFillPlanSeats()">
+                  <option value="free">Free (3 Seats)</option>
+                  <option value="team" selected>Team (15 Seats)</option>
+                  <option value="enterprise">Enterprise (100 Seats)</option>
+                </select>
+              </div>
+              <div>
+                <label class="saas-form-label">Max Seats</label>
+                <input type="number" id="new-comp-seats" class="saas-input" value="15" min="1" max="1000" required>
+              </div>
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">
+              <div>
+                <label class="saas-form-label">Company Admin Email (Sends Invite)</label>
+                <input type="email" id="new-comp-admin-email" class="saas-input" placeholder="admin@manchesterstorm.com">
+              </div>
+              <div>
+                <label class="saas-form-label">Company Admin Name</label>
+                <input type="text" id="new-comp-admin-name" class="saas-input" placeholder="Lead Photographer">
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary" id="btn-create-comp" style="padding:8px 20px;">
+              <span>Create Company & Provision Seats</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Existing Companies Directory -->
+        <div style="font-size:0.85rem; font-weight:800; color:#fff; margin-bottom:10px;">Active Organizations & Subscriptions</div>
+        <div style="max-height:280px; overflow-y:auto; border:1px solid #1f293d; border-radius:10px;">
+          <table class="saas-table">
+            <thead>
+              <tr>
+                <th>Company</th>
+                <th>Plan Tier</th>
+                <th>Seat Quota</th>
+                <th>Status</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="companies-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
 """
 
 
 class StudioServerHandler(BaseHTTPRequestHandler):
+    def _send_json(self, data, status=200, cookie=None):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode("utf-8"))
+
+    def _get_current_user(self):
+        try:
+            return saas_auth.get_authenticated_user(self.headers)
+        except Exception as e:
+            print(f"[Auth Error] {e}")
+            return None
+
+    def _get_base_url(self):
+        proto = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+        host = self.headers.get("Host", "localhost:8080")
+        return f"{proto}://{host}"
+
     def do_HEAD(self):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -4660,6 +6036,94 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode("utf-8"))
+
+        elif path == "/api/auth/me":
+            user = self._get_current_user()
+            if not user:
+                self._send_json({"logged_in": False, "user": None})
+                return
+            company = user.get("company")
+            used_seats = saas_db.get_company_seat_count(user["company_id"]) if user.get("company_id") else 0
+            safe_user = {
+                "id": user["id"],
+                "company_id": user["company_id"],
+                "email": user["email"],
+                "full_name": user["full_name"],
+                "role": user["role"],
+                "is_active": user["is_active"],
+                "created_at": user.get("created_at"),
+                "company": {
+                    "id": company["id"],
+                    "name": company["name"],
+                    "slug": company["slug"],
+                    "plan": company.get("plan", "team"),
+                    "max_seats": company.get("max_seats", 10),
+                    "used_seats": used_seats,
+                    "remaining_seats": max(0, company.get("max_seats", 10) - used_seats),
+                    "status": company.get("status", "active")
+                } if company else None
+            }
+            self._send_json({"logged_in": True, "user": safe_user})
+            return
+
+        elif path == "/api/company/details":
+            user = self._get_current_user()
+            if not user or not user.get("company_id"):
+                self._send_json({"error": "Unauthorized"}, status=401)
+                return
+            company = saas_db.get_company_by_id(user["company_id"])
+            if not company:
+                self._send_json({"error": "Company not found"}, status=404)
+                return
+            used = saas_db.get_company_seat_count(company["id"])
+            company["used_seats"] = used
+            company["remaining_seats"] = max(0, company.get("max_seats", 10) - used)
+            self._send_json({"status": "ok", "company": company})
+            return
+
+        elif path == "/api/company/users":
+            user = self._get_current_user()
+            if not user:
+                self._send_json({"error": "Unauthorized"}, status=401)
+                return
+
+            target_company_id = user["company_id"]
+            if user["role"] == "superadmin" and params.get("company_id"):
+                target_company_id = params.get("company_id")[0]
+
+            if user["role"] not in ("superadmin", "company_admin") and user["company_id"] != target_company_id:
+                self._send_json({"error": "Forbidden: Requires Company Admin privileges"}, status=403)
+                return
+
+            company = saas_db.get_company_by_id(target_company_id)
+            members = saas_db.get_users_by_company(target_company_id)
+            base_url = self._get_base_url()
+            for m in members:
+                if m.get("invite_token"):
+                    m["activation_url"] = f"{base_url}/#activate?token={m['invite_token']}"
+                else:
+                    m["activation_url"] = None
+
+            used = saas_db.get_company_seat_count(target_company_id)
+            max_seats = company.get("max_seats", 10) if company else 10
+            self._send_json({
+                "status": "ok",
+                "company": company,
+                "used_seats": used,
+                "max_seats": max_seats,
+                "remaining_seats": max(0, max_seats - used),
+                "users": members
+            })
+            return
+
+        elif path == "/api/admin/companies":
+            user = self._get_current_user()
+            if not user or user["role"] != "superadmin":
+                self._send_json({"error": "Forbidden: Requires SuperAdmin"}, status=403)
+                return
+            companies = saas_db.get_all_companies()
+            self._send_json({"status": "ok", "companies": companies})
+            return
 
         elif path == "/api/suggested_folders":
             workspace_dir = os.path.dirname(os.path.abspath(__file__))
@@ -5345,6 +6809,334 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     "saved_count": len([s for s in saved_files if s.get("status") == "ok"]),
                     "files": saved_files
                 }).encode("utf-8"))
+            elif parsed.path == "/api/auth/login":
+                email = data.get("email", "").strip().lower()
+                password = data.get("password", "")
+                user = saas_db.get_user_by_email(email)
+                if not user:
+                    self._send_json({"status": "error", "message": "Invalid email or password."}, status=401)
+                    return
+                if not user.get("is_active"):
+                    self._send_json({"status": "error", "message": "This account is inactive. Please contact your company administrator."}, status=403)
+                    return
+                if not user.get("password_hash") or not user.get("salt"):
+                    self._send_json({"status": "error", "message": "Account has not been activated yet. Please click the invitation link sent to your email to set your password."}, status=400)
+                    return
+                if not saas_auth.verify_password(password, user["password_hash"], user["salt"]):
+                    self._send_json({"status": "error", "message": "Invalid email or password."}, status=401)
+                    return
+
+                token = saas_db.create_session(user["id"])
+                company = saas_db.get_company_by_id(user["company_id"])
+                used_seats = saas_db.get_company_seat_count(user["company_id"]) if user.get("company_id") else 0
+                safe_user = {
+                    "id": user["id"],
+                    "company_id": user["company_id"],
+                    "email": user["email"],
+                    "full_name": user["full_name"],
+                    "role": user["role"],
+                    "company": {
+                        "id": company["id"],
+                        "name": company["name"],
+                        "slug": company["slug"],
+                        "plan": company.get("plan", "team"),
+                        "max_seats": company.get("max_seats", 10),
+                        "used_seats": used_seats,
+                        "remaining_seats": max(0, company.get("max_seats", 10) - used_seats),
+                        "status": company.get("status", "active")
+                    } if company else None
+                }
+                cookie = f"session_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+                self._send_json({"status": "ok", "token": token, "user": safe_user}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/auth/logout":
+                token = None
+                auth_header = self.headers.get("Authorization", "")
+                if auth_header.startswith("Bearer "):
+                    token = auth_header.split(" ", 1)[1].strip()
+                if not token:
+                    cookie_header = self.headers.get("Cookie", "")
+                    if "session_token=" in cookie_header:
+                        m = re.search(r'session_token=([^;]+)', cookie_header)
+                        if m:
+                            token = m.group(1).strip()
+                if token:
+                    saas_db.delete_session(token)
+                cookie = "session_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+                self._send_json({"status": "ok"}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/auth/activate":
+                invite_token = data.get("token", "").strip()
+                password = data.get("password", "")
+                full_name = data.get("full_name", "").strip()
+                if not invite_token:
+                    self._send_json({"status": "error", "message": "Missing activation token."}, status=400)
+                    return
+                if not password or len(password) < 6:
+                    self._send_json({"status": "error", "message": "Password must be at least 6 characters long."}, status=400)
+                    return
+
+                user = saas_db.get_user_by_invite_token(invite_token)
+                if not user:
+                    self._send_json({"status": "error", "message": "Invalid or expired activation link."}, status=404)
+                    return
+
+                p_hash, salt = saas_auth.hash_password(password)
+                saas_db.activate_user(user["id"], p_hash, salt, full_name=full_name if full_name else None)
+                token = saas_db.create_session(user["id"])
+                company = saas_db.get_company_by_id(user["company_id"])
+                used_seats = saas_db.get_company_seat_count(user["company_id"]) if user.get("company_id") else 0
+                safe_user = {
+                    "id": user["id"],
+                    "company_id": user["company_id"],
+                    "email": user["email"],
+                    "full_name": full_name or user["full_name"],
+                    "role": user["role"],
+                    "company": {
+                        "id": company["id"],
+                        "name": company["name"],
+                        "slug": company["slug"],
+                        "plan": company.get("plan", "team"),
+                        "max_seats": company.get("max_seats", 10),
+                        "used_seats": used_seats,
+                        "remaining_seats": max(0, company.get("max_seats", 10) - used_seats),
+                        "status": company.get("status", "active")
+                    } if company else None
+                }
+                cookie = f"session_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+                self._send_json({"status": "ok", "token": token, "user": safe_user}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/company/users/invite":
+                user = self._get_current_user()
+                if not user or user["role"] not in ("superadmin", "company_admin"):
+                    self._send_json({"status": "error", "message": "Forbidden: Admin privileges required."}, status=403)
+                    return
+
+                company_id = data.get("company_id") or user["company_id"]
+                if user["role"] != "superadmin":
+                    company_id = user["company_id"]
+
+                company = saas_db.get_company_by_id(company_id)
+                if not company:
+                    self._send_json({"status": "error", "message": "Company not found."}, status=404)
+                    return
+
+                used_seats = saas_db.get_company_seat_count(company_id)
+                max_seats = company.get("max_seats", 10)
+                if used_seats >= max_seats:
+                    self._send_json({
+                        "status": "error",
+                        "message": f"Seat limit reached for {company['name']} ({used_seats}/{max_seats} used). Please upgrade company subscription to add more members."
+                    }, status=400)
+                    return
+
+                email = data.get("email", "").strip().lower()
+                name = data.get("full_name", "").strip() or email.split("@")[0].title()
+                role = data.get("role", "member")
+                if role not in ("member", "company_admin"):
+                    role = "member"
+
+                if not email or "@" not in email:
+                    self._send_json({"status": "error", "message": "A valid email address is required."}, status=400)
+                    return
+
+                if saas_db.get_user_by_email(email):
+                    self._send_json({"status": "error", "message": f"User with email '{email}' already exists."}, status=400)
+                    return
+
+                invite_token = saas_auth.generate_invite_token()
+                new_user = saas_db.create_user(company_id, email, name, role, invite_token)
+                base_url = self._get_base_url()
+                email_res = saas_email.send_invitation_email(email, name, company["name"], invite_token, base_url)
+
+                self._send_json({
+                    "status": "ok",
+                    "user": new_user,
+                    "activation_url": f"{base_url}/#activate?token={invite_token}",
+                    "email_status": email_res,
+                    "used_seats": saas_db.get_company_seat_count(company_id),
+                    "max_seats": max_seats
+                })
+                return
+
+            elif parsed.path == "/api/company/users/bulk_invite":
+                user = self._get_current_user()
+                if not user or user["role"] not in ("superadmin", "company_admin"):
+                    self._send_json({"status": "error", "message": "Forbidden: Admin privileges required."}, status=403)
+                    return
+
+                company_id = data.get("company_id") or user["company_id"]
+                if user["role"] != "superadmin":
+                    company_id = user["company_id"]
+
+                company = saas_db.get_company_by_id(company_id)
+                if not company:
+                    self._send_json({"status": "error", "message": "Company not found."}, status=404)
+                    return
+
+                raw_text = data.get("raw_text", "")
+                parsed_users = saas_auth.parse_bulk_user_input(raw_text)
+                if not parsed_users:
+                    self._send_json({"status": "error", "message": "No valid user emails found in provided text."}, status=400)
+                    return
+
+                used_seats = saas_db.get_company_seat_count(company_id)
+                max_seats = company.get("max_seats", 10)
+                available_seats = max(0, max_seats - used_seats)
+
+                added = []
+                skipped = []
+                base_url = self._get_base_url()
+
+                for item in parsed_users:
+                    em = item["email"]
+                    nm = item["full_name"]
+                    rl = item.get("role", "member")
+                    if available_seats <= 0:
+                        skipped.append({"email": em, "name": nm, "reason": f"Seat quota reached ({max_seats} max seats)"})
+                        continue
+                    if saas_db.get_user_by_email(em):
+                        skipped.append({"email": em, "name": nm, "reason": "User with this email already exists"})
+                        continue
+
+                    inv_tok = saas_auth.generate_invite_token()
+                    nu = saas_db.create_user(company_id, em, nm, rl, inv_tok)
+                    email_res = saas_email.send_invitation_email(em, nm, company["name"], inv_tok, base_url)
+                    available_seats -= 1
+                    added.append({
+                        "id": nu["id"],
+                        "email": em,
+                        "full_name": nm,
+                        "role": rl,
+                        "activation_url": f"{base_url}/#activate?token={inv_tok}",
+                        "email_simulated": email_res.get("simulated", False)
+                    })
+
+                self._send_json({
+                    "status": "ok",
+                    "added": added,
+                    "skipped": skipped,
+                    "used_seats": saas_db.get_company_seat_count(company_id),
+                    "max_seats": max_seats,
+                    "remaining_seats": max(0, max_seats - saas_db.get_company_seat_count(company_id))
+                })
+                return
+
+            elif parsed.path == "/api/company/users/revoke":
+                user = self._get_current_user()
+                if not user or user["role"] not in ("superadmin", "company_admin"):
+                    self._send_json({"status": "error", "message": "Forbidden: Admin privileges required."}, status=403)
+                    return
+
+                target_user_id = data.get("user_id")
+                if not target_user_id:
+                    self._send_json({"status": "error", "message": "Missing user_id parameter."}, status=400)
+                    return
+
+                target_user = saas_db.get_user_by_id(target_user_id)
+                if not target_user:
+                    self._send_json({"status": "error", "message": "User not found."}, status=404)
+                    return
+
+                if target_user["id"] == user["id"]:
+                    self._send_json({"status": "error", "message": "You cannot revoke your own account."}, status=400)
+                    return
+
+                if user["role"] != "superadmin" and target_user["company_id"] != user["company_id"]:
+                    self._send_json({"status": "error", "message": "Unauthorized to manage users from another company."}, status=403)
+                    return
+
+                company_id = target_user["company_id"]
+                saas_db.delete_user(target_user_id)
+                used_seats = saas_db.get_company_seat_count(company_id)
+                self._send_json({
+                    "status": "ok",
+                    "message": f"User {target_user['email']} has been removed and seat freed.",
+                    "used_seats": used_seats
+                })
+                return
+
+            elif parsed.path == "/api/company/users/resend_invite":
+                user = self._get_current_user()
+                if not user or user["role"] not in ("superadmin", "company_admin"):
+                    self._send_json({"status": "error", "message": "Forbidden: Admin privileges required."}, status=403)
+                    return
+
+                target_user_id = data.get("user_id")
+                target_user = saas_db.get_user_by_id(target_user_id)
+                if not target_user:
+                    self._send_json({"status": "error", "message": "User not found."}, status=404)
+                    return
+
+                if user["role"] != "superadmin" and target_user["company_id"] != user["company_id"]:
+                    self._send_json({"status": "error", "message": "Unauthorized."}, status=403)
+                    return
+
+                company = saas_db.get_company_by_id(target_user["company_id"])
+                inv_tok = saas_auth.generate_invite_token()
+                now = datetime.datetime.now(datetime.timezone.utc)
+                exp = (now + datetime.timedelta(days=7)).isoformat()
+                saas_db.execute_query("UPDATE users SET invite_token = ?, invite_expires_at = ? WHERE id = ?", (inv_tok, exp, target_user_id), commit=True)
+                base_url = self._get_base_url()
+                email_res = saas_email.send_invitation_email(target_user["email"], target_user["full_name"], company["name"], inv_tok, base_url)
+                self._send_json({
+                    "status": "ok",
+                    "activation_url": f"{base_url}/#activate?token={inv_tok}",
+                    "email_status": email_res
+                })
+                return
+
+            elif parsed.path == "/api/admin/companies/create":
+                user = self._get_current_user()
+                if not user or user["role"] != "superadmin":
+                    self._send_json({"status": "error", "message": "Forbidden: SuperAdmin required."}, status=403)
+                    return
+
+                name = data.get("name", "").strip()
+                plan = data.get("plan", "team")
+                max_seats = int(data.get("max_seats", 10))
+                if not name:
+                    self._send_json({"status": "error", "message": "Company name is required."}, status=400)
+                    return
+
+                comp = saas_db.create_company(name=name, plan=plan, max_seats=max_seats)
+
+                admin_email = data.get("admin_email", "").strip().lower()
+                admin_name = data.get("admin_name", "").strip() or "Company Admin"
+                admin_user = None
+                activation_url = None
+                if admin_email and "@" in admin_email:
+                    if not saas_db.get_user_by_email(admin_email):
+                        inv_tok = saas_auth.generate_invite_token()
+                        admin_user = saas_db.create_user(comp["id"], admin_email, admin_name, role="company_admin", invite_token=inv_tok)
+                        base_url = self._get_base_url()
+                        saas_email.send_invitation_email(admin_email, admin_name, comp["name"], inv_tok, base_url)
+                        activation_url = f"{base_url}/#activate?token={inv_tok}"
+
+                self._send_json({
+                    "status": "ok",
+                    "company": comp,
+                    "admin_user": admin_user,
+                    "activation_url": activation_url
+                })
+                return
+
+            elif parsed.path == "/api/admin/companies/update_plan":
+                user = self._get_current_user()
+                if not user or user["role"] != "superadmin":
+                    self._send_json({"status": "error", "message": "Forbidden: SuperAdmin required."}, status=403)
+                    return
+
+                cid = data.get("company_id")
+                plan = data.get("plan", "team")
+                max_seats = int(data.get("max_seats", 10))
+                status = data.get("status", "active")
+                updated = saas_db.update_company_plan(cid, plan, max_seats, status)
+                self._send_json({"status": "ok", "company": updated})
+                return
             else:
                 self.send_response(404)
                 self.send_header("Content-Type", "application/json")
@@ -5375,6 +7167,13 @@ def launch_studio(port: int = None):
         print(f"[Studio] Startup cleanup complete: freed {startup_clean.get('freed_mb', 0)} MB disk space & RAM cache.")
     except Exception as e:
         print(f"[Studio] Startup cleanup note: {e}")
+
+    # Initialize multi-tenant SaaS database (PostgreSQL / SQLite fallback)
+    try:
+        saas_db.init_db()
+        print("[Studio] Multi-tenant SaaS database initialized.")
+    except Exception as e:
+        print(f"[Studio] Database init error: {e}")
 
     ports_to_try = [target_port] if env_port else [target_port, 8081, 8082, 8888, 5050]
 

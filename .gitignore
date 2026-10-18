@@ -23,5 +23,7 @@ Thumbs.db
 # Output and temp files
 *_edited/
 *.zip
+*.db
+.venv
 input_photos/*
 !input_photos/.gitkeep
