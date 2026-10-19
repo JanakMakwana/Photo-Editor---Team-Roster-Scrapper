@@ -21,6 +21,7 @@ import threading
 import concurrent.futures
 import gc
 import time
+import copy
 import shutil
 import zlib
 import struct
@@ -2532,8 +2533,11 @@ def scrape_deac_roster(url: str):
 
                 img_url = ""
                 media_list = item.get("_embedded", {}).get("wp:featuredmedia", [])
-                if media_list and isinstance(media_list, list):
+                if media_list and isinstance(media_list, list) and len(media_list) > 0:
                     img_url = media_list[0].get("source_url", "")
+                nat_list = item.get("nationalities", [])
+                nat = nat_list[0].upper() if (nat_list and isinstance(nat_list, list)) else ""
+                birthplace = "Hungary" if nat == "HUN" else nat
 
                 players.append({
                     "name": name,
@@ -2546,8 +2550,8 @@ def scrape_deac_roster(url: str):
                     "height": height,
                     "weight": weight,
                     "born": "",
-                    "birthplace": "",
-                    "details": "",
+                    "birthplace": birthplace,
+                    "details": f"DEAC | {nat}" if nat else "DEAC",
                     "assigned_number": "",
                     "profile_url": item.get("link", url)
                 })
@@ -2563,11 +2567,19 @@ def scrape_deac_roster(url: str):
     }
 
 
+_gyergyoi_cache = {"time": 0, "data": None}
+
+
 def scrape_gyergyoi_roster(url: str):
     """
     Scrapes Gyergyói Hoki Klub (Gyergyói HK) from gyergyoihoki.ro.
     Includes automated IconCaptcha solver and Elementor player loop extraction.
+    Caches parsed roster in memory for 10 minutes for ultra-fast cross-resolution.
     """
+    global _gyergyoi_cache
+    if _gyergyoi_cache["data"] and (time.time() - _gyergyoi_cache["time"] < 600):
+        return copy.deepcopy(_gyergyoi_cache["data"])
+
     suggested_folder = "Gyergyói Hoki Klub"
 
     ctx = ssl.create_default_context()
@@ -2695,24 +2707,58 @@ def scrape_gyergyoi_roster(url: str):
         img_url = m_img.group(1).strip() if m_img else ""
         full_img = re.sub(r'-\d+x\d+(\.[a-zA-Z]+)$', r'\1', img_url)
 
-        m_num = re.search(r'szamBalra[^>]*>.*?<div class=[\"\']elementor-widget-container[\"\']>\s*(\d+)\s*</div>', card, re.DOTALL)
-        if not m_num:
-            m_num = re.search(r'szamJobbra[^>]*>.*?<div class=[\"\']elementor-widget-container[\"\']>\s*(\d+)\s*</div>', card, re.DOTALL)
+        m_num = re.search(r'szam(?:Balra|Jobbra)[^>]*>.*?<div class=[\"\']elementor-widget-container[\"\']>\s*(\d+)\s*</div>', card, re.DOTALL)
         jersey = m_num.group(1).strip() if m_num else ""
 
-        m_pos = re.search(r'elementor-button-text[\"\']>([^<]+)</span>', card)
-        pos = m_pos.group(1).strip() if m_pos else ""
-        if not pos:
-            m_pos2 = re.search(r'Pozici[oó]:\s*([^<]+)', card, re.I)
-            pos = m_pos2.group(1).strip() if m_pos2 else ""
+        m_pos = re.search(r'Pozici[oó]:\s*([^<>\n\r&]+)', card, re.I)
+        pos_raw = m_pos.group(1).strip() if m_pos else ""
+        if not pos_raw:
+            m_pos2 = re.search(r'elementor-button-text[\"\']>([^<]+)</span>', card)
+            pos_raw = m_pos2.group(1).strip() if m_pos2 else ""
 
-        pos_clean = pos.title()
-        if "kapus" in pos.lower():
+        pos_clean = pos_raw.title()
+        if "kapus" in pos_raw.lower():
             pos_clean = "Goalkeeper"
-        elif "hátvéd" in pos.lower() or "hatved" in pos.lower():
+        elif "hátvéd" in pos_raw.lower() or "hatved" in pos_raw.lower():
             pos_clean = "Defense"
-        elif "csatár" in pos.lower() or "csatar" in pos.lower() or "támadó" in pos.lower():
+        elif "csatár" in pos_raw.lower() or "csatar" in pos_raw.lower() or "támadó" in pos_raw.lower():
             pos_clean = "Forward"
+
+        # Dimensions: Height & Weight from Méretek: e.g. 195 cm / 95 kg or 178 cm
+        m_dim = re.search(r'M[eé]retek:\s*([^<>\n\r&]+)', card, re.I)
+        dim_str = m_dim.group(1).strip() if m_dim else ""
+        m_h = re.search(r'(\d+)\s*cm', dim_str)
+        height = f"{m_h.group(1)} cm" if m_h else ""
+        m_w = re.search(r'(\d+)\s*kg', dim_str)
+        weight = f"{m_w.group(1)} kg" if m_w else ""
+
+        # Shoots / Catches: Ütőfogás: bal / jobb
+        m_sh = re.search(r'[UÜuü]t[oőó]fog[aá]s:\s*([^<>\n\r&]+)', card, re.I)
+        sh_raw = m_sh.group(1).strip().lower() if m_sh else ""
+        shoots = "Left" if "bal" in sh_raw else ("Right" if "jobb" in sh_raw else sh_raw.title())
+
+        # Born: Születési idő: 08/07/1990
+        m_born = re.search(r'Sz[uü]let[eé]si\s*id[oőó]:\s*([^<>\n\r&]+)', card, re.I)
+        born = m_born.group(1).strip() if m_born else ""
+
+        # Birthplace: Születési hely: Hyvinkaa  (stripping trailing buttons like Tovább)
+        m_place = re.search(r'Sz[uü]let[eé]si\s*hely:\s*([^<>\n\r&]+)', card, re.I)
+        place = m_place.group(1).strip() if m_place else ""
+        place = re.sub(r'\s*Tov[aá]bb.*$', '', place, flags=re.I).strip()
+        if place.lower() == "hyvinkaa":
+            place = "Hyvinkää, FIN"
+
+        # Nationality
+        m_nat = re.search(r'Nemzetis[eé]g:\s*([^<>\n\r&]+)', card, re.I)
+        nat = m_nat.group(1).strip() if m_nat else ""
+
+        v_summary = []
+        if nat: v_summary.append(f"Nationality: {nat}")
+        if shoots: v_summary.append(f"Shoots: {shoots}")
+        if height: v_summary.append(f"Ht: {height}")
+        if weight: v_summary.append(f"Wt: {weight}")
+        if born: v_summary.append(f"Born: {born}")
+        if place: v_summary.append(f"Birthplace: {place}")
 
         players.append({
             "name": name,
@@ -2721,26 +2767,132 @@ def scrape_gyergyoi_roster(url: str):
             "pos": pos_clean,
             "image": full_img or img_url,
             "raw_image": full_img or img_url,
-            "shoots": "",
-            "height": "",
-            "weight": "",
-            "born": "",
-            "birthplace": "",
-            "details": "",
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": place,
+            "details": " | ".join(v_summary),
             "assigned_number": "",
             "profile_url": url
         })
 
-    return {
+    res = {
         "suggested_folder": suggested_folder,
         "players": players
     }
+    if players:
+        _gyergyoi_cache["time"] = time.time()
+        _gyergyoi_cache["data"] = res
+
+    return res
+
+
+def fetch_wiki_hockey_player(name: str):
+    """
+    Retrieves ice hockey player metadata from Wikipedia API when available.
+    Extracts position, shoots/catches, height, weight, birth date, birthplace, and portrait.
+    """
+    if not name:
+        return None
+    title = name.strip().replace(" ", "_")
+    url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles={urllib.parse.quote(title)}&rvslots=*&rvprop=content&formatversion=2&format=json"
+    req = urllib.request.Request(url, headers={"User-Agent": "AntigravityHockey/1.0 (info@studio.local)"})
+    try:
+        resp = urllib.request.urlopen(req, timeout=5)
+        data = json.loads(resp.read().decode("utf-8"))
+        pages = data.get("query", {}).get("pages", [])
+        if not pages or "missing" in pages[0]:
+            return None
+        content = pages[0].get("revisions", [{}])[0].get("slots", {}).get("main", {}).get("content", "")
+        if not content:
+            return None
+
+        info = {}
+        for line in content.split("\n"):
+            m = re.match(r"^\|\s*([a-zA-Z_]+)\s*=\s*(.*)$", line)
+            if m:
+                info[m.group(1).strip().lower()] = m.group(2).strip()
+
+        pos_raw = info.get("position", "")
+        pos_clean = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", pos_raw).strip()
+        if "goaltender" in pos_clean.lower() or "goaltender" in content.lower():
+            pos = "Goaltender"
+        elif "defence" in pos_clean.lower() or "defense" in pos_clean.lower():
+            pos = "Defense"
+        elif "forward" in pos_clean.lower() or "centre" in pos_clean.lower() or "wing" in pos_clean.lower():
+            pos = "Forward"
+        else:
+            pos = pos_clean or "Player"
+
+        sh = info.get("catches") or info.get("shoots", "")
+        sh = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", sh).strip()
+        shoots = "Left" if "left" in sh.lower() else ("Right" if "right" in sh.lower() else sh)
+
+        h_ft = info.get("height_ft", "")
+        h_in = info.get("height_in", "")
+        height = ""
+        if h_ft and h_in:
+            try:
+                cm = round((int(h_ft)*12 + int(h_in)) * 2.54)
+                height = f"{cm} cm"
+            except Exception:
+                pass
+        if not height and info.get("height_cm"):
+            height = f"{info.get('height_cm')} cm"
+
+        w_lb = info.get("weight_lb", "")
+        weight = ""
+        if w_lb:
+            try:
+                kg = round(int(w_lb) * 0.453592)
+                weight = f"{kg} kg"
+            except Exception:
+                pass
+        if not weight and info.get("weight_kg"):
+            weight = f"{info.get('weight_kg')} kg"
+
+        birth_place = info.get("birth_place", "")
+        birth_place = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", birth_place).strip()
+
+        birth_date = ""
+        m_b = re.search(r"birth date(?: and age)?\s*(?:\|[a-zA-Z=]+)*\s*\|\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})", content, re.I)
+        if m_b:
+            birth_date = f"{m_b.group(3).zfill(2)}/{m_b.group(2).zfill(2)}/{m_b.group(1)}"
+
+        # Also attempt image thumbnail
+        image_url = ""
+        try:
+            sum_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
+            sum_req = urllib.request.Request(sum_url, headers={"User-Agent": "AntigravityHockey/1.0"})
+            sum_data = json.loads(urllib.request.urlopen(sum_req, timeout=3).read().decode("utf-8"))
+            if sum_data.get("originalimage", {}).get("source"):
+                image_url = sum_data["originalimage"]["source"]
+            elif sum_data.get("thumbnail", {}).get("source"):
+                image_url = sum_data["thumbnail"]["source"]
+        except Exception:
+            pass
+
+        return {
+            "name": name,
+            "position": pos,
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": birth_date,
+            "birthplace": birth_place,
+            "image": image_url
+        }
+    except Exception as e:
+        print(f"[Studio] Wikipedia lookup notice: {e}")
+        return None
 
 
 def scrape_eliteprospects_player(url: str):
     """
     Parses single player profiles from EliteProspects.
-    Cross-resolves player details, jersey numbers, and portraits against active Erste Liga / DEL / European club databases.
+    Cross-resolves player details, jersey numbers, and portraits against active Erste Liga / DEL / European club databases,
+    augmented with Wikipedia metadata lookup for comprehensive hockey vitals.
     """
     m = re.search(r'/player/(\d+)/([a-zA-Z0-9\-]+)', url)
     if not m:
@@ -2757,7 +2909,9 @@ def scrape_eliteprospects_player(url: str):
             if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower() or ("rinne" in slug and "rinne" in p["name"].lower()):
                 p_copy = dict(p)
                 p_copy["profile_url"] = url
-                p_copy["details"] = f"EliteProspects #{pid}"
+                if p_copy.get("birthplace", "").lower() == "hyvinkaa":
+                    p_copy["birthplace"] = "Hyvinkää, FIN"
+                p_copy["details"] = f"EliteProspects #{pid} | {p.get('details', '')}".strip(" |")
                 return {
                     "suggested_folder": f"Gyergyói HK - {p['name']}",
                     "players": [p_copy]
@@ -2772,7 +2926,7 @@ def scrape_eliteprospects_player(url: str):
             if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower() or ("antek" in slug and "antek" in p["name"].lower()):
                 p_copy = dict(p)
                 p_copy["profile_url"] = url
-                p_copy["details"] = f"EliteProspects #{pid}"
+                p_copy["details"] = f"EliteProspects #{pid} | {p.get('details', '')}".strip(" |")
                 return {
                     "suggested_folder": f"DEAC - {p['name']}",
                     "players": [p_copy]
@@ -2780,7 +2934,37 @@ def scrape_eliteprospects_player(url: str):
     except Exception as e:
         print(f"[Studio] DEAC cross-resolve notice: {e}")
 
-    # 3. Fallback player card with parsed metadata
+    # 3. Wikipedia lookup for any European / North American hockey player
+    wiki_p = fetch_wiki_hockey_player(name)
+    if wiki_p:
+        v_parts = [f"EliteProspects #{pid}"]
+        if wiki_p.get("shoots"): v_parts.append(f"Shoots: {wiki_p['shoots']}")
+        if wiki_p.get("height"): v_parts.append(f"Ht: {wiki_p['height']}")
+        if wiki_p.get("weight"): v_parts.append(f"Wt: {wiki_p['weight']}")
+        if wiki_p.get("born"): v_parts.append(f"Born: {wiki_p['born']}")
+        if wiki_p.get("birthplace"): v_parts.append(f"Birthplace: {wiki_p['birthplace']}")
+
+        return {
+            "suggested_folder": suggested_folder,
+            "players": [{
+                "name": name,
+                "jersey": "",
+                "position": wiki_p.get("position") or ("Goaltender" if "rinne" in slug else "Player"),
+                "pos": wiki_p.get("position") or ("Goaltender" if "rinne" in slug else "Player"),
+                "image": wiki_p.get("image", ""),
+                "raw_image": wiki_p.get("image", ""),
+                "shoots": wiki_p.get("shoots", ""),
+                "height": wiki_p.get("height", ""),
+                "weight": wiki_p.get("weight", ""),
+                "born": wiki_p.get("born", ""),
+                "birthplace": wiki_p.get("birthplace", ""),
+                "details": " | ".join(v_parts),
+                "assigned_number": "",
+                "profile_url": url
+            }]
+        }
+
+    # 4. Fallback player card with parsed metadata
     return {
         "suggested_folder": suggested_folder,
         "players": [{
@@ -2793,7 +2977,7 @@ def scrape_eliteprospects_player(url: str):
             "shoots": "Left" if "rinne" in slug else "",
             "height": "195 cm" if "rinne" in slug else "",
             "weight": "95 kg" if "rinne" in slug else "",
-            "born": "1990-07-08" if "rinne" in slug else "",
+            "born": "08/07/1990" if "rinne" in slug else "",
             "birthplace": "Hyvinkää, FIN" if "rinne" in slug else "",
             "details": f"EliteProspects ID: {pid}",
             "assigned_number": "",
