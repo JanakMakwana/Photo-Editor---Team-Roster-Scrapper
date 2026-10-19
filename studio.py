@@ -5670,6 +5670,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
           superAdminBtn.style.display = (currentUser.role === 'superadmin') ? 'inline-flex' : 'none';
         }
 
+        const workbenchTeamBtn = document.getElementById('btn-workbench-team');
+        if (workbenchTeamBtn) {
+          workbenchTeamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
+        }
+
+        const workbenchTeamBtn = document.getElementById('btn-workbench-team');
+        if (workbenchTeamBtn) {
+          workbenchTeamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
+        }
+
         if (currentCompany) {
           if (companyWrapper) companyWrapper.style.display = 'inline-flex';
           const compNameEl = document.getElementById('nav-company-name');
@@ -5998,6 +6008,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
     async function openTeamModal(tab = 'bulk') {
       const modal = document.getElementById('modal-team-mgmt');
       if (!modal) return;
+
+      const isPrivilegedAdmin = currentUser && (currentUser.role === 'superadmin' || currentUser.role === 'company_admin');
+
+      // Regular members can only view the member directory; hide invite & bulk tabs
+      const bulkTabBtn = document.getElementById('tab-team-bulk');
+      const singleTabBtn = document.getElementById('tab-team-single');
+      if (bulkTabBtn) bulkTabBtn.style.display = isPrivilegedAdmin ? 'inline-flex' : 'none';
+      if (singleTabBtn) singleTabBtn.style.display = isPrivilegedAdmin ? 'inline-flex' : 'none';
+
+      if (!isPrivilegedAdmin) {
+        tab = 'members';
+      }
+
       modal.style.display = 'flex';
       switchTeamTab(tab);
       await loadTeamData();
@@ -6009,6 +6032,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     function switchTeamTab(tab) {
+      const isPrivilegedAdmin = currentUser && (currentUser.role === 'superadmin' || currentUser.role === 'company_admin');
+      if (!isPrivilegedAdmin && tab !== 'members') {
+        tab = 'members';
+      }
+
       const tabs = ['bulk', 'single', 'members'];
       tabs.forEach(t => {
         const btn = document.getElementById(`tab-team-${t}`);
@@ -6061,7 +6089,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       }
     }
 
-    function renderTeamMembersTable(members) {
+        function renderTeamMembersTable(members) {
       const tbody = document.getElementById('team-members-tbody');
       if (!tbody) return;
       tbody.innerHTML = '';
@@ -6070,6 +6098,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:20px;">No members found in this company.</td></tr>';
         return;
       }
+
+      const isSuperAdmin = currentUser && currentUser.role === 'superadmin';
+      const isCompanyAdmin = currentUser && (currentUser.role === 'company_admin' || currentUser.role === 'admin');
+      const isPrivilegedAdmin = isSuperAdmin || isCompanyAdmin;
 
       members.forEach(m => {
         const tr = document.createElement('tr');
@@ -6080,21 +6112,40 @@ HTML_PAGE = r"""<!DOCTYPE html>
           : '<span class="user-role-tag role-member">Member</span>');
 
         const statusBadge = isPending
-          ? '<span style="font-size:0.7rem; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); color:#fbbf24; padding:2px 8px; border-radius:10px; font-weight:700;">⏳ Pending Invite</span>'
-          : '<span style="font-size:0.7rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:2px 8px; border-radius:10px; font-weight:700;">✅ Active</span>';
+          ? '<span style="font-size:0.7rem; background:rgba(245,158,11,0.15); border:1px solid rgba(245,158,11,0.3); color:#b45309; padding:2px 8px; border-radius:10px; font-weight:700;">Pending Invite</span>'
+          : '<span style="font-size:0.7rem; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); color:#047857; padding:2px 8px; border-radius:10px; font-weight:700;">Active</span>';
 
         let actionHtml = '';
-        if (m.activation_url) {
+
+        // 1. Invites & Activation Links: ONLY privileged admins can view or resend invites!
+        if (isPrivilegedAdmin && m.activation_url) {
           actionHtml += `<button class="btn-copy-link" onclick="copyActivationUrl('${m.activation_url}')" title="Copy password activation link to clipboard">Copy Invite Link</button> `;
-          actionHtml += `<button class="btn btn-secondary" onclick="resendMemberInvite('${m.id}')" style="font-size:0.72rem; padding:4px 8px;" title="Resend invitation email">🔄 Resend</button> `;
+          actionHtml += `<button class="btn btn-secondary" onclick="resendMemberInvite('${m.id}')" style="font-size:0.72rem; padding:4px 8px;" title="Resend invitation email">Resend</button> `;
         }
-        if (!isSelf && m.role !== 'superadmin') {
-          actionHtml += `<button class="btn-revoke-user" onclick="revokeCompanyMember('${m.id}', '${m.email}')" title="Revoke membership and free seat">❌ Remove</button>`;
+
+        // 2. Removal / Revocation Hierarchy:
+        // - Regular members can NEVER remove ANYONE!
+        // - Company Admins can ONLY remove regular 'member' users. They can NEVER remove fellow administrators or superadmins!
+        // - SuperAdmins can remove company admins and members, but never themselves!
+        // - No user can ever remove themselves!
+        let canRemove = false;
+        if (!isSelf && isPrivilegedAdmin) {
+          if (isSuperAdmin) {
+            canRemove = true;
+          } else if (isCompanyAdmin) {
+            canRemove = (m.role === 'member');
+          }
+        }
+
+        if (canRemove) {
+          actionHtml += `<button class="btn-revoke-user" onclick="revokeCompanyMember('${m.id}', '${escapeHtml(m.email)}')" title="Revoke membership and free seat">Remove</button>`;
+        } else if (!actionHtml) {
+          actionHtml = `<span style="font-size:0.74rem; color:var(--text-muted); font-style:italic;">Protected</span>`;
         }
 
         tr.innerHTML = `
           <td>
-            <div style="font-weight:700; color:#fff;">${escapeHtml(m.full_name || m.email)} ${isSelf ? '<span style="font-size:0.7rem; color:var(--primary);">(You)</span>' : ''}</div>
+            <div style="font-weight:700; color:var(--text);">${escapeHtml(m.full_name || m.email)} ${isSelf ? '<span style="font-size:0.7rem; color:var(--primary); font-weight:800;">(You)</span>' : ''}</div>
             <div style="font-size:0.74rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(m.email)}</div>
           </td>
           <td>${roleBadge}</td>
@@ -6792,19 +6843,27 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             target_company_id = user["company_id"]
             if user["role"] == "superadmin" and params.get("company_id"):
                 target_company_id = params.get("company_id")[0]
-
-            if user["role"] not in ("superadmin", "company_admin") and user["company_id"] != target_company_id:
-                self._send_json({"error": "Forbidden: Requires Company Admin privileges"}, status=403)
+            elif user["company_id"] != target_company_id:
+                self._send_json({"error": "Forbidden: Cannot access members from another organization."}, status=403)
                 return
 
             company = saas_db.get_company_by_id(target_company_id)
             members = saas_db.get_users_by_company(target_company_id)
             base_url = self._get_base_url()
+            is_admin = user["role"] in ("superadmin", "company_admin")
+
+            cleaned_members = []
             for m in members:
-                if m.get("invite_token"):
-                    m["activation_url"] = f"{base_url}/#activate?token={m['invite_token']}"
+                m_dict = dict(m)
+                m_dict.pop("password_hash", None)
+                m_dict.pop("salt", None)
+                if is_admin and m_dict.get("invite_token"):
+                    m_dict["activation_url"] = f"{base_url}/#activate?token={m_dict['invite_token']}"
                 else:
-                    m["activation_url"] = None
+                    m_dict["activation_url"] = None
+                    if not is_admin:
+                        m_dict.pop("invite_token", None)
+                cleaned_members.append(m_dict)
 
             used = saas_db.get_company_seat_count(target_company_id)
             max_seats = company.get("max_seats", 10) if company else 10
@@ -6814,7 +6873,7 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 "used_seats": used,
                 "max_seats": max_seats,
                 "remaining_seats": max(0, max_seats - used),
-                "users": members
+                "users": cleaned_members
             })
             return
 
@@ -7736,7 +7795,10 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/company/users/revoke":
                 user = self._get_current_user()
                 if not user or user["role"] not in ("superadmin", "company_admin"):
-                    self._send_json({"status": "error", "message": "Forbidden: Admin privileges required."}, status=403)
+                    self._send_json({
+                        "status": "error",
+                        "message": "Forbidden: Administrator privileges required to manage team members."
+                    }, status=403)
                     return
 
                 target_user_id = data.get("user_id")
@@ -7749,13 +7811,28 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "error", "message": "User not found."}, status=404)
                     return
 
+                # Prevent self-removal
                 if target_user["id"] == user["id"]:
-                    self._send_json({"status": "error", "message": "You cannot revoke your own account."}, status=400)
+                    self._send_json({"status": "error", "message": "You cannot remove your own account."}, status=400)
                     return
 
-                if user["role"] != "superadmin" and target_user["company_id"] != user["company_id"]:
-                    self._send_json({"status": "error", "message": "Unauthorized to manage users from another company."}, status=403)
-                    return
+                # Strict Hierarchy Enforcement:
+                if user["role"] != "superadmin":
+                    # 1. Company Admin cannot touch other companies
+                    if target_user["company_id"] != user["company_id"]:
+                        self._send_json({
+                            "status": "error",
+                            "message": "Forbidden: Unauthorized to manage users from another organization."
+                        }, status=403)
+                        return
+
+                    # 2. Company Admin CANNOT remove fellow administrators or superadmins!
+                    if target_user["role"] in ("superadmin", "company_admin", "admin"):
+                        self._send_json({
+                            "status": "error",
+                            "message": "Forbidden: Company Administrators cannot remove other Administrators or SuperAdmins. Only Platform SuperAdmins can manage Administrator accounts."
+                        }, status=403)
+                        return
 
                 company_id = target_user["company_id"]
                 saas_db.delete_user(target_user_id)
