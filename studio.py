@@ -1788,14 +1788,330 @@ def scrape_hockeytech_roster(url: str) -> dict:
     return {"suggested_folder": "Hockey Team", "players": []}
 
 
+GERMAN_POSITIONS = {
+    "tor": "Goaltender",
+    "torhüter": "Goaltender",
+    "torwart": "Goaltender",
+    "goaltender": "Goaltender",
+    "goalie": "Goaltender",
+    "g": "Goaltender",
+    "verteidigung": "Defense",
+    "verteidiger": "Defense",
+    "abwehr": "Defense",
+    "defense": "Defense",
+    "d": "Defense",
+    "angriff": "Forward",
+    "sturm": "Forward",
+    "stürmer": "Forward",
+    "forward": "Forward",
+    "f": "Forward",
+    "center": "Center",
+    "flügel": "Winger",
+    "trainer": "Coach",
+    "cheftrainer": "Head Coach",
+    "co-trainer": "Assistant Coach",
+}
+
+
+def clean_eisloewen_image_url(img_url: str) -> str:
+    """Strips CDN lossy compression parameters and WordPress thumbnail dimension suffixes to return the original full-res image."""
+    if not img_url or img_url.startswith("data:"):
+        return ""
+    clean = re.sub(r'\?.*$', '', img_url.strip())
+    clean = re.sub(r'-\d+x\d+(\.[a-zA-Z0-9]+)$', r'\1', clean)
+    return clean
+
+
+def normalize_german_position(pos_str: str) -> str:
+    if not pos_str:
+        return ""
+    p_clean = pos_str.strip().lower()
+    return GERMAN_POSITIONS.get(p_clean, pos_str.strip().capitalize())
+
+
+def is_eisloewen_or_del_url(url: str) -> bool:
+    """Detects whether a URL belongs to Dresdner Eislöwen, German DEL/DEL2, or TopScorer hockey clubs."""
+    url_lower = url.lower()
+    return any(k in url_lower for k in [
+        "eisloewen.de", "eisloewen", "del-2.org", "del2.org",
+        "esvk.de", "steelers.de", "kassel-huskies.de", "ec-badnauheim.de",
+        "lausitzer-fuechse.de", "eisbaeren-regensburg.de", "starbulls.de",
+        "ev-landshut.net", "selberwoelfe.de", "blue-devils.de", "ravensburg-towerstars.de"
+    ])
+
+
+def parse_eisloewen_single_player(url: str, html: str):
+    """Scrapes an individual player profile page (e.g. https://www.eisloewen.de/player/adam-helewka/)."""
+    suggested_folder = "Dresdner Eislöwen"
+
+    # Name
+    name = ""
+    name_m = re.search(r'<h[1-3][^>]*class=["\'][^"\']*(?:qodef-m-name|entry-title)[^"\']*["\'][^>]*>(.*?)</h[1-3]>', html, re.DOTALL)
+    if name_m:
+        raw = re.sub(r'<[^>]+>', ' ', name_m.group(1)).strip()
+        name = re.sub(r'^\d+\s*', '', raw).strip()
+    if not name:
+        t_m = re.search(r'<title>(.*?)</title>', html)
+        if t_m:
+            name = t_m.group(1).split('|')[0].strip()
+
+    # Jersey number
+    jersey = ""
+    num_m = re.search(r'class=["\'][^"\']*sp-player-number[^"\']*["\'][^>]*>(\d+)</strong>', html)
+    if not num_m:
+        num_m = re.search(r'>\s*#?(\d{1,2})\s*<', html)
+    if num_m:
+        jersey = num_m.group(1).strip()
+
+    # Position
+    pos = ""
+    pos_m = re.search(r'href=["\'][^"\']*/position/[^"\']*["\'][^>]*>([^<]+)</a>', html)
+    if pos_m:
+        pos = normalize_german_position(pos_m.group(1).strip())
+
+    # Image
+    raw_img = ""
+    dsrc_m = re.search(r'<div[^>]*class=["\'][^"\']*(?:sp-player-photo|qodef-e-image)[^"\']*["\'][^>]*>.*?<img[^>]+data-src=["\']([^"\']+)["\']', html, re.DOTALL)
+    if dsrc_m:
+        raw_img = dsrc_m.group(1)
+    else:
+        srcset_m = re.search(r'<div[^>]*class=["\'][^"\']*(?:sp-player-photo|qodef-e-image)[^"\']*["\'][^>]*>.*?<img[^>]+(?:data-srcset|srcset)=["\']([^"\']+)["\']', html, re.DOTALL)
+        if srcset_m:
+            candidates = [p.strip().split(' ')[0] for p in srcset_m.group(1).split(',') if p.strip()]
+            if candidates:
+                raw_img = candidates[-1]
+        else:
+            src_m = re.search(r'<div[^>]*class=["\'][^"\']*(?:sp-player-photo|qodef-e-image)[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', html, re.DOTALL)
+            if src_m and not src_m.group(1).startswith("data:"):
+                raw_img = src_m.group(1)
+    img_url = clean_eisloewen_image_url(raw_img)
+
+    shoots = ""
+    height = ""
+    weight = ""
+    born = ""
+    birthplace = ""
+
+    dl_items = re.findall(r'<dt>(.*?)</dt>\s*<dd>(.*?)</dd>', html, re.DOTALL)
+    for dt_raw, dd_raw in dl_items:
+        k = re.sub(r'<[^>]+>', '', dt_raw).strip().lower()
+        v = re.sub(r'<[^>]+>', '', dd_raw).strip()
+        if "schuss" in k or "hand" in k:
+            shoots = "Left" if "link" in v.lower() else ("Right" if "recht" in v.lower() else v)
+        elif "größe" in k or "grosse" in k:
+            height = f"{v} cm" if v.isdigit() else v
+        elif "gewicht" in k:
+            weight = f"{v} kg" if v.isdigit() else v
+        elif "geburt" in k:
+            born = v
+        elif "national" in k:
+            birthplace = v
+
+    v_summary = []
+    if born: v_summary.append(f"Born: {born}")
+    if birthplace: v_summary.append(f"Nationality: {birthplace}")
+    if shoots: v_summary.append(f"Shoots: {shoots}")
+    if height: v_summary.append(f"Height: {height}")
+    if weight: v_summary.append(f"Weight: {weight}")
+
+    player = {
+        "name": name,
+        "jersey": jersey,
+        "position": pos,
+        "pos": pos,
+        "image": img_url,
+        "raw_image": img_url,
+        "shoots": shoots,
+        "height": height,
+        "weight": weight,
+        "born": born,
+        "birthplace": birthplace,
+        "details": " | ".join(v_summary),
+        "assigned_number": "",
+        "profile_url": url
+    }
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": [player]
+    }
+
+
+def scrape_eisloewen_roster(url: str, html: str = None):
+    """
+    Scrapes Dresdner Eislöwen and German DEL/DEL2 hockey rosters, extracting
+    player names, jersey numbers, positions, vitals, and high-res cutout headshots.
+    """
+    if not html:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Referer": "https://www.eisloewen.de/"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+    u_lower = url.lower().rstrip('/')
+
+    # Check if this is a single player profile page
+    if "/player/" in u_lower and not u_lower.endswith("/team") and not u_lower.endswith("/team/"):
+        return parse_eisloewen_single_player(url, html)
+
+    # Clean team folder name
+    suggested_folder = "Dresdner Eislöwen"
+    title_m = re.search(r'<title>(.*?)</title>', html, re.I)
+    if title_m:
+        raw_t = py_html.unescape(title_m.group(1).strip())
+        parts = re.split(r'[-–|]', raw_t)
+        for pt in parts:
+            p_s = pt.strip()
+            if p_s.lower() not in ("team", "kader", "roster", "official website", "home", "dresden"):
+                suggested_folder = p_s
+                break
+
+    # Split into cards
+    player_splits = re.split(r'(?=<div[^>]*class=["\'][^"\']*qodef-e qodef-grid-item[^"\']*["\'])', html)
+    cards = [s for s in player_splits if '/player/' in s]
+    if not cards:
+        # Fallback card splitter
+        cards = re.findall(r'<div[^>]*class=["\'][^"\']*qodef-item--full[^"\']*["\'][^>]*>.*?</h3>\s*</div>\s*</div>', html, re.DOTALL)
+
+    players = []
+    seen_names = set()
+
+    for c in cards:
+        # Player name
+        name_m = re.search(r'<h\d[^>]*class=["\'][^"\']*qodef-e-name[^"\']*["\'][^>]*>.*?<a[^>]*>([^<]+)</a>', c, re.DOTALL)
+        if not name_m:
+            name_m = re.search(r'<a[^>]*href=["\'][^"\']*/player/[^"\']*["\'][^>]*>([^<]+)</a>', c)
+        name = name_m.group(1).strip() if name_m else ""
+
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+
+        # Jersey number
+        num_m = re.search(r'<span[^>]*style=[^>]*>(\d{1,2})</span>', c)
+        if not num_m:
+            num_m = re.search(r'>(\d{1,2})</span>', c)
+        if not num_m:
+            num_m = re.search(r'class=["\'][^"\']*number[^"\']*["\'][^>]*>(\d{1,2})<', c, re.I)
+        jersey = num_m.group(1).strip() if num_m else ""
+
+        # Position
+        pos_m = re.search(r'class=["\'][^"\']*qodef-e-position[^"\']*["\'][^>]*>.*?<a[^>]*>([^<]+)</a>', c, re.DOTALL)
+        if not pos_m:
+            pos_m = re.search(r'/position/[^/]+/["\'][^>]*>([^<]+)</a>', c)
+        raw_pos = pos_m.group(1).strip() if pos_m else ""
+        pos = normalize_german_position(raw_pos)
+
+        # Image extraction (highest quality original PNG)
+        raw_img = ""
+        dsrc_m = re.search(r'<img[^>]+data-src=["\']([^"\']+)["\']', c)
+        if dsrc_m:
+            raw_img = dsrc_m.group(1)
+        else:
+            srcset_m = re.search(r'<img[^>]+(?:data-srcset|srcset)=["\']([^"\']+)["\']', c)
+            if srcset_m:
+                candidates = [p.strip().split(' ')[0] for p in srcset_m.group(1).split(',') if p.strip()]
+                if candidates:
+                    raw_img = candidates[-1]
+            else:
+                src_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', c)
+                if src_m and not src_m.group(1).startswith("data:"):
+                    raw_img = src_m.group(1)
+
+        img_url = clean_eisloewen_image_url(raw_img)
+
+        # Profile link
+        link_m = re.search(r'<a[^>]*href=["\'](https?://[^"\'\s]*/player/[^"\'\s]+)["\']', c)
+        profile_url = link_m.group(1).strip() if link_m else ""
+
+        players.append({
+            "name": name,
+            "jersey": jersey,
+            "position": pos,
+            "pos": pos,
+            "image": img_url,
+            "raw_image": img_url,
+            "shoots": "",
+            "height": "",
+            "weight": "",
+            "born": "",
+            "birthplace": "",
+            "details": "",
+            "assigned_number": "",
+            "profile_url": profile_url
+        })
+
+    # Enrich players with vitals in parallel
+    if any(p.get("profile_url") for p in players):
+        def _enrich_player(p):
+            purl = p.get("profile_url")
+            if not purl:
+                return p
+            try:
+                r = urllib.request.Request(
+                    purl,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                        "Referer": "https://www.eisloewen.de/"
+                    }
+                )
+                with urllib.request.urlopen(r, timeout=4) as rp:
+                    h = rp.read().decode("utf-8", errors="ignore")
+                    dl_items = re.findall(r'<dt>(.*?)</dt>\s*<dd>(.*?)</dd>', h, re.DOTALL)
+                    for dt_raw, dd_raw in dl_items:
+                        k = re.sub(r'<[^>]+>', '', dt_raw).strip().lower()
+                        v = re.sub(r'<[^>]+>', '', dd_raw).strip()
+                        if "schuss" in k or "hand" in k:
+                            p["shoots"] = "Left" if "link" in v.lower() else ("Right" if "recht" in v.lower() else v)
+                        elif "größe" in k or "grosse" in k:
+                            p["height"] = f"{v} cm" if v.isdigit() else v
+                        elif "gewicht" in k:
+                            p["weight"] = f"{v} kg" if v.isdigit() else v
+                        elif "geburt" in k:
+                            p["born"] = v
+                        elif "national" in k:
+                            p["birthplace"] = v
+                    v_summary = []
+                    if p["born"]: v_summary.append(f"Born: {p['born']}")
+                    if p["birthplace"]: v_summary.append(f"Nationality: {p['birthplace']}")
+                    if p["shoots"]: v_summary.append(f"Shoots: {p['shoots']}")
+                    if p["height"]: v_summary.append(f"Height: {p['height']}")
+                    if p["weight"]: v_summary.append(f"Weight: {p['weight']}")
+                    p["details"] = " | ".join(v_summary)
+            except Exception:
+                pass
+            return p
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            players = list(ex.map(_enrich_player, players))
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": players
+    }
+
+
 def scrape_roster_data(url: str):
     """
-    Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL, UK Teams, or College/NCAA athletics scrapers
-    with automatic fallbacks.
+    Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL,
+    UK Teams, German DEL2/Eislöwen, or College/NCAA athletics scrapers with automatic fallbacks.
     """
     url_lower = url.lower()
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
         return scrape_nhl_roster(url)
+
+    if is_eisloewen_or_del_url(url):
+        try:
+            res = scrape_eisloewen_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Eisloewen / DEL scraper notice: {e}, falling back...")
 
     if is_eurobasket_url(url):
         try:
@@ -1824,7 +2140,13 @@ def scrape_roster_data(url: str):
     # College / NCAA / Sidearm athletics scraper
     res = scrape_college_roster(url)
     if not res.get("players") or len(res["players"]) == 0:
-        # Fallback to Eurobasket, HockeyTech / BCHL or UK / general sports scraper if college returned no players
+        # Fallback to DEL / Eurobasket, HockeyTech / BCHL or UK / general sports scraper if college returned no players
+        try:
+            del_res = scrape_eisloewen_roster(url)
+            if del_res.get("players") and len(del_res["players"]) > 0:
+                return del_res
+        except Exception:
+            pass
         try:
             eb_res = scrape_eurobasket_roster(url)
             if eb_res.get("players") and len(eb_res["players"]) > 0:
@@ -1847,7 +2169,6 @@ def scrape_roster_data(url: str):
     return res
 
 
-
 def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tuple:
     """Downloads photo with boosted URL width and standardizes width to target_width with Lanczos in-memory."""
     high_res_url = boost_image_url_width(img_url, target_width=1200)
@@ -1857,16 +2178,20 @@ def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tup
         if not u:
             continue
         try:
-            req = urllib.request.Request(
-                u,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                }
-            )
+            parsed_u = urllib.parse.urlparse(u)
+            referer = f"{parsed_u.scheme}://{parsed_u.netloc}/" if parsed_u.netloc else ""
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            if referer:
+                headers["Referer"] = referer
+            req = urllib.request.Request(u, headers=headers)
             with urllib.request.urlopen(req, timeout=8) as resp:
-                raw_bytes = resp.read()
-            if raw_bytes:
-                break
+                data = resp.read()
+                # Verify that response is actually an image, not an HTML error page
+                if data and (data.startswith((b'\x89PNG', b'\xff\xd8', b'RIFF', b'GIF', b'BM', b'<?xml', b'<svg')) or 'image' in resp.headers.get('Content-Type', '')):
+                    raw_bytes = data
+                    break
         except Exception:
             continue
 
