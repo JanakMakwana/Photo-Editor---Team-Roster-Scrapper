@@ -1914,51 +1914,51 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
     :root {
-      /* Royal Obsidian & Imperial Palette */
-      --bg-base: #04060a;
-      --bg-surface: #080c14;
-      --bg-card: #0d121e;
-      --bg-card-hover: #131a2a;
-      --panel: #0a0e18;
-      --panel-border: rgba(212, 175, 55, 0.22);
-      --border-subtle: rgba(212, 175, 55, 0.15);
-      --border-medium: rgba(212, 175, 55, 0.32);
-      --border-highlight: #d4af37;
+      /* Royal Ivory, Alabaster & Marble Light Architecture */
+      --bg-base: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-card: #ffffff;
+      --bg-card-hover: #fcfbf9;
+      --panel: #ffffff;
+      --panel-border: rgba(180, 140, 45, 0.22);
+      --border-subtle: rgba(180, 140, 45, 0.16);
+      --border-medium: rgba(180, 140, 45, 0.32);
+      --border-highlight: #b8860b;
       
-      /* Imperial 24K Burnished Gold & Champagne */
-      --gold-primary: #d4af37;
-      --gold-light: #fcedc5;
-      --gold-bright: #ffd700;
-      --gold-deep: #9a7424;
-      --gold-gradient: linear-gradient(135deg, #fcedc5 0%, #d4af37 50%, #9a7424 100%);
-      --gold-gradient-hover: linear-gradient(135deg, #fff3d6 0%, #dfbf54 50%, #b88628 100%);
-      --gold-glow: 0 0 25px rgba(212, 175, 55, 0.35);
-      --gold-border: rgba(212, 175, 55, 0.28);
-      --gold-border-bright: rgba(212, 175, 55, 0.65);
+      /* Imperial 24K Burnished Gold & Rich Champagne */
+      --gold-primary: #b8860b;
+      --gold-light: #dfb76c;
+      --gold-bright: #9a7424;
+      --gold-deep: #7c5c16;
+      --gold-gradient: linear-gradient(135deg, #dfb76c 0%, #c5a059 50%, #9a7424 100%);
+      --gold-gradient-hover: linear-gradient(135deg, #e8c683 0%, #d4af66 50%, #aa822d 100%);
+      --gold-glow: 0 4px 20px rgba(184, 134, 11, 0.22);
+      --gold-border: rgba(180, 140, 45, 0.28);
+      --gold-border-bright: rgba(180, 140, 45, 0.6);
       
-      /* Royal Sapphire & Midnight Indigo Accents */
-      --royal-navy: #080e1a;
+      /* Royal Sovereign Navy & Midnight Accents */
+      --royal-navy: #0f172a;
       --royal-blue: #1e3a8a;
-      --royal-accent: #60a5fa;
-      --royal-glow: 0 0 30px rgba(30, 58, 138, 0.4);
+      --royal-accent: #2563eb;
+      --royal-glow: 0 4px 20px rgba(37, 99, 235, 0.15);
 
-      /* State Indicators with Gilded Elegance */
-      --success: #10b981;
-      --warning: #f59e0b;
-      --danger: #f43f5e;
+      /* State Indicators */
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #e11d48;
       
       /* Typography */
-      --text: #fcfdfe;
-      --text-muted: #8b9bb4;
-      --text-gold: #e5c07b;
+      --text: #0f172a;
+      --text-muted: #526075;
+      --text-gold: #855f19;
       --font-royal: 'Cinzel', serif;
       --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
 
-      /* Backwards-compatible aliases mapped to Royal Gold/Navy */
-      --primary: #d4af37;
-      --primary-hover: #e5c07b;
-      --accent: #60a5fa;
+      /* Backwards-compatible aliases */
+      --primary: #b8860b;
+      --primary-hover: #9a7424;
+      --accent: #2563eb;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1976,9 +1976,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     /* Custom Royal Scrollbars */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #060910; }
-    ::-webkit-scrollbar-thumb { background: rgba(212, 175, 55, 0.25); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(212, 175, 55, 0.5); }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: rgba(180, 140, 45, 0.3); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(180, 140, 45, 0.55); }
 
     /* =========================================================================
        ENTERPRISE ROYAL AUTHENTICATION GATEWAY (STRICT NO-FREE LOCKOUT)
@@ -1987,7 +1987,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: flex;
       min-height: 100vh;
       width: 100%;
-      background: radial-gradient(ellipse at 50% -10%, #1e1b4b 0%, #0a0e1a 50%, #030509 100%);
+      background: radial-gradient(ellipse at 50% -10%, #fffdf8 0%, #f6f8fc 50%, #eef2f7 100%);
       padding: 40px 24px;
       flex-direction: column;
       align-items: center;
@@ -2000,7 +2000,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       content: '';
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at 50% 30%, rgba(212, 175, 55, 0.05) 0%, transparent 60%);
+      background: radial-gradient(circle at 50% 20%, rgba(212, 175, 55, 0.08) 0%, transparent 70%);
       pointer-events: none;
     }
     .gateway-container {
@@ -2024,8 +2024,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       gap: 9px;
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.35);
       color: var(--text-gold);
       padding: 7px 16px;
       border-radius: 999px;
@@ -2035,7 +2035,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       letter-spacing: 0.12em;
       text-transform: uppercase;
       margin-bottom: 22px;
-      box-shadow: 0 0 20px rgba(212, 175, 55, 0.12);
+      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.1);
     }
     .gateway-hero-title {
       font-family: var(--font-royal);
@@ -2043,18 +2043,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-weight: 800;
       letter-spacing: 0.02em;
       line-height: 1.18;
-      color: #ffffff;
+      color: #0f172a;
       margin-bottom: 18px;
     }
     .gateway-hero-title span {
-      background: linear-gradient(135deg, #fff 0%, #fcedc5 35%, #d4af37 75%, #aa7c24 100%);
+      background: linear-gradient(135deg, #0f172a 0%, #855f19 50%, #b8860b 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 30px rgba(212, 175, 55, 0.25);
+      text-shadow: none;
     }
     .gateway-hero-desc {
       font-size: 1rem;
-      color: #9bb0cd;
+      color: #475569;
       line-height: 1.65;
       margin-bottom: 30px;
       max-width: 520px;
@@ -2070,41 +2070,39 @@ HTML_PAGE = r"""<!DOCTYPE html>
       gap: 15px;
     }
     .gateway-feature-icon {
-      width: 26px;
-      height: 26px;
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.45);
-      color: #fcedc5;
+      background: rgba(184, 134, 11, 0.1);
+      border: 1px solid rgba(184, 134, 11, 0.4);
+      color: #855f19;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
       margin-top: 1px;
-      box-shadow: 0 0 12px rgba(212, 175, 55, 0.2);
+      box-shadow: 0 2px 8px rgba(184, 134, 11, 0.12);
     }
     .gateway-feature-title {
       font-size: 0.92rem;
       font-weight: 700;
-      color: #f8fafc;
+      color: #0f172a;
       letter-spacing: 0.01em;
     }
     .gateway-feature-desc {
       font-size: 0.82rem;
-      color: #7d8ea5;
+      color: #64748b;
       margin-top: 3px;
       line-height: 1.45;
     }
 
     /* Gateway Auth Card */
     .gateway-card {
-      background: rgba(10, 14, 24, 0.88);
-      border: 1px solid rgba(212, 175, 55, 0.32);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       border-radius: 20px;
       padding: 34px;
-      box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.9), 0 0 35px rgba(212, 175, 55, 0.1);
-      backdrop-filter: blur(28px);
-      -webkit-backdrop-filter: blur(28px);
+      box-shadow: 0 25px 60px -12px rgba(15, 23, 42, 0.1), 0 0 25px rgba(180, 140, 45, 0.06);
     }
     .gateway-card-header {
       margin-bottom: 24px;
@@ -2113,19 +2111,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-family: var(--font-royal);
       font-size: 1.45rem;
       font-weight: 700;
-      color: #fff;
+      color: #0f172a;
       letter-spacing: 0.04em;
     }
     .gateway-card-sub {
       font-size: 0.85rem;
-      color: #94a3b8;
+      color: #64748b;
       margin-top: 5px;
     }
     .gateway-tabs {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      background: #060810;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #f1f5f9;
+      border: 1px solid rgba(180, 140, 45, 0.2);
       border-radius: 10px;
       padding: 4px;
       gap: 4px;
@@ -2134,7 +2132,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .gateway-tab-btn {
       background: transparent;
       border: none;
-      color: #94a3b8;
+      color: #64748b;
       padding: 9px 12px;
       border-radius: 7px;
       font-size: 0.82rem;
@@ -2147,10 +2145,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.2s;
     }
     .gateway-tab-btn.active {
-      background: var(--gold-gradient);
-      color: #05070a;
+      background: #ffffff;
+      color: #855f19;
       font-weight: 800;
-      box-shadow: 0 2px 12px rgba(212, 175, 55, 0.4);
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(180, 140, 45, 0.25);
     }
     .input-icon-wrapper {
       position: relative;
@@ -2160,16 +2158,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .input-icon {
       position: absolute;
       left: 14px;
-      color: rgba(212, 175, 55, 0.5);
+      color: #855f19;
       pointer-events: none;
     }
     .saas-input.with-icon {
       padding-left: 40px;
     }
     .saas-alert-danger {
-      color: #fecdd3;
-      background: rgba(225, 29, 72, 0.15);
-      border: 1px solid rgba(225, 29, 72, 0.4);
+      color: #be123c;
+      background: rgba(225, 29, 72, 0.08);
+      border: 1px solid rgba(225, 29, 72, 0.28);
       padding: 10px 14px;
       border-radius: 8px;
       font-size: 0.82rem;
@@ -2177,18 +2175,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       line-height: 1.45;
     }
     .saas-alert-info {
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.3);
       padding: 12px 14px;
       border-radius: 8px;
       font-size: 0.82rem;
-      color: #fcedc5;
+      color: #855f19;
       margin-bottom: 18px;
       line-height: 1.45;
     }
     .btn-demo-fill {
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.32);
       color: var(--text-gold);
       padding: 6px 14px;
       border-radius: 6px;
@@ -2201,9 +2199,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.2s;
     }
     .btn-demo-fill:hover {
-      background: rgba(212, 175, 55, 0.25);
-      color: #fff;
-      box-shadow: 0 0 12px rgba(212, 175, 55, 0.25);
+      background: rgba(184, 134, 11, 0.18);
+      color: #5c410c;
+      box-shadow: 0 0 10px rgba(184, 134, 11, 0.15);
     }
 
     /* =========================================================================
@@ -2211,15 +2209,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
        ========================================================================= */
     .saas-navbar {
       width: 100%;
-      background: rgba(7, 10, 18, 0.96);
+      background: rgba(255, 255, 255, 0.94);
       backdrop-filter: blur(18px);
       -webkit-backdrop-filter: blur(18px);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.22);
       padding: 11px 26px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      box-shadow: 0 4px 28px rgba(0, 0, 0, 0.6), 0 1px 0 rgba(212, 175, 55, 0.12) inset;
+      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
       z-index: 90;
       flex-shrink: 0;
     }
@@ -2233,7 +2231,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-family: var(--font-royal);
       font-weight: 800;
       font-size: 1.05rem;
-      color: #fff;
+      color: #0f172a;
       display: flex;
       align-items: center;
       gap: 10px;
@@ -2243,9 +2241,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .saas-saas-tag {
       font-family: var(--font-royal);
       font-size: 0.64rem;
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.35);
-      color: #fcedc5;
+      background: rgba(184, 134, 11, 0.1);
+      border: 1px solid rgba(184, 134, 11, 0.35);
+      color: #855f19;
       padding: 3px 8px;
       border-radius: 12px;
       font-weight: 800;
@@ -2256,14 +2254,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: #090e18;
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: #fdfbf7;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       padding: 5px 14px;
       border-radius: 20px;
       font-size: 0.78rem;
       font-weight: 700;
-      color: #f1f5f9;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+      color: #0f172a;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
     }
     .saas-plan-pill {
       font-size: 0.68rem;
@@ -2274,17 +2272,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
-    .plan-team { background: rgba(212, 175, 55, 0.18); color: #fcedc5; border: 1px solid rgba(212, 175, 55, 0.45); }
-    .plan-enterprise { background: linear-gradient(135deg, rgba(212,175,55,0.25), rgba(168,85,247,0.25)); color: #fef08a; border: 1px solid rgba(212, 175, 55, 0.6); }
-    .plan-free { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .plan-team { background: rgba(184, 134, 11, 0.12); color: #855f19; border: 1px solid rgba(184, 134, 11, 0.35); }
+    .plan-enterprise { background: linear-gradient(135deg, rgba(184,134,11,0.18), rgba(124,58,237,0.15)); color: #6d28d9; border: 1px solid rgba(180, 140, 45, 0.5); }
+    .plan-free { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
 
     .seat-quota-pill {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      background: rgba(212, 175, 55, 0.08);
-      border: 1px solid rgba(212, 175, 55, 0.3);
-      color: #fcedc5;
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.3);
+      color: #855f19;
       padding: 5px 14px;
       border-radius: 18px;
       font-size: 0.76rem;
@@ -2293,32 +2291,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.2s;
     }
     .seat-quota-pill:hover {
-      background: rgba(212, 175, 55, 0.18);
+      background: rgba(184, 134, 11, 0.15);
       border-color: var(--gold-primary);
-      box-shadow: 0 0 15px rgba(212, 175, 55, 0.2);
+      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.15);
     }
     .seat-quota-pill.warning {
-      background: rgba(245, 158, 11, 0.15);
+      background: rgba(245, 158, 11, 0.12);
       border-color: rgba(245, 158, 11, 0.45);
-      color: #fbbf24;
+      color: #b45309;
     }
     .seat-quota-pill.full {
-      background: rgba(239, 68, 68, 0.15);
+      background: rgba(239, 68, 68, 0.12);
       border-color: rgba(239, 68, 68, 0.45);
-      color: #fca5a5;
+      color: #b91c1c;
     }
     .seat-mini-progress {
       width: 48px;
       height: 6px;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #e2e8f0;
+      border: 1px solid rgba(180, 140, 45, 0.2);
       border-radius: 999px;
       overflow: hidden;
       margin-right: 2px;
     }
     .seat-mini-fill {
       height: 100%;
-      background: linear-gradient(90deg, #aa771c 0%, #d4af37 50%, #fcedc5 100%);
+      background: var(--gold-gradient);
       border-radius: 999px;
       transition: width 0.3s ease;
     }
@@ -2334,19 +2332,20 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       gap: 9px;
-      background: #090e18;
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: #fdfbf7;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       padding: 4px 14px;
       border-radius: 20px;
       font-size: 0.8rem;
-      color: #f8fafc;
+      color: #0f172a;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
     }
     .user-avatar-chip {
       width: 24px;
       height: 24px;
       border-radius: 50%;
       background: var(--gold-gradient);
-      color: #05070a;
+      color: #ffffff;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -2354,7 +2353,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-weight: 800;
       text-transform: uppercase;
       letter-spacing: -0.02em;
-      box-shadow: 0 0 10px rgba(212, 175, 55, 0.3);
+      box-shadow: 0 2px 6px rgba(184, 134, 11, 0.25);
     }
     .user-role-tag {
       font-size: 0.68rem;
@@ -2365,9 +2364,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
-    .role-superadmin { background: rgba(212, 175, 55, 0.2); color: #fcedc5; border: 1px solid rgba(212, 175, 55, 0.45); }
-    .role-admin { background: rgba(96, 165, 250, 0.18); color: #bfdbfe; border: 1px solid rgba(96, 165, 250, 0.4); }
-    .role-member { background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); }
+    .role-superadmin { background: rgba(184, 134, 11, 0.14); color: #855f19; border: 1px solid rgba(184, 134, 11, 0.4); }
+    .role-admin { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; border: 1px solid rgba(37, 99, 235, 0.35); }
+    .role-member { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
 
     /* =========================================================================
        PAGE 1: ROYAL FOLDER SELECTION & ROSTER ATELIER
@@ -2379,7 +2378,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       overflow-y: auto;
       padding: 44px 24px;
       align-items: center;
-      background: radial-gradient(circle at 50% 10%, #151c2e 0%, #04060a 85%);
+      background: radial-gradient(ellipse at 50% 5%, #fffdf8 0%, #f6f8fc 60%, #edf2f7 100%);
       position: relative;
     }
     .landing-hero {
@@ -2391,8 +2390,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.35);
       color: var(--text-gold);
       padding: 6px 16px;
       border-radius: 30px;
@@ -2402,7 +2401,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       letter-spacing: 0.08em;
       text-transform: uppercase;
       margin-bottom: 16px;
-      box-shadow: 0 0 16px rgba(212, 175, 55, 0.12);
+      box-shadow: 0 2px 8px rgba(184, 134, 11, 0.1);
     }
     .landing-title {
       font-family: var(--font-royal);
@@ -2410,35 +2409,35 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-weight: 800;
       letter-spacing: 0.02em;
       margin-bottom: 12px;
-      color: #fff;
+      color: #0f172a;
     }
     .landing-title span {
-      background: var(--gold-gradient);
+      background: linear-gradient(135deg, #0f172a 0%, #855f19 50%, #b8860b 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: 0 0 25px rgba(212, 175, 55, 0.25);
+      text-shadow: none;
     }
     .landing-subtitle {
       font-size: 0.96rem;
-      color: #8fa0b8;
+      color: #475569;
       line-height: 1.6;
     }
 
     /* Gilded Segmented Tabs */
     .landing-tabs-bar {
       display: inline-flex;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.24);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.24);
       border-radius: 14px;
       padding: 4px;
       gap: 6px;
       margin-bottom: 28px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
     }
     .landing-tab {
       background: transparent;
       border: none;
-      color: #94a3b8;
+      color: #64748b;
       padding: 10px 24px;
       border-radius: 10px;
       font-size: 0.88rem;
@@ -2450,32 +2449,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.2s;
     }
     .landing-tab:hover {
-      color: #fff;
-      background: rgba(212, 175, 55, 0.08);
+      color: #0f172a;
+      background: rgba(180, 140, 45, 0.08);
     }
     .landing-tab.active {
       background: var(--gold-gradient);
-      color: #05070a;
+      color: #ffffff;
       font-weight: 800;
-      box-shadow: 0 4px 18px rgba(212, 175, 55, 0.4);
+      box-shadow: 0 4px 16px rgba(184, 134, 11, 0.32);
     }
 
     /* Folder Drop Zone Card */
     .folder-action-card {
       width: 100%;
       max-width: 840px;
-      background: rgba(10, 14, 24, 0.85);
-      border: 2px dashed rgba(212, 175, 55, 0.32);
+      background: #ffffff;
+      border: 2px dashed rgba(180, 140, 45, 0.35);
       border-radius: 20px;
       padding: 38px 32px;
       text-align: center;
       margin-bottom: 38px;
       transition: all 0.25s;
-      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 12px 35px -8px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
     }
     .folder-action-card:hover {
       border-color: var(--gold-primary);
-      box-shadow: 0 15px 45px rgba(212, 175, 55, 0.15), 0 0 25px rgba(212, 175, 55, 0.08);
+      box-shadow: 0 16px 45px rgba(184, 134, 11, 0.15), 0 0 20px rgba(184, 134, 11, 0.08);
     }
     .drop-zone-icon {
       color: var(--gold-primary);
@@ -2484,12 +2483,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .folder-action-card:hover .drop-zone-icon {
       transform: translateY(-3px) scale(1.05);
-      filter: drop-shadow(0 0 10px rgba(212, 175, 55, 0.4));
+      filter: drop-shadow(0 2px 10px rgba(184, 134, 11, 0.3));
     }
     .browse-btn-big {
       background: var(--gold-gradient);
-      color: #05070a;
-      border: 1px solid #ffe89e;
+      color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(180, 140, 45, 0.5);
       padding: 14px 32px;
       border-radius: 12px;
       font-size: 0.98rem;
@@ -2498,23 +2498,23 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: inline-flex;
       align-items: center;
       gap: 10px;
-      box-shadow: 0 6px 24px rgba(212, 175, 55, 0.4);
+      box-shadow: 0 6px 20px rgba(184, 134, 11, 0.32);
       letter-spacing: 0.03em;
       transition: all 0.2s;
     }
     .browse-btn-big:hover {
       background: var(--gold-gradient-hover);
       transform: translateY(-2px);
-      box-shadow: 0 8px 30px rgba(212, 175, 55, 0.55);
+      box-shadow: 0 8px 26px rgba(184, 134, 11, 0.45);
     }
     .select-files-link {
       font-size: 0.84rem;
-      color: var(--text-gold);
+      color: var(--gold-primary);
       cursor: pointer;
       text-decoration: underline;
       transition: color 0.15s;
     }
-    .select-files-link:hover { color: #fff; }
+    .select-files-link:hover { color: #5c410c; }
     .drop-zone-subtitle {
       margin-top: 16px;
       font-size: 0.84rem;
@@ -2528,11 +2528,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .path-input {
       flex: 1;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.22);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       border-radius: 8px;
       padding: 11px 16px;
-      color: #fff;
+      color: #0f172a;
       font-family: var(--font-mono);
       font-size: 0.85rem;
       outline: none;
@@ -2540,7 +2540,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .path-input:focus {
       border-color: var(--gold-primary);
-      box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.25);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
     }
 
     /* Detected Folders Grid */
@@ -2565,8 +2565,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       gap: 16px;
     }
     .folder-card {
-      background: rgba(10, 14, 24, 0.8);
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.22);
       border-radius: 14px;
       padding: 16px 18px;
       cursor: pointer;
@@ -2574,17 +2574,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
       align-items: center;
       gap: 14px;
       transition: all 0.2s;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
     }
     .folder-card:hover {
-      background: #111828;
+      background: #fdfbf7;
       border-color: var(--gold-primary);
       transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(212, 175, 55, 0.15);
+      box-shadow: 0 8px 24px rgba(184, 134, 11, 0.15);
     }
     .folder-icon {
-      background: rgba(212, 175, 55, 0.1);
-      border: 1px solid rgba(212, 175, 55, 0.3);
+      background: rgba(184, 134, 11, 0.1);
+      border: 1px solid rgba(184, 134, 11, 0.3);
       color: var(--gold-primary);
       padding: 9px 12px;
       border-radius: 10px;
@@ -2602,7 +2602,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      color: #fff;
+      color: #0f172a;
     }
     .folder-card-sub {
       font-size: 0.74rem;
@@ -2613,8 +2613,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       gap: 8px;
     }
     .photo-count-pill {
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.3);
+      background: rgba(184, 134, 11, 0.1);
+      border: 1px solid rgba(184, 134, 11, 0.3);
       color: var(--text-gold);
       padding: 2px 7px;
       border-radius: 10px;
@@ -2632,12 +2632,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .roster-config-card {
       width: 100%;
-      background: rgba(10, 14, 24, 0.85);
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       border-radius: 20px;
       padding: 28px;
       margin-bottom: 24px;
-      box-shadow: 0 15px 40px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 12px 35px -8px rgba(15, 23, 42, 0.08);
     }
     .roster-input-grid {
       display: grid;
@@ -2662,18 +2662,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       letter-spacing: 0.06em;
     }
     .roster-text-input {
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.22);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.26);
       border-radius: 8px;
       padding: 12px 14px;
-      color: #fff;
+      color: #0f172a;
       font-size: 0.86rem;
       outline: none;
       transition: all 0.2s;
     }
     .roster-text-input:focus {
       border-color: var(--gold-primary);
-      box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.25);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
     }
     .presets-row {
       display: flex;
@@ -2691,9 +2691,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       letter-spacing: 0.06em;
     }
     .preset-pill {
-      background: rgba(14, 20, 34, 0.9);
-      border: 1px solid rgba(212, 175, 55, 0.25);
-      color: #cbd5e1;
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.25);
+      color: #334155;
       padding: 5px 12px;
       border-radius: 14px;
       font-size: 0.74rem;
@@ -2701,32 +2701,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.2s;
     }
     .preset-pill:hover {
-      background: rgba(212, 175, 55, 0.15);
+      background: #fdfbf7;
       border-color: var(--gold-primary);
-      color: #fff;
+      color: #855f19;
     }
     .quality-boost-tag {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: rgba(212, 175, 55, 0.08);
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.28);
       border-radius: 10px;
       padding: 10px 14px;
       font-size: 0.8rem;
-      color: #fcedc5;
+      color: #855f19;
       margin-top: 16px;
     }
 
     /* Roster Table Results */
     .roster-results-card {
       width: 100%;
-      background: rgba(10, 14, 24, 0.85);
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.28);
       border-radius: 20px;
       padding: 24px;
       margin-bottom: 24px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
     }
     .roster-header-bar {
       display: flex;
@@ -2736,7 +2736,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       gap: 12px;
       margin-bottom: 18px;
       padding-bottom: 14px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.18);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.18);
     }
     .roster-title-badge {
       display: flex;
@@ -2745,7 +2745,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-family: var(--font-royal);
       font-size: 1.15rem;
       font-weight: 700;
-      color: #fff;
+      color: #0f172a;
     }
     .roster-table {
       width: 100%;
@@ -2753,32 +2753,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-size: 0.82rem;
     }
     .roster-table th {
-      background: #060910;
-      color: var(--text-gold);
+      background: #f8fafc;
+      color: #855f19;
       font-family: var(--font-royal);
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-size: 0.72rem;
       padding: 10px 12px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.25);
       text-align: left;
     }
     .roster-table td {
       padding: 10px 12px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.1);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.12);
       vertical-align: middle;
-      color: #e2e8f0;
+      color: #1e293b;
     }
     .roster-table tr:hover td {
-      background: rgba(212, 175, 55, 0.04);
+      background: #fdfbf7;
     }
     .player-avatar-thumb {
       width: 38px;
       height: 48px;
       object-fit: cover;
       border-radius: 6px;
-      background: #070a12;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #f1f5f9;
+      border: 1px solid rgba(180, 140, 45, 0.2);
     }
     .jersey-badge {
       display: inline-block;
@@ -2786,8 +2786,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       height: 26px;
       line-height: 24px;
       text-align: center;
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.4);
+      background: rgba(184, 134, 11, 0.12);
+      border: 1px solid rgba(184, 134, 11, 0.4);
       color: var(--text-gold);
       border-radius: 50%;
       font-weight: 800;
@@ -2798,19 +2798,46 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-size: 0.75rem;
       padding: 3px 8px;
       border-radius: 6px;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.2);
-      color: #e5c07b;
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.2);
+      color: #855f19;
     }
     .roster-footer-bar {
       margin-top: 18px;
       padding-top: 16px;
-      border-top: 1px solid rgba(212, 175, 55, 0.18);
+      border-top: 1px solid rgba(180, 140, 45, 0.18);
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
       gap: 14px;
+    }
+
+    /* Bulk Paste Drawer */
+    .bulk-paste-drawer {
+      display: none;
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.25);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .bulk-paste-textarea {
+      width: 100%;
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.26);
+      color: #0f172a;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      min-height: 100px;
+      outline: none;
+      margin-bottom: 10px;
+    }
+    .bulk-paste-textarea:focus {
+      border-color: var(--gold-primary);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
     }
 
     /* =========================================================================
@@ -2823,15 +2850,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
       overflow: hidden;
     }
     header {
-      background: rgba(7, 10, 18, 0.96);
-      border-bottom: 1px solid rgba(212, 175, 55, 0.22);
+      background: rgba(255, 255, 255, 0.95);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.22);
       padding: 10px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       height: 64px;
       flex-shrink: 0;
-      box-shadow: 0 4px 25px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
     }
     .header-left {
       display: flex;
@@ -2859,27 +2886,29 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .btn-primary {
       background: var(--gold-gradient);
-      color: #05070a;
+      color: #ffffff;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
       font-weight: 800;
-      border: 1px solid #ffe89e;
-      box-shadow: 0 4px 18px rgba(212, 175, 55, 0.38);
+      border: 1px solid rgba(180, 140, 45, 0.5);
+      box-shadow: 0 4px 16px rgba(184, 134, 11, 0.28);
       letter-spacing: 0.02em;
     }
     .btn-primary:hover {
       background: var(--gold-gradient-hover);
       transform: translateY(-1px);
-      box-shadow: 0 6px 26px rgba(212, 175, 55, 0.55);
+      box-shadow: 0 6px 22px rgba(184, 134, 11, 0.4);
     }
     .btn-secondary {
-      background: rgba(14, 20, 34, 0.9);
-      color: #e2e8f0;
-      border: 1px solid rgba(212, 175, 55, 0.28);
+      background: #ffffff;
+      color: #1e293b;
+      border: 1px solid rgba(180, 140, 45, 0.28);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
     }
     .btn-secondary:hover {
-      background: #151e30;
+      background: #fdfbf7;
       border-color: var(--gold-primary);
-      color: #fcedc5;
-      box-shadow: 0 0 14px rgba(212, 175, 55, 0.2);
+      color: #855f19;
+      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.15);
     }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -2892,8 +2921,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .sidebar {
       width: 330px;
-      background: #080c16;
-      border-right: 1px solid rgba(212, 175, 55, 0.2);
+      background: #ffffff;
+      border-right: 1px solid rgba(180, 140, 45, 0.2);
       padding: 16px;
       display: flex;
       flex-direction: column;
@@ -2911,8 +2940,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-bottom: 6px;
     }
     .box {
-      background: #050810;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #fbfcfe;
+      border: 1px solid rgba(180, 140, 45, 0.2);
       border-radius: 10px;
       padding: 12px;
     }
@@ -2922,12 +2951,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-bottom: 6px;
       font-size: 0.8rem;
       font-weight: 600;
+      color: #1e293b;
     }
     .pill {
       font-family: var(--font-mono);
       color: var(--text-gold);
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.3);
+      background: rgba(184, 134, 11, 0.1);
+      border: 1px solid rgba(184, 134, 11, 0.3);
       padding: 1px 7px;
       border-radius: 4px;
       font-size: 0.74rem;
@@ -2935,7 +2965,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     input[type=range] {
       width: 100%;
       height: 5px;
-      background: #0d121e;
+      background: #e2e8f0;
       border-radius: 3px;
       outline: none;
       -webkit-appearance: none;
@@ -2947,8 +2977,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       height: 16px;
       border-radius: 50%;
       background: var(--gold-gradient);
-      border: 1px solid #ffe89e;
-      box-shadow: 0 0 10px rgba(212, 175, 55, 0.5);
+      border: 1px solid rgba(180, 140, 45, 0.5);
+      box-shadow: 0 1px 5px rgba(184, 134, 11, 0.4);
       cursor: pointer;
     }
     .tool-tabs {
@@ -2958,9 +2988,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-bottom: 10px;
     }
     .tool-tab {
-      background: #090e18;
-      border: 1px solid rgba(212, 175, 55, 0.2);
-      color: #94a3b8;
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.2);
+      color: #64748b;
       padding: 8px 4px;
       border-radius: 8px;
       font-size: 0.75rem;
@@ -2973,13 +3003,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
       justify-content: center;
       gap: 5px;
     }
-    .tool-tab:hover { color: #fff; background: #121828; }
+    .tool-tab:hover { color: #0f172a; background: #fdfbf7; }
     .tool-tab.active {
       background: var(--gold-gradient);
-      border-color: #ffe89e;
-      color: #05070a;
+      border-color: rgba(180, 140, 45, 0.5);
+      color: #ffffff;
       font-weight: 800;
-      box-shadow: 0 2px 10px rgba(212, 175, 55, 0.35);
+      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.3);
     }
     .btn-grid {
       display: grid;
@@ -2988,8 +3018,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-top: 8px;
     }
     .btn-sm {
-      background: #090e18;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.22);
       color: var(--text);
       padding: 6px;
       border-radius: 6px;
@@ -2999,12 +3029,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       text-align: center;
       transition: all 0.15s;
     }
-    .btn-sm:hover { background: #131a28; border-color: var(--gold-primary); color: #fcedc5; }
+    .btn-sm:hover { background: #fdfbf7; border-color: var(--gold-primary); color: #855f19; }
 
     /* Center Stage */
     .stage {
       flex: 1;
-      background: radial-gradient(circle at center, #101626 0%, #04060a 100%);
+      background: radial-gradient(circle at center, #f4f6fa 0%, #e8edf4 100%);
       display: flex;
       flex-direction: column;
       align-items: center;
@@ -3017,18 +3047,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       top: 14px;
       display: flex;
       gap: 8px;
-      background: rgba(8, 12, 20, 0.88);
+      background: rgba(255, 255, 255, 0.92);
       backdrop-filter: blur(12px);
       padding: 6px 14px;
       border-radius: 30px;
-      border: 1px solid rgba(212, 175, 55, 0.3);
+      border: 1px solid rgba(180, 140, 45, 0.3);
       z-index: 10;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
     }
     .chip {
       background: transparent;
       border: none;
-      color: #94a3b8;
+      color: #64748b;
       font-size: 0.78rem;
       font-weight: 600;
       padding: 4px 10px;
@@ -3037,17 +3067,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.15s;
     }
     .chip.active, .chip:hover {
-      color: #05070a;
+      color: #ffffff;
       background: var(--gold-gradient);
       font-weight: 800;
     }
     .viewport-outer {
       position: relative;
       padding: 6px;
-      border: 2px dashed rgba(212, 175, 55, 0.45);
+      border: 2px dashed rgba(180, 140, 45, 0.45);
       border-radius: 14px;
-      background: rgba(0, 0, 0, 0.6);
-      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 30px rgba(212, 175, 55, 0.1);
+      background: #ffffff;
+      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12), 0 0 20px rgba(180, 140, 45, 0.08);
     }
     .viewport-container {
       width: 440px;
@@ -3058,13 +3088,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .checkerboard {
       background-image: 
-        linear-gradient(45deg, #101626 25%, transparent 25%), 
-        linear-gradient(-45deg, #101626 25%, transparent 25%), 
-        linear-gradient(45deg, transparent 75%, #101626 75%), 
-        linear-gradient(-45deg, transparent 75%, #101626 75%);
+        linear-gradient(45deg, #f1f5f9 25%, transparent 25%), 
+        linear-gradient(-45deg, #f1f5f9 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #f1f5f9 75%), 
+        linear-gradient(-45deg, transparent 75%, #f1f5f9 75%);
       background-size: 20px 20px;
       background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-      background-color: #050810;
+      background-color: #ffffff;
     }
     canvas#editor-canvas {
       position: absolute;
@@ -3080,50 +3110,52 @@ HTML_PAGE = r"""<!DOCTYPE html>
       display: none;
       z-index: 100;
     }
-    .cursor-recover { border-color: #10b981 !important; background: rgba(16, 185, 129, 0.2); }
-    .cursor-erase { border-color: #f43f5e !important; background: rgba(244, 63, 94, 0.2); }
+    .cursor-recover { border-color: #059669 !important; background: rgba(5, 150, 105, 0.2); }
+    .cursor-erase { border-color: #e11d48 !important; background: rgba(225, 29, 72, 0.2); }
 
     .stage-hint {
       position: absolute;
       bottom: 12px;
       font-size: 0.75rem;
-      color: #94a3b8;
-      background: rgba(8, 12, 20, 0.88);
+      color: #475569;
+      background: rgba(255, 255, 255, 0.92);
       padding: 5px 14px;
       border-radius: 20px;
-      border: 1px solid rgba(212, 175, 55, 0.25);
+      border: 1px solid rgba(180, 140, 45, 0.25);
       display: flex;
       align-items: center;
       gap: 10px;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
     }
 
     /* Carousel */
     .carousel-bar {
       height: 120px;
-      background: #080c16;
-      border-top: 1px solid rgba(212, 175, 55, 0.2);
+      background: #ffffff;
+      border-top: 1px solid rgba(180, 140, 45, 0.2);
       padding: 8px 16px;
       display: flex;
       align-items: center;
       gap: 10px;
       overflow-x: auto;
       flex-shrink: 0;
+      box-shadow: 0 -4px 15px rgba(15, 23, 42, 0.03);
     }
     .carousel-item {
       display: flex;
       flex-direction: column;
       align-items: center;
       padding: 5px;
-      background: #050810;
-      border: 1px solid rgba(212, 175, 55, 0.15);
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.2);
       border-radius: 8px;
       cursor: pointer;
       min-width: 78px;
       transition: all 0.15s;
       position: relative;
     }
-    .carousel-item:hover { border-color: var(--gold-primary); transform: translateY(-2px); }
-    .carousel-item.active { border-color: var(--gold-primary); background: rgba(212, 175, 55, 0.12); box-shadow: 0 0 12px rgba(212, 175, 55, 0.25); }
+    .carousel-item:hover { border-color: var(--gold-primary); transform: translateY(-2px); background: #fdfbf7; }
+    .carousel-item.active { border-color: var(--gold-primary); background: #fefce8; box-shadow: 0 0 12px rgba(184, 134, 11, 0.25); }
     .carousel-item img { width: 50px; height: 60px; object-fit: cover; border-radius: 4px; }
     .carousel-item span {
       font-size: 0.65rem;
@@ -3138,16 +3170,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .status-dot {
       position: absolute;
       top: 4px; right: 4px; width: 8px; height: 8px;
-      border-radius: 50%; background: #64748b;
+      border-radius: 50%; background: #94a3b8;
     }
-    .status-dot.saved { background: #10b981; box-shadow: 0 0 6px #10b981; }
+    .status-dot.saved { background: #059669; box-shadow: 0 0 6px #059669; }
     .status-dot.cutout { background: var(--gold-primary); box-shadow: 0 0 6px var(--gold-primary); }
 
     /* Loading Overlay */
     .loading-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(4, 6, 10, 0.9);
+      background: rgba(255, 255, 255, 0.88);
       display: none;
       flex-direction: column;
       align-items: center;
@@ -3157,12 +3189,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       backdrop-filter: blur(8px);
     }
     .spinner {
-      width: 32px; height: 32px;
-      border: 3px solid rgba(212, 175, 55, 0.2);
+      width: 34px; height: 34px;
+      border: 3px solid rgba(180, 140, 45, 0.2);
       border-top-color: var(--gold-primary);
       border-radius: 50%;
       animation: spin 0.8s linear infinite;
-      box-shadow: 0 0 15px rgba(212, 175, 55, 0.3);
+      box-shadow: 0 0 15px rgba(184, 134, 11, 0.25);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -3172,7 +3204,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .saas-modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(3, 5, 8, 0.88);
+      background: rgba(15, 23, 42, 0.45);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
       display: none;
@@ -3188,32 +3220,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
       to { opacity: 1; transform: scale(1); }
     }
     .saas-modal-card {
-      background: #090d18;
-      border: 1px solid rgba(212, 175, 55, 0.32);
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.32);
       border-radius: 18px;
       width: 100%;
       max-width: 620px;
       max-height: 90vh;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 30px 75px -15px rgba(0, 0, 0, 0.95), 0 0 35px rgba(212, 175, 55, 0.08);
+      box-shadow: 0 25px 65px -15px rgba(15, 23, 42, 0.2), 0 0 35px rgba(180, 140, 45, 0.08);
       position: relative;
       overflow: hidden;
     }
     .saas-modal-card.wide { max-width: 900px; }
     .saas-modal-header {
       padding: 20px 26px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.2);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #060910;
+      background: #fbfcfe;
     }
     .saas-modal-title {
       font-family: var(--font-royal);
       font-size: 1.25rem;
       font-weight: 700;
-      color: #fff;
+      color: #0f172a;
       display: flex;
       align-items: center;
       gap: 10px;
@@ -3222,7 +3254,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .saas-modal-close {
       background: transparent;
       border: none;
-      color: #94a3b8;
+      color: #64748b;
       font-size: 1.3rem;
       cursor: pointer;
       padding: 4px 8px;
@@ -3231,8 +3263,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.15s;
     }
     .saas-modal-close:hover {
-      background: rgba(212, 175, 55, 0.15);
-      color: #fff;
+      background: rgba(184, 134, 11, 0.12);
+      color: #0f172a;
     }
     .saas-modal-body {
       padding: 26px;
@@ -3242,7 +3274,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .saas-tabs {
       display: flex;
       gap: 8px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.2);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.2);
       margin-bottom: 22px;
       padding-bottom: 2px;
     }
@@ -3281,9 +3313,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .saas-input {
       width: 100%;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.24);
-      color: #fff;
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.28);
+      color: #0f172a;
       padding: 11px 16px;
       border-radius: 8px;
       font-size: 0.88rem;
@@ -3293,13 +3325,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .saas-input:focus {
       border-color: var(--gold-primary);
-      box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.25);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
     }
     .saas-textarea {
       width: 100%;
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.24);
-      color: #e2e8f0;
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.26);
+      color: #0f172a;
       padding: 12px 16px;
       border-radius: 8px;
       font-size: 0.85rem;
@@ -3311,15 +3343,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .saas-textarea:focus {
       border-color: var(--gold-primary);
-      box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.25);
+      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
     }
     .seat-meter-card {
-      background: #060910;
-      border: 1px solid rgba(212, 175, 55, 0.25);
+      background: #f8fafc;
+      border: 1px solid rgba(180, 140, 45, 0.25);
       border-radius: 14px;
       padding: 18px;
       margin-bottom: 22px;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
     }
     .seat-meter-header {
       display: flex;
@@ -3329,9 +3361,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       font-size: 0.85rem;
     }
     .seat-bar-track {
-      background: #0a0e18;
+      background: #e2e8f0;
       height: 9px;
-      border: 1px solid rgba(212, 175, 55, 0.2);
+      border: 1px solid rgba(180, 140, 45, 0.2);
       border-radius: 999px;
       overflow: hidden;
       position: relative;
@@ -3339,7 +3371,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .seat-bar-fill {
       height: 100%;
       background: var(--gold-gradient);
-      box-shadow: 0 0 12px rgba(212, 175, 55, 0.4);
+      box-shadow: 0 0 10px rgba(184, 134, 11, 0.35);
       transition: width 0.3s ease;
     }
     .saas-table {
@@ -3350,27 +3382,27 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .saas-table th {
       text-align: left;
       padding: 11px 14px;
-      background: #05070e;
+      background: #f8fafc;
       color: var(--text-gold);
       font-family: var(--font-royal);
       font-weight: 700;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.25);
+      border-bottom: 1px solid rgba(180, 140, 45, 0.25);
       font-size: 0.74rem;
       text-transform: uppercase;
       letter-spacing: 0.08em;
     }
     .saas-table td {
       padding: 12px 14px;
-      border-bottom: 1px solid rgba(212, 175, 55, 0.1);
-      color: #e2e8f0;
+      border-bottom: 1px solid rgba(180, 140, 45, 0.12);
+      color: #1e293b;
       vertical-align: middle;
     }
     .saas-table tr:hover td {
-      background: rgba(212, 175, 55, 0.04);
+      background: #fdfbf7;
     }
     .btn-copy-link {
-      background: rgba(212, 175, 55, 0.12);
-      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(184, 134, 11, 0.08);
+      border: 1px solid rgba(184, 134, 11, 0.35);
       color: var(--text-gold);
       padding: 4px 10px;
       border-radius: 6px;
@@ -3383,13 +3415,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.15s;
     }
     .btn-copy-link:hover {
-      background: rgba(212, 175, 55, 0.25);
-      color: #fff;
+      background: rgba(184, 134, 11, 0.18);
+      color: #5c410c;
     }
     .btn-revoke-user {
-      background: rgba(244, 63, 94, 0.12);
-      border: 1px solid rgba(244, 63, 94, 0.35);
-      color: #fda4af;
+      background: rgba(225, 29, 72, 0.08);
+      border: 1px solid rgba(225, 29, 72, 0.32);
+      color: #be123c;
       padding: 4px 10px;
       border-radius: 6px;
       font-size: 0.72rem;
@@ -3398,12 +3430,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       transition: all 0.15s;
     }
     .btn-revoke-user:hover {
-      background: rgba(244, 63, 94, 0.25);
+      background: rgba(225, 29, 72, 0.16);
     }
     .result-pill-added {
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.35);
-      color: #6ee7b7;
+      background: rgba(5, 150, 105, 0.08);
+      border: 1px solid rgba(5, 150, 105, 0.3);
+      color: #065f46;
       padding: 6px 12px;
       border-radius: 6px;
       font-size: 0.78rem;
@@ -3413,9 +3445,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-bottom: 6px;
     }
     .result-pill-skipped {
-      background: rgba(245, 158, 11, 0.12);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      color: #fde68a;
+      background: rgba(217, 119, 6, 0.08);
+      border: 1px solid rgba(217, 119, 6, 0.3);
+      color: #92400e;
       padding: 6px 12px;
       border-radius: 6px;
       font-size: 0.78rem;
@@ -3527,7 +3559,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </button>
 
-              <div style="margin-top:16px; padding-top:14px; border-top:1px solid #1e293b; display:flex; justify-content:space-between; align-items:center;">
+              <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(180, 140, 45, 0.2); display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:0.75rem; color:var(--text-muted);">Evaluation Demo Access:</span>
                 <button type="button" class="btn-demo-fill" onclick="fillDemoGatewayCredentials()">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -3581,7 +3613,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#05070a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18M4 18l2-10 5 6 3-8 3 8 5-6 2 10H4z"/><circle cx="12" cy="4" r="1.5"/><circle cx="6" cy="8" r="1.5"/><circle cx="18" cy="8" r="1.5"/></svg>
         </div>
         <div style="display:flex; flex-direction:column; line-height:1.2;">
-          <div style="font-family:'Cinzel', serif; font-weight:800; font-size:1.05rem; letter-spacing:0.06em; color:#fff;">SOVEREIGN STUDIO</div>
+          <div style="font-family:'Cinzel', serif; font-weight:800; font-size:1.05rem; letter-spacing:0.06em; color:var(--text);">SOVEREIGN STUDIO</div>
           <div style="font-size:0.64rem; color:var(--text-gold); font-weight:700; letter-spacing:0.12em; text-transform:uppercase;">ROYAL PORTRAIT ATELIER</div>
         </div>
       </div>
@@ -3644,10 +3676,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         Download high-resolution roster portraits with custom player ID assignment, or select an existing local folder to crop into standardized 180×180 transparent headshots.
       </p>
       <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
-        <span style="font-size:0.75rem; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.35); color:#34d399; padding:5px 12px; border-radius:20px; font-weight:700; display:inline-flex; align-items:center; gap:5px;">
+        <span style="font-size:0.75rem; background:rgba(5, 150, 105, 0.08); border:1px solid rgba(5, 150, 105, 0.25); color:#047857; padding:5px 12px; border-radius:20px; font-weight:700; display:inline-flex; align-items:center; gap:5px;">
           <span style="width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block; margin-right:4px;"></span><span>Sovereign Client Direct Pipeline (0 Server Bytes)</span>
         </span>
-        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(239, 68, 68, 0.4); color:#fca5a5; font-weight:700;">
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(225, 29, 72, 0.3); color:#be123c; font-weight:700;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Server RAM</span>
         </button>
       </div>
@@ -3771,7 +3803,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
         <!-- Bulk Paste Drawer -->
         <div class="bulk-paste-drawer" id="bulk-paste-drawer">
-          <div style="font-size:0.8rem; font-weight:700; color:#fff; margin-bottom:6px;">
+          <div style="font-size:0.8rem; font-weight:700; color:var(--text); margin-bottom:6px;">
             Paste Assigned Numbers from Excel, Sheets, or Text:
           </div>
           <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:8px;">
@@ -3826,7 +3858,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <!-- Success Card -->
       <div class="roster-results-card" id="roster-success-card" style="display: none; text-align: center; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
         <div style="width:48px; height:48px; border-radius:50%; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); display:inline-flex; align-items:center; justify-content:center; color:#34d399; margin:0 auto 12px auto;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <h3 style="font-size: 1.25rem; font-weight: 800; color: #fff; margin-bottom: 6px;">Photos Downloaded to Your PC!</h3>
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text); margin-bottom: 6px;">Photos Downloaded to Your PC!</h3>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;" id="roster-success-desc">
           All portraits were downloaded directly to your computer's Downloads as a standardized ZIP (0 bytes stored on Render).
         </p>
@@ -3981,7 +4013,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <!-- Global Loading Overlay -->
   <div class="loading-overlay" id="loading-overlay">
     <div class="spinner"></div>
-    <div id="loading-text" style="font-size:0.88rem; font-weight:700; color:#fff;">Processing...</div>
+    <div id="loading-text" style="font-size:0.88rem; font-weight:700; color:var(--text);">Processing...</div>
   </div>
 
   <script>
@@ -4300,7 +4332,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           e.preventDefault();
           e.stopPropagation();
           dropZone.style.borderColor = 'var(--primary)';
-          dropZone.style.background = '#1e293b';
+          dropZone.style.background = '#fffdf5';
         });
       });
 
@@ -4308,8 +4340,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         dropZone.addEventListener(eventName, (e) => {
           e.preventDefault();
           e.stopPropagation();
-          dropZone.style.borderColor = '#28354f';
-          dropZone.style.background = '#111827';
+          dropZone.style.borderColor = 'rgba(180, 140, 45, 0.35)';
+          dropZone.style.background = '#ffffff';
         });
       });
 
@@ -5283,7 +5315,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       if (!toast) {
         toast = document.createElement('div');
         toast.id = 'studio-toast';
-        toast.style.cssText = 'position:fixed; bottom:28px; left:50%; transform:translateX(-50%); background:#0f172a; border:1px solid #38bdf8; color:#fff; padding:12px 24px; border-radius:30px; font-size:0.88rem; font-weight:700; box-shadow:0 10px 35px rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity 0.25s, transform 0.25s; pointer-events:none;';
+        toast.style.cssText = 'position:fixed; bottom:28px; left:50%; transform:translateX(-50%); background:#ffffff; border:1px solid rgba(180, 140, 45, 0.4); color:#0f172a; box-shadow:0 12px 35px rgba(15,23,42,0.12); padding:12px 24px; border-radius:30px; font-size:0.88rem; font-weight:700; box-shadow:0 10px 35px rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity 0.25s, transform 0.25s; pointer-events:none;';
         document.body.appendChild(toast);
       }
       toast.textContent = msg;
@@ -6475,10 +6507,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="seat-meter-card">
           <div class="seat-meter-header">
             <div>
-              <span style="font-weight:800; color:#fff;" id="meter-company-name">Athletics Media Group</span>
+              <span style="font-weight:800; color:var(--text);" id="meter-company-name">Athletics Media Group</span>
               <span id="meter-plan-tag" class="saas-plan-pill plan-team" style="margin-left:8px;">Team Plan</span>
             </div>
-            <div style="font-weight:700; color:#38bdf8;" id="meter-seat-text">1 / 15 Seats Used (14 Available)</div>
+            <div style="font-weight:700; color:var(--gold-primary);" id="meter-seat-text">1 / 15 Seats Used (14 Available)</div>
           </div>
           <div class="seat-bar-track">
             <div id="meter-bar-fill" class="seat-bar-fill" style="width: 7%;"></div>
@@ -6514,8 +6546,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
 
           <!-- Bulk Invite Results Box -->
-          <div id="bulk-results-box" style="display:none; margin-top:18px; border-top:1px solid #1f293d; padding-top:16px;">
-            <div style="font-size:0.85rem; font-weight:800; color:#fff; margin-bottom:10px;">Invitation Dispatch Results:</div>
+          <div id="bulk-results-box" style="display:none; margin-top:18px; border-top:1px solid rgba(180, 140, 45, 0.2); padding-top:16px;">
+            <div style="font-size:0.85rem; font-weight:800; color:var(--text); margin-bottom:10px;">Invitation Dispatch Results:</div>
             <div id="bulk-results-list" style="max-height:220px; overflow-y:auto;"></div>
           </div>
         </div>
@@ -6549,7 +6581,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
         <!-- TAB 3: MEMBERS DIRECTORY -->
         <div id="view-team-members" style="display:none;">
-          <div style="max-height:360px; overflow-y:auto; border:1px solid #1f293d; border-radius:10px;">
+          <div style="max-height:360px; overflow-y:auto; border:1px solid rgba(180, 140, 45, 0.22); border-radius:10px;">
             <table class="saas-table">
               <thead>
                 <tr>
@@ -6580,8 +6612,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
       <div class="saas-modal-body">
         <!-- Create New Tenant Company -->
-        <div style="background:#0b0f19; border:1px solid #1f293d; border-radius:12px; padding:18px; margin-bottom:24px;">
-          <div style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:14px;">Create New Tenant Company / Organization</div>
+        <div style="background:#fbfcfe; border:1px solid rgba(180, 140, 45, 0.22); border-radius:12px; padding:18px; margin-bottom:24px;">
+          <div style="font-size:0.9rem; font-weight:800; color:var(--text); margin-bottom:14px;">Create New Tenant Company / Organization</div>
           <form onsubmit="handleCreateCompanySubmit(event)">
             <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:12px; margin-bottom:12px;">
               <div>
@@ -6618,8 +6650,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         </div>
 
         <!-- Existing Companies Directory -->
-        <div style="font-size:0.85rem; font-weight:800; color:#fff; margin-bottom:10px;">Active Organizations & Subscriptions</div>
-        <div style="max-height:280px; overflow-y:auto; border:1px solid #1f293d; border-radius:10px;">
+        <div style="font-size:0.85rem; font-weight:800; color:var(--text); margin-bottom:10px;">Active Organizations & Subscriptions</div>
+        <div style="max-height:280px; overflow-y:auto; border:1px solid rgba(180, 140, 45, 0.22); border-radius:10px;">
           <table class="saas-table">
             <thead>
               <tr>
