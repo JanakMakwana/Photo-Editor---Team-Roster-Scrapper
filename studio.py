@@ -19,6 +19,7 @@ import zipfile
 import ssl
 import threading
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import gc
 import time
 import copy
@@ -2934,7 +2935,37 @@ def scrape_eliteprospects_player(url: str):
     except Exception as e:
         print(f"[Studio] DEAC cross-resolve notice: {e}")
 
-    # 3. Wikipedia lookup for any European / North American hockey player
+    # 3. Search in Bílí Tygři Liberec if matches
+    try:
+        lib_res = scrape_czech_hockey_roster("https://www.hcbilitygri.cz/roster/MUZ")
+        for p in lib_res.get("players", []):
+            if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower():
+                p_copy = dict(p)
+                p_copy["profile_url"] = url
+                p_copy["details"] = f"EliteProspects #{pid} | {p.get('details', '')}".strip(" |")
+                return {
+                    "suggested_folder": f"Bílí Tygři Liberec - {p['name']}",
+                    "players": [p_copy]
+                }
+    except Exception as e:
+        print(f"[Studio] Liberec cross-resolve notice: {e}")
+
+    # 4. Search in BK Mladá Boleslav if matches
+    try:
+        mb_res = scrape_czech_hockey_roster("https://www.bkboleslav.cz/roster/MUZ")
+        for p in mb_res.get("players", []):
+            if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower():
+                p_copy = dict(p)
+                p_copy["profile_url"] = url
+                p_copy["details"] = f"EliteProspects #{pid} | {p.get('details', '')}".strip(" |")
+                return {
+                    "suggested_folder": f"BK Mladá Boleslav - {p['name']}",
+                    "players": [p_copy]
+                }
+    except Exception as e:
+        print(f"[Studio] Mlada Boleslav cross-resolve notice: {e}")
+
+    # 5. Wikipedia lookup for any European / North American hockey player
     wiki_p = fetch_wiki_hockey_player(name)
     if wiki_p:
         v_parts = [f"EliteProspects #{pid}"]
@@ -2964,7 +2995,7 @@ def scrape_eliteprospects_player(url: str):
             }]
         }
 
-    # 4. Fallback player card with parsed metadata
+    # 6. Fallback player card with parsed metadata
     return {
         "suggested_folder": suggested_folder,
         "players": [{
@@ -2984,6 +3015,354 @@ def scrape_eliteprospects_player(url: str):
             "profile_url": url
         }]
     }
+
+
+def is_czech_hockey_url(url: str) -> bool:
+    """Detects whether a URL belongs to Czech Tipsport Extraliga or eSports.cz hockey club websites."""
+    u = url.lower()
+    return any(k in u for k in [
+        "hcbilitygri.cz", "bilitygri", "bkboleslav.cz", "bkboleslav",
+        "hcmotor.cz", "hc-vitkovice.cz", "hcocelari.cz", "hkometa.cz",
+        "hc-olomouc.cz", "hcplzen.cz", "hclitvinov.cz", "mountfieldhk.cz",
+        "hcdynamo.cz", "hc-sparta.cz", "rytirikladno.cz", "esports.cz"
+    ]) or (".cz/roster" in u) or (".cz/player" in u)
+
+
+_czech_hockey_cache = {}
+
+def scrape_czech_hockey_roster(url: str):
+    """
+    Scrapes Czech Tipsport Extraliga / eSports.cz club rosters and single player profiles
+    (e.g., Bílí Tygři Liberec, BK Mladá Boleslav, Motor České Budějovice, HC Sparta, etc.).
+    Extracts high-resolution transparent studio portrait PNGs, jersey numbers, positions,
+    shoots/stick, height, weight, birth date, and birthplace.
+    Includes memory caching for ultra-fast response.
+    """
+    global _czech_hockey_cache
+    cache_key = url.strip()
+    if cache_key in _czech_hockey_cache:
+        cached_entry = _czech_hockey_cache[cache_key]
+        if time.time() - cached_entry["time"] < 600:
+            return copy.deepcopy(cached_entry["data"])
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Connection": "close"
+    }
+
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        html = resp.read().decode("utf-8", errors="replace")
+
+    parsed_u = urllib.parse.urlparse(url)
+    base_domain = f"{parsed_u.scheme}://{parsed_u.netloc}"
+
+    # Suggested folder from og:site_name or title
+    m_og = re.search(r'<meta[^>]+property=[\"\']og:site_name[\"\'][^>]+content=[\"\']([^\"\']+)[\"\']', html, re.I)
+    if not m_og:
+        m_og = re.search(r'<meta[^>]+content=[\"\']([^\"\']+)[\"\'][^>]+property=[\"\']og:site_name[\"\']', html, re.I)
+    suggested_folder = m_og.group(1).strip() if m_og else ""
+    if not suggested_folder:
+        if "hcbilitygri" in url.lower():
+            suggested_folder = "Bílí Tygři Liberec"
+        elif "bkboleslav" in url.lower():
+            suggested_folder = "BK Mladá Boleslav"
+        else:
+            suggested_folder = "Czech Extraliga"
+
+    # Single player URL handling
+    if "/player/" in url.lower():
+        m_name = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.DOTALL)
+        full_name = re.sub(r'<[^>]+>', ' ', m_name.group(1)).strip() if m_name else ""
+        if not full_name:
+            m_t = re.search(r'<title>(.*?)</title>', html, re.DOTALL)
+            if m_t:
+                full_name = m_t.group(1).split('|')[0].strip()
+        full_name = re.sub(r'\s+', ' ', full_name).strip()
+
+        m_num = re.search(r'<span[^>]*class=[\"\'][^\"\']*jersey[^\"\']*[\"\'][^>]*>\s*(\d+)\s*</span>', html)
+        if not m_num:
+            m_num = re.search(r'<div class=[\"\']c-team__img[\"\']>.*?<span>\s*(\d+)\s*</span>', html, re.DOTALL)
+        jersey = m_num.group(1).strip() if m_num else ""
+
+        m_pos = re.search(r'Pozice\s*</div>\s*<span[^>]*>\s*([^<]+)\s*</span>', html, re.I)
+        pos_raw = m_pos.group(1).strip() if m_pos else ""
+        pos = "Goalkeeper" if "brank" in pos_raw.lower() else ("Defense" if "obr" in pos_raw.lower() else ("Forward" if "út" in pos_raw.lower() or "ut" in pos_raw.lower() else pos_raw.title()))
+
+        m_born = re.search(r'(?:Narozen|Datum narozen[ií]:)\s*(?:</div>|</span>)?\s*<span[^>]*>\s*([0-9\.\s]+)\s*</span>', html, re.I)
+        if not m_born:
+            m_born = re.search(r'Datum narozen[ií]:\s*</span>\s*([0-9\.\s]+)', html, re.I)
+        born = ""
+        if m_born:
+            b_nums = re.findall(r'\d+', m_born.group(1))
+            if len(b_nums) >= 3:
+                born = f"{b_nums[0].zfill(2)}/{b_nums[1].zfill(2)}/{b_nums[2]}"
+
+        m_hul = re.search(r'H[uů]l\s*(?:</div>|:)\s*(?:<span[^>]*>)?\s*([^\s<]+)', html, re.I)
+        sh_raw = m_hul.group(1).strip().lower() if m_hul else ""
+        shoots = "Left" if "lev" in sh_raw or sh_raw == "l" else ("Right" if "prav" in sh_raw or sh_raw in ("p", "r") else "")
+
+        m_h = re.search(r'V[yý][sš]ka\s*(?:</div>|:)\s*(?:<span[^>]*>)?\s*(\d+)', html, re.I)
+        height = f"{m_h.group(1)} cm" if m_h else ""
+        m_w = re.search(r'V[aá]ha\s*(?:</div>|:)\s*(?:<span[^>]*>)?\s*(\d+)', html, re.I)
+        weight = f"{m_w.group(1)} kg" if m_w else ""
+
+        m_img = re.search(r'<img[^>]+(?:data-src|src)=[\"\']([^\"\']+(?:foto_lib|foto_mbl|foto_)[^\"\'\s]+)[\"\']', html)
+        img_url = m_img.group(1).strip() if m_img else ""
+        if "file=" in img_url:
+            parsed_img = urllib.parse.urlparse(img_url)
+            qs = urllib.parse.parse_qs(parsed_img.query)
+            if "file" in qs:
+                img_url = qs["file"][0]
+        img_url = re.sub(r'\?.*$', '', img_url).replace("esports.cz//", "esports.cz/")
+        official_img = img_url.replace("Profil", "Soupiska").replace("Gesta", "Soupiska")
+
+        birthplace = "Czech Republic"
+        if re.search(r'(kanad|vancouver|ontario|quebec)', html, re.I):
+            birthplace = "Canada"
+        elif re.search(r'(loty[sš]|riga)', html, re.I):
+            birthplace = "Latvia"
+        elif re.search(r'([sš]v[eé]d|stockholm)', html, re.I):
+            birthplace = "Sweden"
+        elif re.search(r'(slovensk|slovensko|bansk|ko[sš]ic)', html, re.I):
+            birthplace = "Slovakia"
+        elif re.search(r'(finsk|helsinki)', html, re.I):
+            birthplace = "Finland"
+        elif re.search(r'(americ|usa)', html, re.I):
+            birthplace = "USA"
+
+        v_parts = []
+        if shoots: v_parts.append(f"Shoots: {shoots}")
+        if height: v_parts.append(f"Ht: {height}")
+        if weight: v_parts.append(f"Wt: {weight}")
+        if born: v_parts.append(f"Born: {born}")
+        if birthplace: v_parts.append(f"Birthplace: {birthplace}")
+
+        res = {
+            "suggested_folder": f"{suggested_folder} - {full_name}".strip(" -"),
+            "players": [{
+                "name": full_name,
+                "jersey": jersey,
+                "position": pos or "Player",
+                "pos": pos or "Player",
+                "shoots": shoots,
+                "height": height,
+                "weight": weight,
+                "born": born,
+                "birthplace": birthplace,
+                "details": " | ".join(v_parts) or f"{suggested_folder} #{jersey}".strip(),
+                "image": official_img or img_url,
+                "raw_image": official_img or img_url,
+                "assigned_number": "",
+                "profile_url": url
+            }]
+        }
+        _czech_hockey_cache[cache_key] = {"time": time.time(), "data": res}
+        return res
+
+    # Full Roster
+    pos_map = {
+        "brankáři": "Goalkeeper",
+        "brankari": "Goalkeeper",
+        "obránci": "Defense",
+        "obranci": "Defense",
+        "útočníci": "Forward",
+        "utocnici": "Forward"
+    }
+
+    parts = re.split(r'<h[23][^>]*>\s*([^<]+)\s*</h[23]>', html)
+    raw_players = []
+
+    for i in range(1, len(parts), 2):
+        sec_title = parts[i].strip()
+        sec_html = parts[i+1]
+        if sec_title.lower() not in pos_map:
+            continue
+        pos = pos_map[sec_title.lower()]
+
+        # Format A: Liberec style (roster-item)
+        if "roster-item" in sec_html:
+            cards = re.findall(r'<div[^>]*class=[\"\'][^\"\']*roster-item\s+[^\"\']*[\"\'][^>]*>(.*?)(?=<div[^>]*class=[\"\'][^\"\']*roster-item\s+[^\"\']*[\"\']|</section|</div>\s*</div>\s*</div>\s*</div>)', sec_html, re.DOTALL)
+            for card in cards:
+                m_num = re.search(r'class=[\"\']jersey[^\"]*[\"\'][^>]*>\s*(\d+)\s*<', card)
+                jersey = m_num.group(1).strip() if m_num else ""
+
+                m_name = re.search(r'<h3[^>]*class=[\"\'][^\"\']*name[^\"\']*[\"\'][^>]*>(.*?)</h3>', card, re.DOTALL)
+                if m_name:
+                    n_raw = m_name.group(1)
+                    first = re.search(r'<span[^>]*>([^<]+)</span>', n_raw)
+                    first_name = first.group(1).strip() if first else ""
+                    last_name = re.sub(r'<[^>]+>', ' ', n_raw)
+                    last_name = re.sub(r'\s+', ' ', last_name).replace(first_name, '').strip()
+                    full_name = f"{first_name} {last_name}".strip()
+                else:
+                    full_name = ""
+
+                m_prim = (
+                    re.search(r'<img[^>]+class=[\"\'][^\"\']*player-primary[^\"\']*[\"\'][^>]+data-src=[\"\']([^\"\']+)[\"\']', card) or
+                    re.search(r'<img[^>]+data-src=[\"\']([^\"\']+)[\"\'][^>]+class=[\"\'][^\"\']*player-primary[^\"\']*[\"\']', card) or
+                    re.search(r'<img[^>]+class=[\"\'][^\"\']*player-primary[^\"\']*[\"\'][^>]+src=[\"\']([^\"\']+)[\"\']', card) or
+                    re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\'][^>]+class=[\"\'][^\"\']*player-primary[^\"\']*[\"\']', card) or
+                    re.search(r'<img[^>]+data-src=[\"\']([^\"\']*Soupiska[^\"\']*)[\"\']', card) or
+                    re.search(r'<img[^>]+src=[\"\']([^\"\']*Soupiska[^\"\']*)[\"\']', card) or
+                    re.search(r'<img[^>]+data-src=[\"\']([^\"\']+)[\"\']', card) or
+                    re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', card)
+                )
+                img_url = m_prim.group(1).strip() if m_prim else ""
+                clean_img = re.sub(r'\?.*$', '', img_url).replace("esports.cz//", "esports.cz/")
+                official_img = clean_img.replace("Profil", "Soupiska").replace("Gesta", "Soupiska")
+
+                m_link = re.search(r'<a[^>]+href=[\"\'](/player/[^\"\'#]+)[\"\']', card)
+                link = m_link.group(1).strip() if m_link else ""
+                profile_url = urllib.parse.urljoin(base_domain, link) if link else ""
+
+                m_h = re.search(r'v[yý][sš]ka\s*</span>\s*<div[^>]*>\s*(\d+)\s*</div>', card, re.I)
+                height = f"{m_h.group(1)} cm" if m_h else ""
+                m_w = re.search(r'v[aá]ha\s*</span>\s*<div[^>]*>\s*(\d+)\s*</div>', card, re.I)
+                weight = f"{m_w.group(1)} kg" if m_w else ""
+
+                raw_players.append({
+                    "name": full_name,
+                    "jersey": jersey,
+                    "position": pos,
+                    "pos": pos,
+                    "image": official_img or clean_img,
+                    "raw_image": official_img or clean_img,
+                    "shoots": "",
+                    "height": height,
+                    "weight": weight,
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": "",
+                    "profile_url": profile_url
+                })
+
+        # Format B: BK Mladá Boleslav style (c-team__item)
+        elif "c-team__item" in sec_html:
+            matches = re.findall(r'<a\s+href=[\"\'](/player/[^\"\'#]+)[\"\'][^>]*class=[\"\'][^\"\']*c-team__item[^\"\']*[\"\'][^>]*>(.*?)</a>', sec_html, re.DOTALL)
+            for link, item in matches:
+                m_num = re.search(r'<div class=[\"\']c-team__img[\"\']>.*?<span>\s*(\d+)\s*</span>', item, re.DOTALL)
+                jersey = m_num.group(1).strip() if m_num else ""
+
+                m_name = re.search(r'<h3[^>]*>(.*?)</h3>', item, re.DOTALL)
+                if m_name:
+                    n_raw = m_name.group(1)
+                    first = re.search(r'<span[^>]*>([^<]+)</span>', n_raw)
+                    first_name = first.group(1).strip() if first else ""
+                    last_name = re.sub(r'<[^>]+>', ' ', n_raw)
+                    last_name = re.sub(r'\s+', ' ', last_name).replace(first_name, '').strip()
+                    full_name = f"{first_name} {last_name}".strip()
+                else:
+                    full_name = ""
+
+                m_img = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', item)
+                img_url = m_img.group(1).strip() if m_img else ""
+                if "file=" in img_url:
+                    parsed_img = urllib.parse.urlparse(img_url)
+                    qs = urllib.parse.parse_qs(parsed_img.query)
+                    if "file" in qs:
+                        img_url = qs["file"][0]
+                img_url = re.sub(r'\?.*$', '', img_url).replace("esports.cz//", "esports.cz/")
+
+                m_h = re.search(r'<li>\s*(\d+\s*cm)\s*</li>', item, re.I)
+                height = m_h.group(1).strip() if m_h else ""
+                m_w = re.search(r'<li>\s*(\d+\s*kg)\s*</li>', item, re.I)
+                weight = m_w.group(1).strip() if m_w else ""
+                m_s = re.search(r'<li>\s*([LRlPrp])\s*</li>', item)
+                sh_code = m_s.group(1).upper() if m_s else ""
+                shoots = "Left" if sh_code in ("L", "LEVÁ", "LEVA") else ("Right" if sh_code in ("P", "R", "PRAVÁ", "PRAVA") else "")
+
+                profile_url = urllib.parse.urljoin(base_domain, link)
+
+                raw_players.append({
+                    "name": full_name,
+                    "jersey": jersey,
+                    "position": pos,
+                    "pos": pos,
+                    "image": img_url,
+                    "raw_image": img_url,
+                    "shoots": shoots,
+                    "height": height,
+                    "weight": weight,
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": "",
+                    "profile_url": profile_url
+                })
+
+    # Concurrently enrich born, shoots, and birthplace from profile pages
+    def fetch_player_vitals(p):
+        p_url = p.get("profile_url")
+        if not p_url:
+            return p
+        try:
+            r = urllib.request.Request(p_url, headers=headers)
+            with urllib.request.urlopen(r, context=ctx, timeout=5) as r_resp:
+                h = r_resp.read().decode("utf-8", errors="replace")
+
+                # Born
+                if not p.get("born"):
+                    m_born = re.search(r'(?:Narozen|Datum narozen[ií]:)\s*(?:</div>|</span>)?\s*<span[^>]*>\s*([0-9\.\s]+)\s*</span>', h, re.I)
+                    if not m_born:
+                        m_born = re.search(r'Datum narozen[ií]:\s*</span>\s*([0-9\.\s]+)', h, re.I)
+                    if m_born:
+                        b_nums = re.findall(r'\d+', m_born.group(1))
+                        if len(b_nums) >= 3:
+                            p["born"] = f"{b_nums[0].zfill(2)}/{b_nums[1].zfill(2)}/{b_nums[2]}"
+
+                # Shoots
+                if not p.get("shoots"):
+                    m_hul = re.search(r'H[uů]l\s*(?:</div>|:)\s*(?:<span[^>]*>)?\s*([^\s<]+)', h, re.I)
+                    if m_hul:
+                        raw_s = m_hul.group(1).strip().lower()
+                        p["shoots"] = "Left" if "lev" in raw_s or raw_s == "l" else ("Right" if "prav" in raw_s or raw_s in ("p", "r") else "")
+
+                # Nationality / Birthplace heuristics from player bio
+                if not p.get("birthplace"):
+                    if re.search(r'(kanad|vancouver|ontario|quebec)', h, re.I):
+                        p["birthplace"] = "Canada"
+                    elif re.search(r'(loty[sš]|riga)', h, re.I):
+                        p["birthplace"] = "Latvia"
+                    elif re.search(r'([sš]v[eé]d|stockholm)', h, re.I):
+                        p["birthplace"] = "Sweden"
+                    elif re.search(r'(slovensk|slovensko|bansk|ko[sš]ic)', h, re.I):
+                        p["birthplace"] = "Slovakia"
+                    elif re.search(r'(finsk|helsinki)', h, re.I):
+                        p["birthplace"] = "Finland"
+                    elif re.search(r'(americ|usa)', h, re.I):
+                        p["birthplace"] = "USA"
+                    else:
+                        p["birthplace"] = "Czech Republic"
+        except Exception:
+            if not p.get("birthplace"):
+                p["birthplace"] = "Czech Republic"
+
+        # Details
+        v_parts = []
+        if p.get("shoots"): v_parts.append(f"Shoots: {p['shoots']}")
+        if p.get("height"): v_parts.append(f"Ht: {p['height']}")
+        if p.get("weight"): v_parts.append(f"Wt: {p['weight']}")
+        if p.get("born"): v_parts.append(f"Born: {p['born']}")
+        if p.get("birthplace"): v_parts.append(f"Birthplace: {p['birthplace']}")
+        p["details"] = " | ".join(v_parts)
+        return p
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+        final_players = list(executor.map(fetch_player_vitals, raw_players))
+
+    res = {
+        "suggested_folder": suggested_folder,
+        "players": final_players
+    }
+    _czech_hockey_cache[cache_key] = {"time": time.time(), "data": res}
+    return res
 
 
 def is_del_or_german_hockey_url(url: str) -> bool:
@@ -3006,6 +3385,7 @@ def scrape_roster_data(url: str):
     """
     Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL,
     UK Teams, German DEL/DEL2 (Dresdner Eislöwen, Düsseldorfer EG, Red Bull München),
+    Czech Extraliga (Bílí Tygři Liberec, BK Mladá Boleslav), Erste Liga,
     or College/NCAA athletics scrapers with automatic fallbacks.
     """
     url_lower = url.lower()
@@ -3062,7 +3442,16 @@ def scrape_roster_data(url: str):
         except Exception as e:
             print(f"[Studio] Gyergyoi scraper notice: {e}, falling back...")
 
-    # 6. EliteProspects player profiles
+    # 6. Czech Extraliga (Bílí Tygři Liberec, BK Mladá Boleslav, eSports.cz, etc.)
+    if is_czech_hockey_url(url):
+        try:
+            res = scrape_czech_hockey_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Czech Extraliga scraper notice: {e}, falling back...")
+
+    # 7. EliteProspects player profiles
     if "eliteprospects.com" in url_lower:
         try:
             res = scrape_eliteprospects_player(url)
@@ -5356,6 +5745,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Quick Presets:</span>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://jegkorong.deac.hu/a-csapat', 'DEAC')">DEAC (Erste Liga)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://gyergyoihoki.ro/jatekosok-2/', 'Gyergyói Hoki Klub')">Gyergyói HK (Erste Liga)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.hcbilitygri.cz/roster/MUZ', 'Bílí Tygři Liberec')">Bílí Tygři Liberec (Extraliga)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.bkboleslav.cz/roster/MUZ', 'BK Mladá Boleslav')">BK Mladá Boleslav (Extraliga)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">Cardiff Devils (EIHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">Coventry Blaze (EIHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">Belfast Giants (EIHL)</button>
