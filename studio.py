@@ -5675,11 +5675,6 @@ HTML_PAGE = r"""<!DOCTYPE html>
           workbenchTeamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
         }
 
-        const workbenchTeamBtn = document.getElementById('btn-workbench-team');
-        if (workbenchTeamBtn) {
-          workbenchTeamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
-        }
-
         if (currentCompany) {
           if (companyWrapper) companyWrapper.style.display = 'inline-flex';
           const compNameEl = document.getElementById('nav-company-name');
