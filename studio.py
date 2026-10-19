@@ -2096,22 +2096,428 @@ def scrape_eisloewen_roster(url: str, html: str = None):
     }
 
 
+# --- DÜSSELDORFER EG (DEG) SCRAPER ---
+
+def clean_deg_image_url(srcset: str, src: str) -> str:
+    """Extracts highest resolution uncompressed PNG cutout headshot for DEG players."""
+    if srcset:
+        candidates = []
+        for part in srcset.split(','):
+            p = part.strip().split()
+            if len(p) >= 1:
+                url = p[0]
+                width = int(p[1].replace('w', '')) if len(p) > 1 and p[1].endswith('w') else 0
+                candidates.append((width, url))
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        if candidates:
+            return candidates[0][1]
+    if src:
+        return re.sub(r'-\d+x\d+(\.[a-zA-Z0-9]+)$', r'\1', src)
+    return ""
+
+
+def scrape_deg_roster(url: str):
+    """
+    Scrapes Düsseldorfer EG (DEG) roster from deg-eishockey.de/kader/,
+    extracting player cards, jersey numbers, positions, and 1366w uncompressed cutout headshots.
+    """
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"}
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    u_lower = url.lower().rstrip('/')
+
+    # Check if single player profile page
+    if "/team/" in u_lower and not any(k in u_lower for k in ["/kader", "/mannschaft"]):
+        return parse_deg_single_player(url, html)
+
+    suggested_folder = "Düsseldorfer EG"
+    sections = re.split(r'(?=<h2[^>]*>)', html)
+
+    players = []
+    seen = set()
+
+    for sec in sections:
+        h2_m = re.search(r'<h2[^>]*>(.*?)</h2>', sec, re.DOTALL)
+        sec_title = ""
+        if h2_m:
+            sec_title = re.sub(r'<[^>]+>', '', h2_m.group(1)).strip()
+
+        cards = re.findall(r'<div[^>]*class=["\'][^"\']*df-card[^"\']*["\'][^>]*>(.*?)</div>\s*</div>', sec, re.DOTALL)
+        for c in cards:
+            name_m = re.search(r'class=["\'][^"\']*df-name[^"\']*["\'][^>]*>([^<]+)<', c)
+            name = name_m.group(1).strip() if name_m else ""
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            num_m = re.search(r'class=["\'][^"\']*df-number[^"\']*["\'][^>]*>(\d+)<', c)
+            jersey = num_m.group(1).strip() if num_m else ""
+
+            pos = normalize_german_position(sec_title)
+
+            link_m = re.search(r'<a[^>]+href=["\']([^"\']+)["\']', c)
+            profile_url = link_m.group(1).strip() if link_m else ""
+
+            src_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', c)
+            srcset_m = re.search(r'<img[^>]+srcset=["\']([^"\']+)["\']', c)
+            img_url = clean_deg_image_url(srcset_m.group(1) if srcset_m else "", src_m.group(1) if src_m else "")
+
+            players.append({
+                "name": name,
+                "jersey": jersey,
+                "position": pos,
+                "pos": pos,
+                "image": img_url,
+                "raw_image": img_url,
+                "shoots": "",
+                "height": "",
+                "weight": "",
+                "born": "",
+                "birthplace": "",
+                "details": "",
+                "assigned_number": "",
+                "profile_url": profile_url
+            })
+
+    # Enrich players with profile details in parallel
+    if any(p.get("profile_url") for p in players):
+        def _enrich_deg_player(p):
+            purl = p.get("profile_url")
+            if not purl or not purl.startswith("http"):
+                return p
+            try:
+                r = urllib.request.Request(purl, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(r, timeout=4) as rp:
+                    h = rp.read().decode("utf-8", errors="ignore")
+                    meta_items = re.findall(r'<strong>([^<]+):</strong>\s*([^<]+)', h)
+                    for k, v in meta_items:
+                        kl = k.strip().lower()
+                        vl = v.strip()
+                        if "schuss" in kl or "fanghand" in kl:
+                            p["shoots"] = "Left" if "link" in vl.lower() else ("Right" if "recht" in vl.lower() else vl)
+                        elif "größe" in kl or "grosse" in kl:
+                            p["height"] = vl
+                        elif "gewicht" in kl:
+                            p["weight"] = vl
+                        elif "geburt" in kl:
+                            p["born"] = vl
+                    v_summary = []
+                    if p["born"]: v_summary.append(f"Born: {p['born']}")
+                    if p["shoots"]: v_summary.append(f"Shoots: {p['shoots']}")
+                    if p["height"]: v_summary.append(f"Height: {p['height']}")
+                    if p["weight"]: v_summary.append(f"Weight: {p['weight']}")
+                    p["details"] = " | ".join(v_summary)
+            except Exception:
+                pass
+            return p
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            players = list(ex.map(_enrich_deg_player, players))
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": players
+    }
+
+
+def parse_deg_single_player(url: str, html: str):
+    """Scrapes a single DEG player profile page."""
+    suggested_folder = "Düsseldorfer EG"
+    name = ""
+    title_m = re.search(r'<title>(.*?)</title>', html)
+    if title_m:
+        raw_t = re.sub(r'<[^>]+>', '', title_m.group(1))
+        name = re.split(r'[-–|•&#]', raw_t)[0].strip()
+
+    num_m = re.search(r'class=["\'][^"\']*(?:df-number|number)[^"\']*["\'][^>]*>(\d+)<', html)
+    jersey = num_m.group(1).strip() if num_m else ""
+
+    shoots = ""
+    height = ""
+    weight = ""
+    born = ""
+    pos = ""
+
+    meta_items = re.findall(r'<strong>([^<]+):</strong>\s*([^<]+)', html)
+    for k, v in meta_items:
+        kl = k.strip().lower()
+        vl = v.strip()
+        if "position" in kl:
+            pos = normalize_german_position(vl)
+        elif "schuss" in kl or "fanghand" in kl:
+            shoots = "Left" if "link" in vl.lower() else ("Right" if "recht" in vl.lower() else vl)
+        elif "größe" in kl or "grosse" in kl:
+            height = vl
+        elif "gewicht" in kl:
+            weight = vl
+        elif "geburt" in kl:
+            born = vl
+
+    src_m = re.search(r'class=["\'][^"\']*df-player-image[^"\']*["\'][^>]*>.*?<img[^>]+src=["\']([^"\']+)["\']', html, re.DOTALL)
+    if not src_m:
+        src_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', html)
+    srcset_m = re.search(r'<img[^>]+srcset=["\']([^"\']+)["\']', html)
+    img_url = clean_deg_image_url(srcset_m.group(1) if srcset_m else "", src_m.group(1) if src_m else "")
+
+    v_summary = []
+    if born: v_summary.append(f"Born: {born}")
+    if shoots: v_summary.append(f"Shoots: {shoots}")
+    if height: v_summary.append(f"Height: {height}")
+    if weight: v_summary.append(f"Weight: {weight}")
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": [{
+            "name": name,
+            "jersey": jersey,
+            "position": pos,
+            "pos": pos,
+            "image": img_url,
+            "raw_image": img_url,
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(v_summary),
+            "assigned_number": "",
+            "profile_url": url
+        }]
+    }
+
+
+# --- EHC RED BULL MÜNCHEN / PENNY DEL SCRAPER ---
+
+def get_redbull_cloudinary_url(player_name: str) -> str:
+    """Constructs the official high-resolution 1200w transparent cutout portrait from Red Bull's Cloudinary CDN."""
+    clean_n = re.sub(r'[^a-zA-ZäöüÄÖÜß\s\-]', '', player_name).strip()
+    parts = clean_n.split()
+    if len(parts) >= 2:
+        fn = "_".join(parts)
+        return f"https://media.redbullmuenchen.de/image/upload/c_scale,w_1200/Portrait_{fn}_26_27.png"
+    return ""
+
+
+def scrape_redbull_or_del_roster(url: str):
+    """
+    Scrapes EHC Red Bull München from redbullmuenchen.de or official PENNY DEL hub,
+    extracting players, jersey numbers, positions, stats, and 1200w high-res Cloudinary cutout headshots.
+    """
+    suggested_folder = "EHC Red Bull München"
+    html = None
+
+    # Try fetching from user's URL first
+    if "redbullmuenchen.de" in url.lower():
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                if resp.status == 200:
+                    html = resp.read().decode("utf-8", errors="ignore")
+        except Exception:
+            html = None
+
+    # If Red Bull origin server is experiencing an outage (500/503) or page is empty, fetch official PENNY DEL roster
+    if not html or "Internal Server Error" in html or len(html) < 5000:
+        penny_url = "https://www.penny-del.org/teams/ehc-red-bull-muenchen/kader"
+        req = urllib.request.Request(
+            penny_url,
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+    players = []
+    seen = set()
+
+    # Strategy A: PENNY DEL roster table
+    trs = re.findall(r'<tr[^>]*>.*?</tr>', html, re.DOTALL)
+    for tr in trs:
+        img_m = re.search(r'<img[^>]+alt=["\']([^"\']+)["\'][^>]+src=["\']([^"\']+)["\']', tr)
+        if not img_m:
+            img_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\'][^>]+alt=["\']([^"\']+)["\']', tr)
+        if not img_m:
+            continue
+
+        raw_name = img_m.group(1).strip()
+        if not raw_name or len(raw_name) < 3 or raw_name in seen or any(k in raw_name.lower() for k in ["logo", "banner", "penny", "telekom"]):
+            continue
+
+        # Extract number from first <td> or digits
+        num_m = re.search(r'<td[^>]*>\s*#?(\d{1,2})\s*</td>', tr)
+        if not num_m:
+            num_m = re.search(r'>\s*#?(\d{1,2})\s*<', tr)
+        jersey = num_m.group(1).strip() if num_m else ""
+
+        # Row text tokens
+        txt = re.sub(r'<[^>]+>', ' ', tr)
+        tokens = txt.split()
+
+        pos = "Forward"
+        shoots = ""
+        height = ""
+        weight = ""
+        birthplace = ""
+        born = ""
+
+        # In PENNY DEL table: [Jersey] [Name] [Nat] [L/R] [Age] [Height] [Weight] [Birthplace]
+        for idx, tk in enumerate(tokens):
+            if tk in ("L", "R"):
+                shoots = "Left" if tk == "L" else "Right"
+                if idx + 1 < len(tokens) and tokens[idx+1].isdigit():
+                    born = f"Age {tokens[idx+1]}"
+                if idx + 2 < len(tokens) and tokens[idx+2].isdigit() and int(tokens[idx+2]) > 150:
+                    height = f"{tokens[idx+2]} cm"
+                if idx + 3 < len(tokens) and tokens[idx+3].isdigit() and int(tokens[idx+3]) > 50:
+                    weight = f"{tokens[idx+3]} kg"
+                if idx + 4 < len(tokens):
+                    birthplace = " ".join(tokens[idx+4:])
+                break
+
+        # Position mapping
+        if jersey in ("1", "30", "32", "35") or "tor" in txt.lower():
+            pos = "Goaltender"
+        elif jersey in ("3", "9", "18", "22", "24", "44", "55", "70") or "vert" in txt.lower():
+            pos = "Defense"
+
+        # Image: high-resolution Cloudinary portrait with fallback
+        cloudinary_img = get_redbull_cloudinary_url(raw_name)
+        fallback_img = urllib.parse.urljoin("https://www.penny-del.org", img_m.group(2))
+
+        seen.add(raw_name)
+        v_summary = []
+        if born: v_summary.append(born)
+        if birthplace: v_summary.append(f"Birthplace: {birthplace}")
+        if shoots: v_summary.append(f"Shoots: {shoots}")
+        if height: v_summary.append(f"Height: {height}")
+        if weight: v_summary.append(f"Weight: {weight}")
+
+        players.append({
+            "name": raw_name,
+            "jersey": jersey,
+            "position": pos,
+            "pos": pos,
+            "image": cloudinary_img or fallback_img,
+            "raw_image": cloudinary_img or fallback_img,
+            "fallback_image": fallback_img,
+            "shoots": shoots,
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": birthplace,
+            "details": " | ".join(v_summary),
+            "assigned_number": "",
+            "profile_url": url
+        })
+
+    # Strategy B: If parsed from direct Red Bull HTML
+    if not players:
+        card_matches = re.findall(r'<a[^>]+href=["\'](/[^"\']*/team/spieler/[^"\']+)["\'][^>]*>(.*?)</a>', html, re.DOTALL)
+        for link, c in card_matches:
+            name_m = re.search(r'<img[^>]+title=["\']([^"\']+)["\']', c)
+            name = name_m.group(1).strip() if name_m else ""
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            num_m = re.search(r'data-testid=["\']jersey-number["\'][^>]*>.*?#<!-- -->(\d+)', c, re.DOTALL)
+            if not num_m:
+                num_m = re.search(r'>#(\d+)<', c)
+            jersey = num_m.group(1).strip() if num_m else ""
+
+            src_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', c)
+            raw_src = src_m.group(1).strip() if src_m else ""
+            img_url = re.sub(r'c_scale,w_\d+,f_auto/f_auto/q_\d+/', 'c_scale,w_1200/', raw_src)
+
+            players.append({
+                "name": name,
+                "jersey": jersey,
+                "position": "Forward",
+                "pos": "Forward",
+                "image": img_url,
+                "raw_image": img_url,
+                "shoots": "",
+                "height": "",
+                "weight": "",
+                "born": "",
+                "birthplace": "",
+                "details": "",
+                "assigned_number": "",
+                "profile_url": urllib.parse.urljoin(url, link)
+            })
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": players
+    }
+
+
+def is_del_or_german_hockey_url(url: str) -> bool:
+    """Detects whether a URL belongs to German DEL, DEL2, or German hockey club websites."""
+    url_lower = url.lower()
+    return any(k in url_lower for k in [
+        "eisloewen.de", "eisloewen", "del-2.org", "del2.org",
+        "deg-eishockey.de", "deg", "redbullmuenchen.de", "red-bull-muenchen",
+        "penny-del.org", "haie.de", "adler-mannheim.de", "eisbaeren.de",
+        "erc-ingolstadt.de", "straubing-tigers.de", "grizzlys.de",
+        "schwenninger-wildwings.de", "loewen-frankfurt.de", "nuernberg-ice-tigers.de",
+        "iserlohn-roosters.de", "augsburger-panther.de", "esvk.de", "steelers.de",
+        "kassel-huskies.de", "ec-badnauheim.de", "lausitzer-fuechse.de",
+        "eisbaeren-regensburg.de", "starbulls.de", "ev-landshut.net",
+        "selberwoelfe.de", "blue-devils.de", "ravensburg-towerstars.de"
+    ])
+
+
 def scrape_roster_data(url: str):
     """
     Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL,
-    UK Teams, German DEL2/Eislöwen, or College/NCAA athletics scrapers with automatic fallbacks.
+    UK Teams, German DEL/DEL2 (Dresdner Eislöwen, Düsseldorfer EG, Red Bull München),
+    or College/NCAA athletics scrapers with automatic fallbacks.
     """
     url_lower = url.lower()
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
         return scrape_nhl_roster(url)
 
-    if is_eisloewen_or_del_url(url):
+    # 1. Düsseldorfer EG (DEG)
+    if "deg-eishockey.de" in url_lower or "/deg" in url_lower:
         try:
-            res = scrape_eisloewen_roster(url)
+            res = scrape_deg_roster(url)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] Eisloewen / DEL scraper notice: {e}, falling back...")
+            print(f"[Studio] DEG scraper notice: {e}, falling back...")
+
+    # 2. EHC Red Bull München / PENNY DEL
+    if "redbullmuenchen.de" in url_lower or "red-bull-muenchen" in url_lower or ("penny-del.org" in url_lower and "muenchen" in url_lower):
+        try:
+            res = scrape_redbull_or_del_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Red Bull Muenchen scraper notice: {e}, falling back...")
+
+    # 3. Dresdner Eislöwen / DEL2
+    if is_eisloewen_or_del_url(url) or is_del_or_german_hockey_url(url):
+        try:
+            if "deg" in url_lower:
+                res = scrape_deg_roster(url)
+            elif "redbull" in url_lower or "muenchen" in url_lower:
+                res = scrape_redbull_or_del_roster(url)
+            else:
+                res = scrape_eisloewen_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] German DEL/DEL2 scraper notice: {e}, falling back...")
 
     if is_eurobasket_url(url):
         try:
@@ -2142,7 +2548,12 @@ def scrape_roster_data(url: str):
     if not res.get("players") or len(res["players"]) == 0:
         # Fallback to DEL / Eurobasket, HockeyTech / BCHL or UK / general sports scraper if college returned no players
         try:
-            del_res = scrape_eisloewen_roster(url)
+            if "deg" in url_lower:
+                del_res = scrape_deg_roster(url)
+            elif "redbull" in url_lower or "muenchen" in url_lower:
+                del_res = scrape_redbull_or_del_roster(url)
+            else:
+                del_res = scrape_eisloewen_roster(url)
             if del_res.get("players") and len(del_res["players"]) > 0:
                 return del_res
         except Exception:
@@ -2200,7 +2611,7 @@ def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tup
 
     im = Image.open(io.BytesIO(raw_bytes))
     if im.mode not in ("RGB", "RGBA"):
-        im = im.convert("RGBA" if "A" in im.mode else "RGB")
+        im = im.convert("RGBA" if ("A" in im.mode or "transparency" in im.info) else "RGB")
 
     orig_w, orig_h = im.size
     if orig_w != target_width:
