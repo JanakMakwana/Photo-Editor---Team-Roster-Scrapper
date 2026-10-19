@@ -1,0 +1,80 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+	<head>
+		<title>Biztonsági ellenőrzés | Security Check</title>
+		<meta charset="UTF-8" />
+		<meta http-equiv="X-UA-Compatible" content="IE=9" />
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+
+		<link href="/cprot-assets/css/icon-captcha.min.css" rel="stylesheet" type="text/css">
+
+		<style>
+			body { background-color: #ffffff; font-family:arial,helvetica,sans-serif; }
+			.check { padding: 10px 10px 10px 10px;  }
+		</style>
+	</head>
+	<body><center>
+
+		<h1>Biztonsági ellenőrzés</h1>
+		<h2>Security Check</h2>
+
+		<div class="check">
+			<div class="captcha-holder"></div>
+		</div>
+
+		<!-- Include jQuery Library -->
+		<!--[if lt IE 9]>
+		<script src="/cprot-assets/js/jquery1.min.js"></script>
+		<![endif]-->
+
+		<!--[if (gte IE 9) | (!IE)]><!-->
+		<script src="/cprot-assets/js/jquery3.min.js"></script>
+		<!--<![endif]-->
+
+		<!-- Include IconCaptcha script -->
+		<script src="/cprot-assets/js/icon-captcha.min.js" type="text/javascript"></script>
+
+		<!-- Initialize the IconCaptcha -->
+		<script async type="text/javascript">
+			$(window).ready(function() {
+				$('.captcha-holder').iconCaptcha({
+					theme: ['light', 'dark'], // Select the theme(s) of the Captcha(s). Available: light, dark
+					fontFamily: '', // Change the font family of the captcha. Leaving it blank will add the default font to the end of the <body> tag.
+					clickDelay: 500, // The delay during which the user can't select an image.
+					invalidResetDelay: 3000, // After how many milliseconds the captcha should reset after a wrong icon selection.
+					requestIconsDelay: 10, // How long should the script wait before requesting the hashes and icons? (to prevent a high(er) CPU usage during a DDoS attack)
+					loadingAnimationDelay: 10, // How long the fake loading animation should play.
+					hoverDetection: true, // Enable or disable the cursor hover detection.
+					showCredits: 'hide', // Show, hide or disable the credits element. Valid values: 'show', 'hide', 'disabled' (please leave it enabled).
+					enableLoadingAnimation: true, // Enable of disable the fake loading animation. Doesn't actually do anything other than look nice.
+					validationPath: '/cprot/captcha-request.php', // The path to the Captcha validation file.
+					messages: { // You can put whatever message you want in the captcha.
+						header: "Kérem válassza ki a kakukktojást <br /><br /> Select the image that doesn't belong here",
+						correct: {
+							top: "ACCESS GRANTED",
+							bottom: "Az ellenőrzés sikeres"
+						},
+						incorrect: {
+							top: "ACCESS DENIED",
+							bottom: "Sikertelen ellenőrzés"
+						}
+					}
+				})
+				.bind('init.iconCaptcha', function(e, id) { // You can bind to custom events, in case you want to execute some custom code.
+					console.log('Event: Captcha initialized', id);
+				}).bind('selected.iconCaptcha', function(e, id) {
+					console.log('Event: Icon selected', id);
+				}).bind('refreshed.iconCaptcha', function(e, id) {
+					console.log('Event: Captcha refreshed', id);
+				}).bind('success.iconCaptcha', function(e, id) {
+					console.log('Event: Correct input', id);
+					setTimeout(function() {
+						location.reload();
+					}, 500);
+				}).bind('error.iconCaptcha', function(e, id) {
+					console.log('Event: Wrong input', id);
+				});
+			});
+		</script>
+	</center></body>
+</html>

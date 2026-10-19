@@ -106,3 +106,203 @@ def parse_bulk_user_input(raw_text: str) -> List[Dict[str, str]]:
                 })
 
     return results
+
+
+# --------------------------------------------------------------------------
+# Multi-Factor Authentication (TOTP - RFC 6238)
+# --------------------------------------------------------------------------
+
+import base64
+import hmac
+import struct
+import time
+import json
+import urllib.parse
+
+
+def generate_totp_secret() -> str:
+    """Generates a secure 160-bit (20 bytes) Base32 secret string for TOTP."""
+    raw = secrets.token_bytes(20)
+    return base64.b32encode(raw).decode("utf-8").rstrip("=")
+
+
+def get_totp_uri(secret: str, email: str, issuer: str = "Sovereign Studio Pro") -> str:
+    """Returns the standard otpauth:// URI for QR code generation."""
+    label = f"{issuer}:{email}"
+    params = {
+        "secret": secret,
+        "issuer": issuer,
+        "algorithm": "SHA1",
+        "digits": "6",
+        "period": "30"
+    }
+    return f"otpauth://totp/{urllib.parse.quote(label)}?{urllib.parse.urlencode(params)}"
+
+
+def generate_totp_code(secret: str, t: Optional[int] = None, time_step: int = 30) -> str:
+    """Generates the 6-digit TOTP code for a given timestamp."""
+    if t is None:
+        t = int(time.time())
+    counter = int(t // time_step)
+    padded = secret + "=" * ((8 - len(secret) % 8) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = (struct.unpack(">I", digest[offset:offset+4])[0] & 0x7FFFFFFF) % 1_000_000
+    return f"{code_int:06d}"
+
+
+def verify_totp_code(secret: str, code: str, window: int = 1, time_step: int = 30) -> bool:
+    """Verifies a 6-digit TOTP code with time drift window tolerance."""
+    if not secret or not code:
+        return False
+    curr = int(time.time())
+    clean_code = str(code).strip().replace(" ", "")
+    for w in range(-window, window + 1):
+        expected = generate_totp_code(secret, curr + w * time_step, time_step)
+        if secrets.compare_digest(expected, clean_code):
+            return True
+    return False
+
+
+def generate_backup_codes(count: int = 8) -> List[str]:
+    """Generates human-readable 8-character single-use emergency backup codes."""
+    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    codes = []
+    for _ in range(count):
+        p1 = "".join(secrets.choice(chars) for _ in range(4))
+        p2 = "".join(secrets.choice(chars) for _ in range(4))
+        codes.append(f"{p1}-{p2}")
+    return codes
+
+
+def verify_and_consume_backup_code(user_id: str, code: str) -> bool:
+    """Verifies and consumes a single-use backup code for a user."""
+    user = saas_db.get_user_by_id(user_id)
+    if not user or not user.get("mfa_backup_codes"):
+        return False
+    try:
+        codes = json.loads(user["mfa_backup_codes"])
+    except Exception:
+        return False
+
+    clean_code = str(code).strip().upper().replace(" ", "").replace("-", "")
+    for idx, c in enumerate(codes):
+        if c.replace("-", "").upper() == clean_code:
+            codes.pop(idx)
+            saas_db.execute_query(
+                "UPDATE users SET mfa_backup_codes = ? WHERE id = ?",
+                (json.dumps(codes), user_id),
+                commit=True
+            )
+            return True
+    return False
+
+
+# --------------------------------------------------------------------------
+# Temporary MFA Login Session Store
+# --------------------------------------------------------------------------
+
+_MFA_LOGIN_TOKENS: Dict[str, Dict[str, Any]] = {}
+
+
+def create_mfa_login_token(user_id: str, ttl_seconds: int = 300) -> str:
+    """Creates a temporary MFA challenge token expiring in 5 minutes."""
+    tok = secrets.token_urlsafe(32)
+    _clean_expired_mfa_tokens()
+    _MFA_LOGIN_TOKENS[tok] = {
+        "user_id": user_id,
+        "expires_at": time.time() + ttl_seconds
+    }
+    return tok
+
+
+def verify_mfa_login_token(tok: str) -> Optional[str]:
+    """Returns user_id if token is valid, and consumes the token."""
+    _clean_expired_mfa_tokens()
+    data = _MFA_LOGIN_TOKENS.pop(tok, None)
+    if not data or time.time() > data["expires_at"]:
+        return None
+    return data["user_id"]
+
+
+def _clean_expired_mfa_tokens():
+    now = time.time()
+    expired = [k for k, v in _MFA_LOGIN_TOKENS.items() if now > v["expires_at"]]
+    for k in expired:
+        _MFA_LOGIN_TOKENS.pop(k, None)
+
+
+# --------------------------------------------------------------------------
+# Passkey (WebAuthn / FIDO2) Challenge Management
+# --------------------------------------------------------------------------
+
+_WEBAUTHN_CHALLENGES: Dict[str, Dict[str, Any]] = {}
+
+
+def create_passkey_register_challenge(user: Dict[str, Any], ttl_seconds: int = 180) -> Dict[str, Any]:
+    challenge = secrets.token_urlsafe(32)
+    now = time.time()
+    _clean_webauthn_challenges()
+    challenge_id = secrets.token_hex(16)
+    _WEBAUTHN_CHALLENGES[challenge_id] = {
+        "user_id": user["id"],
+        "challenge": challenge,
+        "type": "register",
+        "expires_at": now + ttl_seconds
+    }
+    return {
+        "challenge_id": challenge_id,
+        "challenge": challenge,
+        "rp": {
+            "name": "Sovereign Studio Pro"
+        },
+        "user": {
+            "id": user["id"],
+            "name": user["email"],
+            "displayName": user["full_name"]
+        },
+        "pubKeyCredParams": [
+            {"type": "public-key", "alg": -7},   # ES256
+            {"type": "public-key", "alg": -257}  # RS256
+        ],
+        "timeout": 60000,
+        "attestation": "none"
+    }
+
+
+def create_passkey_login_challenge(ttl_seconds: int = 180) -> Dict[str, Any]:
+    challenge = secrets.token_urlsafe(32)
+    now = time.time()
+    _clean_webauthn_challenges()
+    challenge_id = secrets.token_hex(16)
+    _WEBAUTHN_CHALLENGES[challenge_id] = {
+        "challenge": challenge,
+        "type": "login",
+        "expires_at": now + ttl_seconds
+    }
+    return {
+        "challenge_id": challenge_id,
+        "challenge": challenge,
+        "timeout": 60000,
+        "userVerification": "preferred"
+    }
+
+
+def verify_passkey_challenge(challenge_id: str, expected_type: str = None) -> Optional[Dict[str, Any]]:
+    _clean_webauthn_challenges()
+    data = _WEBAUTHN_CHALLENGES.pop(challenge_id, None)
+    if not data or time.time() > data["expires_at"]:
+        return None
+    if expected_type and data.get("type") != expected_type:
+        return None
+    return data
+
+
+def _clean_webauthn_challenges():
+    now = time.time()
+    expired = [k for k, v in _WEBAUTHN_CHALLENGES.items() if now > v["expires_at"]]
+    for k in expired:
+        _WEBAUTHN_CHALLENGES.pop(k, None)
+

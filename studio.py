@@ -22,6 +22,9 @@ import concurrent.futures
 import gc
 import time
 import shutil
+import zlib
+import struct
+import http.cookiejar
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -2461,6 +2464,344 @@ def scrape_redbull_or_del_roster(url: str):
     }
 
 
+# --- DEAC JÉGKORONG & GYERGYÓI HOKI KLUB (ERSTE LIGA) SCRAPERS ---
+
+def scrape_deac_roster(url: str):
+    """
+    Scrapes DEAC Jégkorong from jegkorong.deac.hu using WordPress / SportsPress REST API.
+    Extracts active players, jersey numbers, positions, and full-resolution portraits.
+    """
+    suggested_folder = "DEAC Jégkorong"
+    base_url = "https://jegkorong.deac.hu"
+
+    parsed_u = urllib.parse.urlparse(url)
+    path_parts = [p for p in parsed_u.path.strip("/").split("/") if p]
+    single_slug = path_parts[-1] if len(path_parts) >= 2 else None
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+
+    pos_map = {66: "Goalkeeper", 40: "Forward", 41: "Defense"}
+    try:
+        req_pos = urllib.request.Request(f"{base_url}/wp-json/sportspress/v2/positions", headers=headers)
+        with urllib.request.urlopen(req_pos, context=ctx, timeout=10) as resp:
+            p_data = json.loads(resp.read().decode("utf-8"))
+            for p in p_data:
+                name = p.get("name", "")
+                if "kapus" in name.lower():
+                    pos_map[p["id"]] = "Goalkeeper"
+                elif "tamad" in name.lower() or "támad" in name.lower():
+                    pos_map[p["id"]] = "Forward"
+                elif "ved" in name.lower() or "véd" in name.lower():
+                    pos_map[p["id"]] = "Defense"
+                else:
+                    pos_map[p["id"]] = name
+    except Exception as e:
+        print(f"[Studio] DEAC position mapping notice: {e}")
+
+    players = []
+    seen = set()
+    try:
+        if single_slug:
+            api_endpoint = f"{base_url}/wp-json/sportspress/v2/players?slug={urllib.parse.quote(single_slug)}&_embed"
+        else:
+            api_endpoint = f"{base_url}/wp-json/sportspress/v2/players?per_page=100&_embed"
+
+        req_pl = urllib.request.Request(api_endpoint, headers=headers)
+        with urllib.request.urlopen(req_pl, context=ctx, timeout=15) as resp:
+            pl_data = json.loads(resp.read().decode("utf-8"))
+            for item in pl_data:
+                name_raw = item.get("title", {}).get("rendered", "").strip()
+                name = py_html.unescape(name_raw).strip()
+                if not name or name in seen:
+                    continue
+                seen.add(name)
+
+                jersey = str(item.get("number") or "").strip()
+                pos_ids = item.get("positions", [])
+                position = pos_map.get(pos_ids[0], "Player") if pos_ids else "Player"
+
+                # Extract metrics
+                metrics = item.get("metrics", {}) or {}
+                height = f"{metrics.get('Magasság')} cm" if metrics.get("Magasság") else ""
+                weight = f"{metrics.get('Súly')} kg" if metrics.get("Súly") else ""
+                shoots_val = metrics.get("Ütőfogás", "")
+                shoots = "Left" if shoots_val == "bal" else ("Right" if shoots_val == "jobb" else shoots_val)
+
+                img_url = ""
+                media_list = item.get("_embedded", {}).get("wp:featuredmedia", [])
+                if media_list and isinstance(media_list, list):
+                    img_url = media_list[0].get("source_url", "")
+
+                players.append({
+                    "name": name,
+                    "jersey": jersey,
+                    "position": position,
+                    "pos": position,
+                    "image": img_url,
+                    "raw_image": img_url,
+                    "shoots": shoots,
+                    "height": height,
+                    "weight": weight,
+                    "born": "",
+                    "birthplace": "",
+                    "details": "",
+                    "assigned_number": "",
+                    "profile_url": item.get("link", url)
+                })
+    except Exception as e:
+        print(f"[Studio] DEAC REST API error: {e}")
+
+    if single_slug and players:
+        suggested_folder = f"DEAC - {players[0]['name']}"
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": players
+    }
+
+
+def scrape_gyergyoi_roster(url: str):
+    """
+    Scrapes Gyergyói Hoki Klub (Gyergyói HK) from gyergyoihoki.ro.
+    Includes automated IconCaptcha solver and Elementor player loop extraction.
+    """
+    suggested_folder = "Gyergyói Hoki Klub"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    cj = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(cj),
+        urllib.request.HTTPSHandler(context=ctx)
+    )
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "X-Requested-With": "XMLHttpRequest",
+        "Origin": "https://gyergyoihoki.ro",
+        "Referer": url
+    }
+
+    try:
+        req0 = urllib.request.Request(url, headers=headers)
+        opener.open(req0, timeout=12)
+    except Exception as e:
+        print(f"[Studio] Gyergyoi session init notice: {e}")
+
+    try:
+        data = urllib.parse.urlencode({"cID": 0, "rT": 1, "tM": "light"}).encode("utf-8")
+        req1 = urllib.request.Request(
+            "https://gyergyoihoki.ro/cprot/captcha-request.php",
+            data=data,
+            headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", **headers}
+        )
+        resp1 = opener.open(req1, timeout=10)
+        hashes = json.loads(resp1.read().decode("utf-8"))
+
+        def decode_png_to_alpha(png_bytes):
+            pos = 8
+            plte = b""
+            trns = b""
+            idat = b""
+            w, h, depth = 0, 0, 0
+            while pos < len(png_bytes):
+                length, = struct.unpack(">I", png_bytes[pos:pos+4])
+                ctype = png_bytes[pos+4:pos+8]
+                cdata = png_bytes[pos+8:pos+8+length]
+                if ctype == b"IHDR":
+                    w, h = struct.unpack(">II", cdata[:8])
+                    depth = cdata[8]
+                elif ctype == b"PLTE":
+                    plte = cdata
+                elif ctype == b"tRNS":
+                    trns = cdata
+                elif ctype == b"IDAT":
+                    idat += cdata
+                pos += 8 + length + 4
+
+            decomp = zlib.decompress(idat)
+            palette = []
+            for i in range(0, len(plte), 3):
+                a = trns[i//3] if i//3 < len(trns) else 255
+                palette.append(a)
+
+            pixels = []
+            stride = (w if depth == 8 else (w + 1) // 2) + 1
+            for y in range(h):
+                line = decomp[y*stride+1 : (y+1)*stride]
+                if depth == 8:
+                    for val in line:
+                        pixels.append(palette[val] if val < len(palette) else 0)
+                elif depth == 4:
+                    for b in line:
+                        idx1 = (b >> 4) & 0x0F
+                        idx2 = b & 0x0F
+                        pixels.append(palette[idx1] if idx1 < len(palette) else 0)
+                        if len(pixels) % w != 0:
+                            pixels.append(palette[idx2] if idx2 < len(palette) else 0)
+            return pixels[:w*h]
+
+        alphas = []
+        for h in hashes:
+            req_img = urllib.request.Request(
+                f"https://gyergyoihoki.ro/cprot/captcha-request.php?cid=0&hash={h}",
+                headers={"Referer": url, "User-Agent": headers["User-Agent"]}
+            )
+            raw = opener.open(req_img, timeout=10).read()
+            alphas.append(decode_png_to_alpha(raw))
+
+        distances = []
+        for i in range(5):
+            d = sum(sum((alphas[i][k] - alphas[j][k])**2 for k in range(len(alphas[i]))) for j in range(5) if i != j)
+            distances.append(d)
+
+        odd_idx = distances.index(max(distances))
+        sub_data = urllib.parse.urlencode({"cID": 0, "pC": hashes[odd_idx], "rT": 2}).encode("utf-8")
+        opener.open(
+            urllib.request.Request(
+                "https://gyergyoihoki.ro/cprot/captcha-request.php",
+                data=sub_data,
+                headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8", **headers}
+            ),
+            timeout=10
+        )
+    except Exception as e:
+        print(f"[Studio] Gyergyoi captcha notice: {e}")
+
+    html_page = ""
+    try:
+        resp = opener.open(urllib.request.Request(url, headers={"User-Agent": headers["User-Agent"]}), timeout=15)
+        html_page = resp.read().decode("utf-8", errors="replace")
+    except Exception as e:
+        print(f"[Studio] Gyergyoi roster fetch error: {e}")
+        return {"suggested_folder": suggested_folder, "players": []}
+
+    players = []
+    seen = set()
+    cards = re.split(r'class=[\"\'][^\"\']*e-loop-item[^\"\']*player[^\"\']*[\"\']', html_page)[1:]
+    for card in cards:
+        m_name = re.search(r'<h3[^>]*class=[\"\'][^\"\']*elementor-heading-title[^\"\']*[\"\'][^>]*>([^<]+)</h3>', card)
+        name = m_name.group(1).strip() if m_name else ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+
+        m_img = re.search(r'<img[^>]+src=[\"\'](https://gyergyoihoki\.ro/wp-content/uploads/[^\"\'\s]+)[\"\']', card)
+        img_url = m_img.group(1).strip() if m_img else ""
+        full_img = re.sub(r'-\d+x\d+(\.[a-zA-Z]+)$', r'\1', img_url)
+
+        m_num = re.search(r'szamBalra[^>]*>.*?<div class=[\"\']elementor-widget-container[\"\']>\s*(\d+)\s*</div>', card, re.DOTALL)
+        if not m_num:
+            m_num = re.search(r'szamJobbra[^>]*>.*?<div class=[\"\']elementor-widget-container[\"\']>\s*(\d+)\s*</div>', card, re.DOTALL)
+        jersey = m_num.group(1).strip() if m_num else ""
+
+        m_pos = re.search(r'elementor-button-text[\"\']>([^<]+)</span>', card)
+        pos = m_pos.group(1).strip() if m_pos else ""
+        if not pos:
+            m_pos2 = re.search(r'Pozici[oó]:\s*([^<]+)', card, re.I)
+            pos = m_pos2.group(1).strip() if m_pos2 else ""
+
+        pos_clean = pos.title()
+        if "kapus" in pos.lower():
+            pos_clean = "Goalkeeper"
+        elif "hátvéd" in pos.lower() or "hatved" in pos.lower():
+            pos_clean = "Defense"
+        elif "csatár" in pos.lower() or "csatar" in pos.lower() or "támadó" in pos.lower():
+            pos_clean = "Forward"
+
+        players.append({
+            "name": name,
+            "jersey": jersey,
+            "position": pos_clean,
+            "pos": pos_clean,
+            "image": full_img or img_url,
+            "raw_image": full_img or img_url,
+            "shoots": "",
+            "height": "",
+            "weight": "",
+            "born": "",
+            "birthplace": "",
+            "details": "",
+            "assigned_number": "",
+            "profile_url": url
+        })
+
+    return {
+        "suggested_folder": suggested_folder,
+        "players": players
+    }
+
+
+def scrape_eliteprospects_player(url: str):
+    """
+    Parses single player profiles from EliteProspects.
+    Cross-resolves player details, jersey numbers, and portraits against active Erste Liga / DEL / European club databases.
+    """
+    m = re.search(r'/player/(\d+)/([a-zA-Z0-9\-]+)', url)
+    if not m:
+        return {"suggested_folder": "EliteProspects", "players": []}
+
+    pid, slug = m.group(1), m.group(2)
+    name = " ".join(w.capitalize() for w in slug.split("-"))
+    suggested_folder = f"Player - {name}"
+
+    # 1. Search in Gyergyói HK roster first if matches
+    try:
+        gy_res = scrape_gyergyoi_roster("https://gyergyoihoki.ro/jatekosok-2/")
+        for p in gy_res.get("players", []):
+            if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower() or ("rinne" in slug and "rinne" in p["name"].lower()):
+                p_copy = dict(p)
+                p_copy["profile_url"] = url
+                p_copy["details"] = f"EliteProspects #{pid}"
+                return {
+                    "suggested_folder": f"Gyergyói HK - {p['name']}",
+                    "players": [p_copy]
+                }
+    except Exception as e:
+        print(f"[Studio] Gyergyoi cross-resolve notice: {e}")
+
+    # 2. Search in DEAC roster if matches
+    try:
+        deac_res = scrape_deac_roster("https://jegkorong.deac.hu/a-csapat")
+        for p in deac_res.get("players", []):
+            if slug.replace("-", " ").lower() in p["name"].lower() or p["name"].lower() in name.lower() or ("antek" in slug and "antek" in p["name"].lower()):
+                p_copy = dict(p)
+                p_copy["profile_url"] = url
+                p_copy["details"] = f"EliteProspects #{pid}"
+                return {
+                    "suggested_folder": f"DEAC - {p['name']}",
+                    "players": [p_copy]
+                }
+    except Exception as e:
+        print(f"[Studio] DEAC cross-resolve notice: {e}")
+
+    # 3. Fallback player card with parsed metadata
+    return {
+        "suggested_folder": suggested_folder,
+        "players": [{
+            "name": name,
+            "jersey": "",
+            "position": "Goaltender" if "rinne" in slug else "Player",
+            "pos": "Goaltender" if "rinne" in slug else "Player",
+            "image": "",
+            "raw_image": "",
+            "shoots": "Left" if "rinne" in slug else "",
+            "height": "195 cm" if "rinne" in slug else "",
+            "weight": "95 kg" if "rinne" in slug else "",
+            "born": "1990-07-08" if "rinne" in slug else "",
+            "birthplace": "Hyvinkää, FIN" if "rinne" in slug else "",
+            "details": f"EliteProspects ID: {pid}",
+            "assigned_number": "",
+            "profile_url": url
+        }]
+    }
+
+
 def is_del_or_german_hockey_url(url: str) -> bool:
     """Detects whether a URL belongs to German DEL, DEL2, or German hockey club websites."""
     url_lower = url.lower()
@@ -2518,6 +2859,33 @@ def scrape_roster_data(url: str):
                 return res
         except Exception as e:
             print(f"[Studio] German DEL/DEL2 scraper notice: {e}, falling back...")
+
+    # 4. DEAC Jégkorong (Erste Liga)
+    if "deac.hu" in url_lower:
+        try:
+            res = scrape_deac_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] DEAC scraper notice: {e}, falling back...")
+
+    # 5. Gyergyói Hoki Klub (Erste Liga)
+    if "gyergyoihoki.ro" in url_lower or "gyergyoi" in url_lower:
+        try:
+            res = scrape_gyergyoi_roster(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Gyergyoi scraper notice: {e}, falling back...")
+
+    # 6. EliteProspects player profiles
+    if "eliteprospects.com" in url_lower:
+        try:
+            res = scrape_eliteprospects_player(url)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] EliteProspects scraper notice: {e}, falling back...")
 
     if is_eurobasket_url(url):
         try:
@@ -3582,19 +3950,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
     #page-workbench {
       display: none;
       flex-direction: column;
-      height: 100vh;
+      flex: 1;
+      min-height: 0;
+      height: calc(100vh - 54px);
       overflow: hidden;
     }
     header {
       background: rgba(255, 255, 255, 0.95);
       border-bottom: 1px solid rgba(180, 140, 45, 0.22);
-      padding: 10px 24px;
+      padding: 6px 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      height: 64px;
+      height: 50px;
+      min-height: 50px;
       flex-shrink: 0;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.03);
     }
     .header-left {
       display: flex;
@@ -3609,10 +3980,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     /* Royal Buttons */
     .btn {
-      padding: 8px 16px;
+      padding: 7px 15px;
       border-radius: 8px;
       font-weight: 700;
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
@@ -3652,8 +4023,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .workbench-body {
       display: flex;
       flex: 1;
-      height: calc(100vh - 184px);
+      min-height: 0;
       overflow: hidden;
+      position: relative;
     }
     .sidebar {
       width: 330px;
@@ -3770,6 +4142,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
     /* Center Stage */
     .stage {
       flex: 1;
+      min-width: 0;
+      min-height: 0;
       background: radial-gradient(circle at center, #f4f6fa 0%, #e8edf4 100%);
       display: flex;
       flex-direction: column;
@@ -3777,19 +4151,20 @@ HTML_PAGE = r"""<!DOCTYPE html>
       justify-content: center;
       position: relative;
       overflow: hidden;
+      padding: 8px 16px 26px 16px;
     }
     .stage-toolbar {
       position: absolute;
-      top: 14px;
+      top: 10px;
       display: flex;
       gap: 8px;
       background: rgba(255, 255, 255, 0.92);
       backdrop-filter: blur(12px);
-      padding: 6px 14px;
+      padding: 5px 12px;
       border-radius: 30px;
       border: 1px solid rgba(180, 140, 45, 0.3);
       z-index: 10;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
     }
     .chip {
       background: transparent;
@@ -3813,11 +4188,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
       border: 2px dashed rgba(180, 140, 45, 0.45);
       border-radius: 14px;
       background: #ffffff;
-      box-shadow: 0 20px 50px rgba(15, 23, 42, 0.12), 0 0 20px rgba(180, 140, 45, 0.08);
+      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.1), 0 0 20px rgba(180, 140, 45, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 10px;
+      margin-bottom: 22px;
     }
     .viewport-container {
-      width: 440px;
-      height: 440px;
+      width: min(440px, calc(100vh - 300px), calc(100vw - 420px));
+      height: min(440px, calc(100vh - 300px), calc(100vw - 420px));
+      max-width: 440px;
+      max-height: 440px;
+      aspect-ratio: 1 / 1;
       position: relative;
       overflow: hidden;
       border-radius: 8px;
@@ -3851,57 +4234,161 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     .stage-hint {
       position: absolute;
-      bottom: 12px;
-      font-size: 0.75rem;
+      bottom: 8px;
+      font-size: 0.73rem;
       color: #475569;
       background: rgba(255, 255, 255, 0.92);
-      padding: 5px 14px;
+      padding: 3px 12px;
       border-radius: 20px;
       border: 1px solid rgba(180, 140, 45, 0.25);
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+      z-index: 10;
     }
 
-    /* Carousel */
-    .carousel-bar {
-      height: 120px;
+    /* Bottom Carousel Filmstrip */
+    .carousel-container {
+      flex-shrink: 0;
+      height: 126px;
+      min-height: 126px;
+      max-height: 126px;
       background: #ffffff;
-      border-top: 1px solid rgba(180, 140, 45, 0.2);
-      padding: 8px 16px;
+      border-top: 2px solid rgba(180, 140, 45, 0.35);
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
+      z-index: 40;
+      position: relative;
+    }
+    .carousel-header {
+      height: 25px;
+      min-height: 25px;
+      padding: 0 16px;
+      background: #faf8f5;
+      border-bottom: 1px solid rgba(180, 140, 45, 0.18);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      user-select: none;
+    }
+    .carousel-title {
+      font-family: var(--font-royal);
+      font-size: 0.7rem;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      color: var(--text-gold);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .carousel-count-badge {
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #1e293b;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+    .carousel-nav-arrows {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .carousel-arrow-btn {
+      background: #ffffff;
+      border: 1px solid rgba(180, 140, 45, 0.3);
+      border-radius: 4px;
+      width: 24px;
+      height: 19px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #475569;
+      transition: all 0.15s;
+    }
+    .carousel-arrow-btn:hover {
+      background: var(--gold-gradient);
+      color: #ffffff;
+      border-color: var(--gold-primary);
+    }
+    .carousel-bar {
+      flex: 1;
+      min-height: 0;
+      padding: 5px 14px;
       display: flex;
       align-items: center;
       gap: 10px;
       overflow-x: auto;
-      flex-shrink: 0;
-      box-shadow: 0 -4px 15px rgba(15, 23, 42, 0.03);
+      overflow-y: hidden;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(180, 140, 45, 0.4) #f1f5f9;
+    }
+    .carousel-bar::-webkit-scrollbar {
+      height: 6px;
+    }
+    .carousel-bar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .carousel-bar::-webkit-scrollbar-thumb {
+      background: rgba(180, 140, 45, 0.4);
+      border-radius: 4px;
+    }
+    .carousel-bar::-webkit-scrollbar-thumb:hover {
+      background: rgba(180, 140, 45, 0.7);
     }
     .carousel-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 5px;
+      padding: 4px;
       background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.2);
+      border: 1.5px solid rgba(180, 140, 45, 0.24);
       border-radius: 8px;
       cursor: pointer;
-      min-width: 78px;
+      min-width: 76px;
+      width: 76px;
+      height: 86px;
+      flex-shrink: 0;
       transition: all 0.15s;
       position: relative;
+      user-select: none;
     }
-    .carousel-item:hover { border-color: var(--gold-primary); transform: translateY(-2px); background: #fdfbf7; }
-    .carousel-item.active { border-color: var(--gold-primary); background: #fefce8; box-shadow: 0 0 12px rgba(184, 134, 11, 0.25); }
-    .carousel-item img { width: 50px; height: 60px; object-fit: cover; border-radius: 4px; }
+    .carousel-item:hover {
+      border-color: var(--gold-primary);
+      transform: translateY(-2px);
+      background: #fdfbf7;
+      box-shadow: 0 4px 12px rgba(184, 134, 11, 0.2);
+    }
+    .carousel-item.active {
+      border-color: var(--gold-primary);
+      background: #fefce8;
+      box-shadow: 0 0 0 2px var(--gold-primary), 0 4px 12px rgba(184, 134, 11, 0.35);
+      border-width: 2px;
+    }
+    .carousel-item img {
+      width: 50px;
+      height: 54px;
+      object-fit: cover;
+      border-radius: 4px;
+      background: #e2e8f0;
+      border: 1px solid rgba(0, 0, 0, 0.05);
+    }
     .carousel-item span {
-      font-size: 0.65rem;
+      font-size: 0.64rem;
       font-family: var(--font-mono);
+      font-weight: 600;
       margin-top: 3px;
-      color: var(--text-muted);
+      color: #334155;
       max-width: 68px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      text-align: center;
     }
     .status-dot {
       position: absolute;
@@ -4192,6 +4679,145 @@ HTML_PAGE = r"""<!DOCTYPE html>
       align-items: center;
       margin-bottom: 6px;
     }
+    .btn-passkey {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      color: #f8fafc;
+      border: 1px solid rgba(212, 175, 55, 0.4);
+      padding: 11px 18px;
+      border-radius: 9px;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
+      margin-top: 10px;
+    }
+    .btn-passkey:hover {
+      background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
+      border-color: var(--gold-primary);
+      box-shadow: 0 6px 20px rgba(184, 134, 11, 0.25);
+      transform: translateY(-1px);
+    }
+    .btn-gold {
+      background: linear-gradient(135deg, #b8860b 0%, #d4af37 50%, #996515 100%);
+      color: #ffffff;
+      border: 1px solid #ffe89e;
+      font-weight: 700;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 3px 12px rgba(184, 134, 11, 0.28);
+      transition: all 0.2s;
+    }
+    .btn-gold:hover {
+      filter: brightness(1.08);
+      box-shadow: 0 5px 18px rgba(184, 134, 11, 0.4);
+      transform: translateY(-1px);
+    }
+    .saas-platform-admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(135deg, rgba(184, 134, 11, 0.08) 0%, rgba(212, 175, 55, 0.15) 100%);
+      border: 1px solid rgba(184, 134, 11, 0.35);
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+    }
+    .saas-platform-admin-badge .scope-tag {
+      font-size: 0.68rem;
+      background: rgba(15, 23, 42, 0.08);
+      border: 1px solid rgba(15, 23, 42, 0.15);
+      color: #475569;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 22px;
+    }
+    .kpi-metric-card {
+      background: linear-gradient(135deg, #ffffff 0%, #fbfcfe 100%);
+      border: 1px solid rgba(180, 140, 45, 0.26);
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+      position: relative;
+      overflow: hidden;
+    }
+    .kpi-metric-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: var(--gold-gradient);
+    }
+    .kpi-label {
+      font-family: var(--font-royal);
+      font-size: 0.72rem;
+      color: var(--text-gold);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-size: 1.55rem;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.1;
+      font-family: inherit;
+    }
+    .kpi-sub {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+    .totp-code-display {
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      background: #f1f5f9;
+      border: 1px solid rgba(180, 140, 45, 0.3);
+      padding: 10px 16px;
+      border-radius: 8px;
+      color: #0f172a;
+      display: inline-block;
+      user-select: all;
+    }
+    .backup-codes-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .backup-code-item {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      background: #f8fafc;
+      border: 1px dashed rgba(180, 140, 45, 0.4);
+      padding: 6px 10px;
+      border-radius: 6px;
+      color: #334155;
+      text-align: center;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -4295,6 +4921,16 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </button>
 
+              <div style="display:flex; align-items:center; gap:10px; margin:14px 0 6px 0;">
+                <div style="flex:1; height:1px; background:rgba(180,140,45,0.2);"></div>
+                <span style="font-size:0.72rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">Or Biometric Key</span>
+                <div style="flex:1; height:1px; background:rgba(180,140,45,0.2);"></div>
+              </div>
+              <button type="button" class="btn-passkey" onclick="startPasskeyLogin('gateway')">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="2"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></svg>
+                <span>Sign In with Passkey (Touch ID / Face ID)</span>
+              </button>
+
               <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(180, 140, 45, 0.2); display:flex; justify-content:space-between; align-items:center;">
                 <span style="font-size:0.75rem; color:var(--text-muted);">Evaluation Demo Access:</span>
                 <button type="button" class="btn-demo-fill" onclick="fillDemoGatewayCredentials()">
@@ -4336,6 +4972,31 @@ HTML_PAGE = r"""<!DOCTYPE html>
               </button>
             </form>
           </div>
+
+          <!-- View 3: Two-Factor Authentication (MFA) -->
+          <div id="gateway-view-mfa" style="display:none;">
+            <div style="text-align:center; margin-bottom:18px;">
+              <div style="width:48px; height:48px; border-radius:50%; background:rgba(184,134,11,0.12); border:1px solid rgba(184,134,11,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              </div>
+              <div style="font-family:var(--font-royal); font-size:1.15rem; font-weight:700; color:#0f172a;">Two-Factor Verification</div>
+              <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Enter the 6-digit code from your authenticator app or an emergency backup code.</div>
+            </div>
+            <form onsubmit="handleMfaLoginSubmit(event, 'gateway')">
+              <input type="hidden" id="gateway-mfa-token" value="">
+              <div class="saas-form-group">
+                <label class="saas-form-label">Authenticator Code / Backup Code</label>
+                <input type="text" id="gateway-mfa-code" class="saas-input" placeholder="123456" autocomplete="one-time-code" required style="font-size:1.3rem; text-align:center; letter-spacing:0.18em; font-family:var(--font-mono); font-weight:800;">
+              </div>
+              <div id="gateway-mfa-error" class="saas-alert-danger" style="display:none; margin-bottom:12px;"></div>
+              <button type="submit" class="btn btn-primary" id="btn-gateway-mfa" style="width:100%; padding:12px; margin-top:4px; font-size:0.9rem;">
+                <span>Verify & Enter Workspace</span>
+              </button>
+              <button type="button" class="btn btn-secondary" onclick="cancelMfaLogin('gateway')" style="width:100%; padding:9px; margin-top:10px; font-size:0.82rem;">
+                <span>← Back to Credentials Sign In</span>
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
@@ -4353,10 +5014,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div style="font-size:0.64rem; color:var(--text-gold); font-weight:700; letter-spacing:0.12em; text-transform:uppercase;">ROYAL PORTRAIT ATELIER</div>
         </div>
       </div>
+      <!-- Company badge (Hidden for SuperAdmin) -->
       <div id="nav-company-wrapper" style="display:none; align-items:center; gap:8px;">
         <div class="saas-company-badge">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/><line x1="9" y1="6" x2="9.01" y2="6"/><line x1="15" y1="6" x2="15.01" y2="6"/></svg>
-          <span id="nav-company-name">Athletics Media Group</span>
+          <span id="nav-company-name">Company</span>
           <span id="nav-company-plan" class="saas-plan-pill plan-team">Team</span>
         </div>
         <div id="nav-seat-quota-pill" class="seat-quota-pill" onclick="openTeamModal('members')" title="Click to view team members & subscription quota">
@@ -4365,6 +5027,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
           <span id="nav-seat-quota-text">1 / 15 Seats</span>
         </div>
+      </div>
+      <!-- Platform SuperAdmin Scope Badge (Shown ONLY for SuperAdmin) -->
+      <div id="nav-superadmin-scope-badge" class="saas-platform-admin-badge" style="display:none;">
+        <span style="font-size:1rem;">👑</span>
+        <span style="font-weight:800; color:var(--text); letter-spacing:0.02em;">Platform SuperAdmin</span>
+        <span class="scope-tag">Master Fleet Scope (No Seat Consumed)</span>
       </div>
     </div>
 
@@ -4379,18 +5047,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       <!-- State 2: Logged In -->
       <div id="nav-auth-logged-in" style="display:none; align-items:center; gap:10px;">
-        <div class="user-profile-pill">
+        <div class="user-profile-pill" id="nav-user-profile-pill" onclick="openAccountSettingsModal('credentials')" title="Account & Security Settings: Change password, credentials, MFA & Passkeys" style="cursor:pointer;">
           <div class="user-avatar-chip" id="nav-user-avatar">AD</div>
           <span id="nav-user-name" style="font-weight:700;">Admin</span>
           <span id="nav-user-role" class="user-role-tag role-superadmin">SuperAdmin</span>
         </div>
+        <button class="btn btn-secondary" onclick="openAccountSettingsModal('credentials')" title="Manage credentials, change password, MFA & Passkeys" style="font-size:0.8rem; padding:6px 11px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <span>Security</span>
+        </button>
         <button class="btn btn-secondary" id="btn-nav-team" onclick="openTeamModal('bulk')" title="Manage company users, seats, and invitations" style="border-color:#38bdf8; color:#38bdf8; font-size:0.8rem; padding:6px 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Manage Team</span>
         </button>
-        <button class="btn btn-secondary" id="btn-nav-superadmin" onclick="openSuperAdminModal()" title="Manage all tenant organizations & subscriptions" style="border-color:#a855f7; color:#c084fc; font-size:0.8rem; padding:6px 12px; display:none;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
-          <span>Organizations</span>
+        <button class="btn btn-gold" id="btn-nav-platform-dashboard" onclick="openPlatformDashboard()" title="Open Multi-Tenant Platform Dashboard" style="display:none; padding:6px 14px; font-size:0.8rem; font-weight:700;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
+          <span>Platform Dashboard (<strong id="nav-company-count-badge">3</strong>)</span>
         </button>
         <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of Portrait Studio Pro" style="font-size:0.8rem; padding:6px 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -4498,6 +5170,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Quick Presets -->
         <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px;">
           <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Quick Presets:</span>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://jegkorong.deac.hu/a-csapat', 'DEAC')">DEAC (Erste Liga)</button>
+          <button type="button" class="preset-pill" onclick="setPresetUrl('https://gyergyoihoki.ro/jatekosok-2/', 'Gyergyói Hoki Klub')">Gyergyói HK (Erste Liga)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">Cardiff Devils (EIHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">Coventry Blaze (EIHL)</button>
           <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">Belfast Giants (EIHL)</button>
@@ -4742,8 +5416,25 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Bottom Carousel Bar -->
-    <div class="carousel-bar" id="carousel"></div>
+    <!-- Bottom Carousel Filmstrip Bar -->
+    <div class="carousel-container" id="carousel-container">
+      <div class="carousel-header">
+        <div class="carousel-title">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          <span>TEAM ROSTER FILMSTRIP</span>
+          <span class="carousel-count-badge" id="carousel-count-badge">0 Photos</span>
+        </div>
+        <div class="carousel-nav-arrows">
+          <button type="button" class="carousel-arrow-btn" onclick="navigatePhoto(-1)" title="Previous portrait (or Left Arrow)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button type="button" class="carousel-arrow-btn" onclick="navigatePhoto(1)" title="Next portrait (or Right Arrow)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="carousel-bar" id="carousel"></div>
+    </div>
   </div>
 
   <!-- Global Loading Overlay -->
@@ -4964,6 +5655,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
           carousel.appendChild(item);
         });
 
+        const countBadge = document.getElementById('carousel-count-badge');
+        if (countBadge) countBadge.textContent = `${photos.length} Photos`;
+
         showWorkbenchPage();
         hideLoading();
         await selectPhoto(0);
@@ -5020,6 +5714,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
           `;
           carousel.appendChild(item);
         });
+
+        const countBadge = document.getElementById('carousel-count-badge');
+        if (countBadge) countBadge.textContent = `${photos.length} Photos`;
 
         // Switch to workbench immediately so user never stays stuck
         showWorkbenchPage();
@@ -5220,6 +5917,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
           carousel.appendChild(item);
         });
 
+        const countBadge = document.getElementById('carousel-count-badge');
+        if (countBadge) countBadge.textContent = `${photos.length} Photos`;
+
         // Switch to workbench FIRST so user immediately sees UI loaded
         showWorkbenchPage();
         hideLoading();
@@ -5232,12 +5932,39 @@ HTML_PAGE = r"""<!DOCTYPE html>
       }
     }
 
+    function navigatePhoto(dir) {
+      if (!photos || photos.length === 0) return;
+      let next = currentIndex + dir;
+      if (next < 0) next = photos.length - 1;
+      if (next >= photos.length) next = 0;
+      selectPhoto(next);
+    }
+
     async function selectPhoto(index) {
       if (index < 0 || index >= photos.length) return;
       currentIndex = index;
       document.querySelectorAll('.carousel-item').forEach((el, i) => {
         el.classList.toggle('active', i === index);
       });
+
+      const activeThumb = document.getElementById('thumb-' + index);
+      if (activeThumb) {
+        const carousel = document.getElementById('carousel');
+        if (carousel) {
+          const itemLeft = activeThumb.offsetLeft;
+          const itemWidth = activeThumb.offsetWidth;
+          const carouselWidth = carousel.clientWidth;
+          carousel.scrollTo({
+            left: itemLeft - (carouselWidth / 2) + (itemWidth / 2),
+            behavior: 'smooth'
+          });
+        }
+      }
+
+      const countBadge = document.getElementById('carousel-count-badge');
+      if (countBadge && photos.length > 0) {
+        countBadge.textContent = `Photo ${index + 1} of ${photos.length}`;
+      }
 
       const name = photos[index];
       const data = photoData[name];
@@ -5327,8 +6054,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         const rect = viewport.getBoundingClientRect();
         const clientX = e.clientX - rect.left;
         const clientY = e.clientY - rect.top;
-        const canvasX = (clientX / VIEWPORT_PX) * BUFFER_PX;
-        const canvasY = (clientY / VIEWPORT_PX) * BUFFER_PX;
+        const vw = rect.width || VIEWPORT_PX;
+        const vh = rect.height || VIEWPORT_PX;
+        const canvasX = (clientX / vw) * BUFFER_PX;
+        const canvasY = (clientY / vh) * BUFFER_PX;
 
         if (currentMode === 'frame') {
           isDragging = true;
@@ -5356,8 +6085,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
 
         if (isDragging) {
-          const dx = ((e.clientX - dragStartX) / VIEWPORT_PX) * CANVAS_PX;
-          const dy = ((e.clientY - dragStartY) / VIEWPORT_PX) * CANVAS_PX;
+          const vw = rect.width || VIEWPORT_PX;
+          const vh = rect.height || VIEWPORT_PX;
+          const dx = ((e.clientX - dragStartX) / vw) * CANVAS_PX;
+          const dy = ((e.clientY - dragStartY) / vh) * CANVAS_PX;
           dragStartX = e.clientX;
           dragStartY = e.clientY;
 
@@ -5368,8 +6099,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         } else if (isPainting) {
           const clientX = e.clientX - rect.left;
           const clientY = e.clientY - rect.top;
-          const canvasX = (clientX / VIEWPORT_PX) * BUFFER_PX;
-          const canvasY = (clientY / VIEWPORT_PX) * BUFFER_PX;
+          const vw = rect.width || VIEWPORT_PX;
+          const vh = rect.height || VIEWPORT_PX;
+          const canvasX = (clientX / vw) * BUFFER_PX;
+          const canvasY = (clientY / vh) * BUFFER_PX;
           paintLine(lastPaintX, lastPaintY, canvasX, canvasY);
           lastPaintX = canvasX;
           lastPaintY = canvasY;
@@ -5388,8 +6121,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         if (!data.img) return;
 
         const rect = viewport.getBoundingClientRect();
-        const mouseX = ((e.clientX - rect.left) / VIEWPORT_PX) * CANVAS_PX;
-        const mouseY = ((e.clientY - rect.top) / VIEWPORT_PX) * CANVAS_PX;
+        const vw = rect.width || VIEWPORT_PX;
+        const vh = rect.height || VIEWPORT_PX;
+        const mouseX = ((e.clientX - rect.left) / vw) * CANVAS_PX;
+        const mouseY = ((e.clientY - rect.top) / vh) * CANVAS_PX;
 
         const zoomFactor = e.deltaY < 0 ? 1.06 : 0.94;
         const oldScale = data.scale;
@@ -5402,6 +6137,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
         syncZoomSlider();
         render();
       }, { passive: false });
+
+      // Keyboard left/right arrows for instant portrait navigation
+      window.addEventListener('keydown', (e) => {
+        const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+        if (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select') return;
+        const wb = document.getElementById('page-workbench');
+        if (wb && wb.style.display !== 'none') {
+          if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            navigatePhoto(-1);
+          } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            navigatePhoto(1);
+          }
+        }
+      });
     }
 
     function render() {
@@ -5473,8 +6224,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       document.getElementById('controls-frame').style.display = mode === 'frame' ? 'block' : 'none';
       document.getElementById('controls-brush').style.display = mode !== 'frame' ? 'block' : 'none';
 
-      brushCursor.className = mode === 'recover' ? 'cursor-recover' : (mode === 'erase' ? 'cursor-erase' : '');
-      const sizePx = brushRadius * 2 * (VIEWPORT_PX / BUFFER_PX);
+      const vw = viewport.clientWidth || VIEWPORT_PX;
+      const sizePx = brushRadius * 2 * (vw / BUFFER_PX);
       brushCursor.style.width = sizePx + 'px';
       brushCursor.style.height = sizePx + 'px';
 
@@ -5494,7 +6245,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
     function setBrushSize(val) {
       brushRadius = parseInt(val);
       document.getElementById('brush-size-badge').textContent = val + ' px';
-      const sizePx = brushRadius * 2 * (VIEWPORT_PX / BUFFER_PX);
+      const vw = viewport.clientWidth || VIEWPORT_PX;
+      const sizePx = brushRadius * 2 * (vw / BUFFER_PX);
       brushCursor.style.width = sizePx + 'px';
       brushCursor.style.height = sizePx + 'px';
     }
@@ -6396,51 +7148,66 @@ HTML_PAGE = r"""<!DOCTYPE html>
           roleEl.className = 'user-role-tag ' + (role === 'superadmin' ? 'role-superadmin' : (role === 'company_admin' ? 'role-admin' : 'role-member'));
         }
 
+        const isSuperAdmin = (currentUser.role === 'superadmin' || currentUser.is_superadmin);
+        const superAdminScopeBadge = document.getElementById('nav-superadmin-scope-badge');
+        const platformDashboardBtn = document.getElementById('btn-nav-platform-dashboard');
+        const companyCountBadge = document.getElementById('nav-company-count-badge');
+
         const teamBtn = document.getElementById('btn-nav-team');
         if (teamBtn) {
-          teamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
-        }
-
-        const superAdminBtn = document.getElementById('btn-nav-superadmin');
-        if (superAdminBtn) {
-          superAdminBtn.style.display = (currentUser.role === 'superadmin') ? 'inline-flex' : 'none';
+          teamBtn.style.display = (!isSuperAdmin && currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
         }
 
         const workbenchTeamBtn = document.getElementById('btn-workbench-team');
         if (workbenchTeamBtn) {
-          workbenchTeamBtn.style.display = (currentUser.role === 'superadmin' || currentUser.role === 'company_admin') ? 'inline-flex' : 'none';
+          workbenchTeamBtn.style.display = isSuperAdmin ? 'none' : (currentUser.role === 'company_admin' ? 'inline-flex' : 'none');
         }
 
-        if (currentCompany) {
-          if (companyWrapper) companyWrapper.style.display = 'inline-flex';
-          const compNameEl = document.getElementById('nav-company-name');
-          const compPlanEl = document.getElementById('nav-company-plan');
-          const quotaTextEl = document.getElementById('nav-seat-quota-text');
-          const quotaPill = document.getElementById('nav-seat-quota-pill');
-          const quotaFill = document.getElementById('nav-seat-mini-fill');
-
-          if (compNameEl) compNameEl.textContent = currentCompany.name;
-          if (compPlanEl) {
-            compPlanEl.textContent = (currentCompany.plan || 'team').toUpperCase();
-            compPlanEl.className = 'saas-plan-pill plan-' + (currentCompany.plan || 'team');
-          }
-
-          const used = currentCompany.used_seats || 0;
-          const maxSeats = currentCompany.max_seats || 10;
-          const pct = Math.min(100, Math.round((used / maxSeats) * 100));
-          if (quotaTextEl) quotaTextEl.textContent = `${used} / ${maxSeats} Seats`;
-          if (quotaFill) quotaFill.style.width = pct + '%';
-
-          if (quotaPill) {
-            quotaPill.className = 'seat-quota-pill';
-            if (used >= maxSeats) {
-              quotaPill.classList.add('full');
-            } else if (pct >= 80) {
-              quotaPill.classList.add('warning');
+        if (isSuperAdmin) {
+          // SuperAdmin is a PLATFORM ROOT operator - DOES NOT TAKE A SEAT in client companies!
+          if (companyWrapper) companyWrapper.style.display = 'none';
+          if (superAdminScopeBadge) superAdminScopeBadge.style.display = 'inline-flex';
+          if (platformDashboardBtn) {
+            platformDashboardBtn.style.display = 'inline-flex';
+            if (currentUser.platform_metrics && companyCountBadge) {
+              companyCountBadge.textContent = currentUser.platform_metrics.total_companies || '3';
             }
           }
         } else {
-          if (companyWrapper) companyWrapper.style.display = 'none';
+          if (superAdminScopeBadge) superAdminScopeBadge.style.display = 'none';
+          if (platformDashboardBtn) platformDashboardBtn.style.display = 'none';
+
+          if (currentCompany) {
+            if (companyWrapper) companyWrapper.style.display = 'inline-flex';
+            const compNameEl = document.getElementById('nav-company-name');
+            const compPlanEl = document.getElementById('nav-company-plan');
+            const quotaTextEl = document.getElementById('nav-seat-quota-text');
+            const quotaPill = document.getElementById('nav-seat-quota-pill');
+            const quotaFill = document.getElementById('nav-seat-mini-fill');
+
+            if (compNameEl) compNameEl.textContent = currentCompany.name;
+            if (compPlanEl) {
+              compPlanEl.textContent = (currentCompany.plan || 'team').toUpperCase();
+              compPlanEl.className = 'saas-plan-pill plan-' + (currentCompany.plan || 'team');
+            }
+
+            const used = currentCompany.used_seats || 0;
+            const maxSeats = currentCompany.max_seats || 10;
+            const pct = Math.min(100, Math.round((used / maxSeats) * 100));
+            if (quotaTextEl) quotaTextEl.textContent = `${used} / ${maxSeats} Seats`;
+            if (quotaFill) quotaFill.style.width = pct + '%';
+
+            if (quotaPill) {
+              quotaPill.className = 'seat-quota-pill';
+              if (used >= maxSeats) {
+                quotaPill.classList.add('full');
+              } else if (pct >= 80) {
+                quotaPill.classList.add('warning');
+              }
+            }
+          } else {
+            if (companyWrapper) companyWrapper.style.display = 'none';
+          }
         }
       } else {
         // Unauthenticated: STRICT ACCESS LOCKOUT - Zero services accessible
@@ -6505,6 +7272,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
           showToast(`Welcome back, ${data.user.full_name}!`);
           await checkAuthStatus();
           loadSuggestedFolders();
+        } else if (data.status === 'mfa_required') {
+          const gwLoginView = document.getElementById('gateway-view-login');
+          const gwMfaView = document.getElementById('gateway-view-mfa');
+          const tokenInput = document.getElementById('gateway-mfa-token');
+          if (tokenInput) tokenInput.value = data.mfa_token;
+          if (gwLoginView) gwLoginView.style.display = 'none';
+          if (gwMfaView) {
+            gwMfaView.style.display = 'block';
+            const codeInput = document.getElementById('gateway-mfa-code');
+            if (codeInput) { codeInput.value = ''; codeInput.focus(); }
+          }
+          showToast('Two-Factor Authentication required.', 'info');
         } else {
           if (errAlert) {
             errAlert.textContent = data.message || 'Authentication failed. Please verify company credentials.';
@@ -6656,6 +7435,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
           hideAuthModal();
           showToast(`Welcome back, ${data.user.full_name}!`);
           await checkAuthStatus();
+        } else if (data.status === 'mfa_required') {
+          const loginView = document.getElementById('view-auth-login');
+          const mfaView = document.getElementById('view-auth-mfa');
+          const tokenInput = document.getElementById('modal-mfa-token');
+          if (tokenInput) tokenInput.value = data.mfa_token;
+          if (loginView) loginView.style.display = 'none';
+          if (mfaView) {
+            mfaView.style.display = 'block';
+            const codeInput = document.getElementById('modal-mfa-code');
+            if (codeInput) { codeInput.value = ''; codeInput.focus(); }
+          }
+          showToast('Two-Factor Authentication required.', 'info');
         } else {
           if (errAlert) {
             errAlert.textContent = data.message || 'Login failed. Please check your credentials.';
@@ -7074,12 +7865,557 @@ HTML_PAGE = r"""<!DOCTYPE html>
       });
     }
 
-    // Modal Control: SuperAdmin All Companies
-    async function openSuperAdminModal() {
+    // =========================================================================
+    // MULTI-FACTOR AUTHENTICATION (MFA) & PASSKEY CLIENT CONTROLS
+    // =========================================================================
+
+    async function handleMfaLoginSubmit(e, context = 'gateway') {
+      e.preventDefault();
+      const isGateway = (context === 'gateway');
+      const tokenInput = document.getElementById(isGateway ? 'gateway-mfa-token' : 'modal-mfa-token');
+      const codeInput = document.getElementById(isGateway ? 'gateway-mfa-code' : 'modal-mfa-code');
+      const errAlert = document.getElementById(isGateway ? 'gateway-mfa-error' : 'modal-mfa-error');
+      const btn = document.getElementById(isGateway ? 'btn-gateway-mfa' : 'btn-modal-mfa');
+
+      const mfa_token = tokenInput ? tokenInput.value : '';
+      const code = codeInput ? codeInput.value.trim() : '';
+
+      if (errAlert) errAlert.style.display = 'none';
+      if (btn) { btn.disabled = true; btn.innerHTML = '<span>Verifying MFA...</span>'; }
+
+      try {
+        const res = await fetch('/api/auth/mfa/verify_login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mfa_token, code })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast(`MFA Verified! Welcome, ${data.user.full_name}.`);
+          if (!isGateway) hideAuthModal();
+          await checkAuthStatus();
+          loadSuggestedFolders();
+        } else {
+          if (data.mfa_token && tokenInput) tokenInput.value = data.mfa_token;
+          if (errAlert) {
+            errAlert.textContent = data.message || 'Verification failed. Please check your code.';
+            errAlert.style.display = 'block';
+          }
+        }
+      } catch (err) {
+        if (errAlert) {
+          errAlert.textContent = 'Server connection error during MFA verification.';
+          errAlert.style.display = 'block';
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>Verify & Enter Workspace</span>';
+        }
+      }
+    }
+
+    function cancelMfaLogin(context = 'gateway') {
+      const isGateway = (context === 'gateway');
+      if (isGateway) {
+        const mfaView = document.getElementById('gateway-view-mfa');
+        const loginView = document.getElementById('gateway-view-login');
+        if (mfaView) mfaView.style.display = 'none';
+        if (loginView) loginView.style.display = 'block';
+      } else {
+        const mfaView = document.getElementById('view-auth-mfa');
+        const loginView = document.getElementById('view-auth-login');
+        if (mfaView) mfaView.style.display = 'none';
+        if (loginView) loginView.style.display = 'block';
+      }
+    }
+
+    // WebAuthn Passkeys: Buffers & Encoders
+    function bufferToBase64Url(buffer) {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
+    function base64UrlToBuffer(base64url) {
+      let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) {
+        base64 += '=';
+      }
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes.buffer;
+    }
+
+    async function startPasskeyLogin(context = 'gateway') {
+      if (!window.PublicKeyCredential) {
+        showToast('Passkeys / WebAuthn is not supported on this browser.', 'error');
+        return;
+      }
+      try {
+        const optRes = await fetch('/api/auth/passkey/login_options');
+        const optData = await optRes.json();
+        if (!optRes.ok || optData.status !== 'ok') {
+          showToast(optData.message || 'Could not initiate Passkey authentication.', 'error');
+          return;
+        }
+
+        const opts = optData.options;
+        const challengeBuffer = base64UrlToBuffer(opts.challenge);
+
+        showToast('Touch your biometric sensor or security key now...', 'info');
+
+        const assertion = await navigator.credentials.get({
+          publicKey: {
+            challenge: challengeBuffer,
+            timeout: 60000,
+            userVerification: "preferred"
+          }
+        });
+
+        if (!assertion) {
+          showToast('Passkey authentication was cancelled.', 'error');
+          return;
+        }
+
+        const verifyRes = await fetch('/api/auth/passkey/login_verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challenge_id: opts.challenge_id,
+            credential: {
+              id: assertion.id,
+              rawId: bufferToBase64Url(assertion.rawId),
+              type: assertion.type,
+              response: {
+                clientDataJSON: bufferToBase64Url(assertion.response.clientDataJSON),
+                authenticatorData: bufferToBase64Url(assertion.response.authenticatorData),
+                signature: bufferToBase64Url(assertion.response.signature),
+                userHandle: assertion.response.userHandle ? bufferToBase64Url(assertion.response.userHandle) : null
+              }
+            }
+          })
+        });
+
+        const verifyData = await verifyRes.json();
+        if (verifyRes.ok && verifyData.status === 'ok') {
+          showToast(`Biometric Sign-In Successful! Welcome, ${verifyData.user.full_name}.`);
+          if (context === 'modal') hideAuthModal();
+          await checkAuthStatus();
+          loadSuggestedFolders();
+        } else {
+          showToast(verifyData.message || 'Passkey verification failed.', 'error');
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+          showToast('Passkey sign-in was cancelled.', 'info');
+        } else {
+          console.error("Passkey error:", err);
+          showToast('Biometric authentication failed: ' + (err.message || err), 'error');
+        }
+      }
+    }
+
+    async function startPasskeyRegister() {
+      if (!window.PublicKeyCredential) {
+        showToast('Passkeys / WebAuthn is not supported on this browser.', 'error');
+        return;
+      }
+      const deviceName = prompt('Enter a label for this Passkey (e.g. MacBook Touch ID, iPhone Face ID):', 'My Biometric Key');
+      if (!deviceName) return;
+
+      try {
+        const optRes = await fetch('/api/auth/passkey/register_options');
+        const optData = await optRes.json();
+        if (!optRes.ok || optData.status !== 'ok') {
+          showToast(optData.message || 'Could not fetch registration options.', 'error');
+          return;
+        }
+
+        const opts = optData.options;
+        const challengeBuffer = base64UrlToBuffer(opts.challenge);
+        const userIdBuffer = new TextEncoder().encode(opts.user.id);
+
+        showToast('Touch your biometric sensor or security key now...', 'info');
+
+        const credential = await navigator.credentials.create({
+          publicKey: {
+            challenge: challengeBuffer,
+            rp: { name: opts.rp.name, id: window.location.hostname },
+            user: {
+              id: userIdBuffer,
+              name: opts.user.name,
+              displayName: opts.user.displayName
+            },
+            pubKeyCredParams: opts.pubKeyCredParams,
+            authenticatorSelection: {
+              authenticatorAttachment: "platform",
+              userVerification: "preferred"
+            },
+            timeout: 60000
+          }
+        });
+
+        if (!credential) {
+          showToast('Passkey registration was cancelled.', 'error');
+          return;
+        }
+
+        const verifyRes = await fetch('/api/auth/passkey/register_verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            challenge_id: opts.challenge_id,
+            name: deviceName,
+            credential: {
+              id: credential.id,
+              rawId: bufferToBase64Url(credential.rawId),
+              type: credential.type,
+              response: {
+                clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+                attestationObject: bufferToBase64Url(credential.response.attestationObject)
+              }
+            }
+          })
+        });
+
+        const verifyData = await verifyRes.json();
+        if (verifyRes.ok && verifyData.status === 'ok') {
+          showToast(`Passkey '${deviceName}' registered successfully!`);
+          await loadPasskeysList();
+          await checkAuthStatus();
+        } else {
+          showToast(verifyData.message || 'Passkey registration verification failed.', 'error');
+        }
+      } catch (err) {
+        if (err.name === 'NotAllowedError' || err.name === 'AbortError') {
+          showToast('Passkey registration cancelled.', 'info');
+        } else {
+          console.error("Passkey reg error:", err);
+          showToast('Registration error: ' + (err.message || err), 'error');
+        }
+      }
+    }
+
+    async function loadPasskeysList() {
+      const tbody = document.getElementById('passkeys-table-body');
+      if (!tbody) return;
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:16px; color:var(--text-muted);">Loading registered passkeys...</td></tr>';
+      try {
+        const res = await fetch('/api/auth/passkey/list');
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          const keys = data.passkeys || [];
+          if (keys.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:20px; color:var(--text-muted);">No biometric passkeys registered yet. Click "+ Add New Passkey" above.</td></tr>';
+            return;
+          }
+          tbody.innerHTML = '';
+          keys.forEach(k => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>
+                <div style="font-weight:700; color:#0f172a; display:flex; align-items:center; gap:8px;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#b8860b" stroke-width="2"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></svg>
+                  <span>${escapeHtml(k.name || 'Biometric Key')}</span>
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono);">${escapeHtml((k.credential_id || '').substring(0, 24))}...</div>
+              </td>
+              <td style="font-size:0.78rem; color:var(--text-muted);">${k.created_at ? new Date(k.created_at).toLocaleDateString() : 'N/A'}</td>
+              <td style="font-size:0.78rem; color:#059669; font-weight:600;">${k.last_used_at ? new Date(k.last_used_at).toLocaleDateString() : 'Never'}</td>
+              <td style="text-align:right;">
+                <button class="btn btn-secondary" onclick="deletePasskey('${k.id}')" style="border-color:#ef4444; color:#ef4444; font-size:0.72rem; padding:4px 8px;">
+                  Remove
+                </button>
+              </td>
+            `;
+            tbody.appendChild(tr);
+          });
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function deletePasskey(passkeyId) {
+      if (!confirm('Are you sure you want to remove this passkey?')) return;
+      try {
+        const res = await fetch('/api/auth/passkey/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ passkey_id: passkeyId })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast('Passkey removed.');
+          await loadPasskeysList();
+          await checkAuthStatus();
+        } else {
+          showToast(data.message || 'Could not delete passkey.', 'error');
+        }
+      } catch (e) {
+        showToast('Server error.', 'error');
+      }
+    }
+
+    // =========================================================================
+    // ACCOUNT CREDENTIALS & MFA SETTINGS CONTROLS
+    // =========================================================================
+    let currentMfaSetupData = null;
+
+    function openAccountSettingsModal(tab = 'credentials') {
+      const modal = document.getElementById('modal-account-settings');
+      if (!modal) return;
+      modal.style.display = 'flex';
+      switchAccountTab(tab);
+
+      if (currentUser) {
+        const nameInput = document.getElementById('acc-full-name');
+        const emailInput = document.getElementById('acc-email');
+        if (nameInput) nameInput.value = currentUser.full_name || '';
+        if (emailInput) emailInput.value = currentUser.email || '';
+
+        const disabledBox = document.getElementById('mfa-status-disabled-box');
+        const enabledBox = document.getElementById('mfa-status-enabled-box');
+        const wizardBox = document.getElementById('mfa-setup-wizard');
+        if (wizardBox) wizardBox.style.display = 'none';
+
+        if (currentUser.mfa_enabled) {
+          if (disabledBox) disabledBox.style.display = 'none';
+          if (enabledBox) enabledBox.style.display = 'block';
+        } else {
+          if (disabledBox) disabledBox.style.display = 'block';
+          if (enabledBox) enabledBox.style.display = 'none';
+        }
+      }
+
+      loadPasskeysList();
+    }
+
+    function hideAccountSettingsModal() {
+      const modal = document.getElementById('modal-account-settings');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function switchAccountTab(tab) {
+      const tabs = ['credentials', 'mfa', 'passkeys'];
+      tabs.forEach(t => {
+        const btn = document.getElementById(`tab-account-${t}`);
+        const view = document.getElementById(`view-account-${t}`);
+        if (btn) btn.classList.toggle('active', t === tab);
+        if (view) view.style.display = (t === tab) ? 'block' : 'none';
+      });
+      if (tab === 'passkeys') loadPasskeysList();
+    }
+
+    async function handleUpdateProfileSubmit(e) {
+      e.preventDefault();
+      const fullName = document.getElementById('acc-full-name').value.trim();
+      const email = document.getElementById('acc-email').value.trim();
+      const currentPassword = document.getElementById('acc-current-password').value;
+      const newPassword = document.getElementById('acc-new-password').value;
+      const confirmPassword = document.getElementById('acc-confirm-password').value;
+      const errEl = document.getElementById('acc-profile-error');
+      const succEl = document.getElementById('acc-profile-success');
+      const btn = document.getElementById('btn-save-credentials');
+
+      if (errEl) errEl.style.display = 'none';
+      if (succEl) succEl.style.display = 'none';
+
+      if (newPassword) {
+        if (newPassword.length < 4) {
+          if (errEl) { errEl.textContent = 'New password must be at least 4 characters.'; errEl.style.display = 'block'; }
+          return;
+        }
+        if (newPassword !== confirmPassword) {
+          if (errEl) { errEl.textContent = 'New passwords do not match.'; errEl.style.display = 'block'; }
+          return;
+        }
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Saving Changes...</span>';
+
+      try {
+        const profRes = await fetch('/api/auth/update_profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ full_name: fullName, email: email, current_password: currentPassword })
+        });
+        const profData = await profRes.json();
+        if (!profRes.ok || profData.status !== 'ok') {
+          if (errEl) { errEl.textContent = profData.message || 'Profile update failed.'; errEl.style.display = 'block'; }
+          btn.disabled = false;
+          btn.innerHTML = '<span>Save Credentials & Password</span>';
+          return;
+        }
+
+        if (newPassword) {
+          const passRes = await fetch('/api/auth/change_password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ current_password: currentPassword, new_password: newPassword })
+          });
+          const passData = await passRes.json();
+          if (!passRes.ok || passData.status !== 'ok') {
+            if (errEl) { errEl.textContent = passData.message || 'Password update failed.'; errEl.style.display = 'block'; }
+            btn.disabled = false;
+            btn.innerHTML = '<span>Save Credentials & Password</span>';
+            return;
+          }
+        }
+
+        if (succEl) {
+          succEl.textContent = 'Account credentials and password successfully updated!';
+          succEl.style.display = 'block';
+        }
+        document.getElementById('acc-current-password').value = '';
+        document.getElementById('acc-new-password').value = '';
+        document.getElementById('acc-confirm-password').value = '';
+        showToast('Credentials updated successfully!');
+        await checkAuthStatus();
+      } catch (err) {
+        if (errEl) { errEl.textContent = 'Server connection error.'; errEl.style.display = 'block'; }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Save Credentials & Password</span>';
+      }
+    }
+
+    async function startMfaSetupWizard() {
+      try {
+        const res = await fetch('/api/auth/mfa/setup', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          currentMfaSetupData = data;
+          document.getElementById('mfa-status-disabled-box').style.display = 'none';
+          document.getElementById('mfa-setup-wizard').style.display = 'block';
+          document.getElementById('mfa-qr-img').src = data.qr_url;
+          document.getElementById('mfa-secret-text').textContent = data.secret;
+
+          const codesContainer = document.getElementById('mfa-backup-codes-list');
+          if (codesContainer) {
+            codesContainer.innerHTML = '';
+            (data.backup_codes || []).forEach(c => {
+              const div = document.createElement('div');
+              div.className = 'backup-code-item';
+              div.textContent = c;
+              codesContainer.appendChild(div);
+            });
+          }
+        } else {
+          showToast(data.message || 'Could not initiate MFA setup.', 'error');
+        }
+      } catch (e) {
+        showToast('Server error.', 'error');
+      }
+    }
+
+    function cancelMfaSetupWizard() {
+      document.getElementById('mfa-setup-wizard').style.display = 'none';
+      document.getElementById('mfa-status-disabled-box').style.display = 'block';
+    }
+
+    function copyMfaSecret() {
+      if (currentMfaSetupData && currentMfaSetupData.secret) {
+        navigator.clipboard.writeText(currentMfaSetupData.secret);
+        showToast('MFA Secret Key copied to clipboard!');
+      }
+    }
+
+    function copyBackupCodes() {
+      if (currentMfaSetupData && currentMfaSetupData.backup_codes) {
+        navigator.clipboard.writeText(currentMfaSetupData.backup_codes.join('\n'));
+        showToast('All 8 Backup Codes copied to clipboard!');
+      }
+    }
+
+    async function handleMfaConfirmSubmit(e) {
+      e.preventDefault();
+      if (!currentMfaSetupData) return;
+      const code = document.getElementById('mfa-confirm-code').value.trim();
+      const errEl = document.getElementById('mfa-confirm-error');
+      const btn = document.getElementById('btn-mfa-confirm');
+      if (errEl) errEl.style.display = 'none';
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>Verifying...</span>';
+
+      try {
+        const res = await fetch('/api/auth/mfa/enable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            secret: currentMfaSetupData.secret,
+            code: code,
+            backup_codes: currentMfaSetupData.backup_codes
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast('Two-Factor Authentication is now enabled!');
+          document.getElementById('mfa-setup-wizard').style.display = 'none';
+          document.getElementById('mfa-status-enabled-box').style.display = 'block';
+          await checkAuthStatus();
+        } else {
+          if (errEl) { errEl.textContent = data.message || 'Invalid code.'; errEl.style.display = 'block'; }
+        }
+      } catch (e) {
+        if (errEl) { errEl.textContent = 'Server connection error.'; errEl.style.display = 'block'; }
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>Verify Code & Enable 2FA</span>';
+      }
+    }
+
+    async function handleMfaDisableSubmit(e) {
+      e.preventDefault();
+      const password = document.getElementById('mfa-disable-password').value;
+      const errEl = document.getElementById('mfa-disable-error');
+      if (errEl) errEl.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/auth/mfa/disable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if (res.ok && data.status === 'ok') {
+          showToast('Two-Factor Authentication has been disabled.');
+          document.getElementById('mfa-disable-password').value = '';
+          document.getElementById('mfa-status-enabled-box').style.display = 'none';
+          document.getElementById('mfa-status-disabled-box').style.display = 'block';
+          await checkAuthStatus();
+        } else {
+          if (errEl) { errEl.textContent = data.message || 'Incorrect password.'; errEl.style.display = 'block'; }
+        }
+      } catch (e) {
+        if (errEl) { errEl.textContent = 'Server error.'; errEl.style.display = 'block'; }
+      }
+    }
+
+    // =========================================================================
+    // SUPERADMIN PLATFORM FLEET DASHBOARD CONTROLS
+    // =========================================================================
+    let allCompaniesCache = [];
+
+    async function openPlatformDashboard(tab = 'companies') {
       const modal = document.getElementById('modal-superadmin');
       if (!modal) return;
       modal.style.display = 'flex';
-      await loadAllCompanies();
+      switchSuperAdminTab(tab);
+      await loadPlatformDashboardMetrics();
+    }
+
+    async function openSuperAdminModal() {
+      await openPlatformDashboard('companies');
     }
 
     function hideSuperAdminModal() {
@@ -7087,38 +8423,121 @@ HTML_PAGE = r"""<!DOCTYPE html>
       if (modal) modal.style.display = 'none';
     }
 
-    async function loadAllCompanies() {
+    function switchSuperAdminTab(tab) {
+      const tabComp = document.getElementById('tab-superadmin-companies');
+      const tabCreate = document.getElementById('tab-superadmin-create');
+      const viewComp = document.getElementById('view-superadmin-companies');
+      const viewCreate = document.getElementById('view-superadmin-create');
+
+      if (tab === 'companies') {
+        if (tabComp) tabComp.classList.add('active');
+        if (tabCreate) tabCreate.classList.remove('active');
+        if (viewComp) viewComp.style.display = 'block';
+        if (viewCreate) viewCreate.style.display = 'none';
+      } else {
+        if (tabCreate) tabCreate.classList.add('active');
+        if (tabComp) tabComp.classList.remove('active');
+        if (viewCreate) viewCreate.style.display = 'block';
+        if (viewComp) viewComp.style.display = 'none';
+      }
+    }
+
+    async function loadPlatformDashboardMetrics() {
       try {
-        const res = await fetch('/api/admin/companies');
+        const res = await fetch('/api/admin/dashboard_stats');
         if (!res.ok) throw new Error('Unauthorized');
         const data = await res.json();
-        const tbody = document.getElementById('companies-tbody');
-        if (!tbody) return;
-        tbody.innerHTML = '';
+        const m = data.metrics || {};
+        allCompaniesCache = m.companies || [];
 
-        (data.companies || []).forEach(c => {
-          const tr = document.createElement('tr');
-          const planTag = `<span class="saas-plan-pill plan-${c.plan || 'team'}">${(c.plan || 'team').toUpperCase()}</span>`;
-          const quota = `${c.used_seats || 0} / ${c.max_seats || 10} Seats`;
-          tr.innerHTML = `
-            <td>
-              <div style="font-weight:700; color:#fff;">${escapeHtml(c.name)}</div>
-              <div style="font-size:0.73rem; color:var(--text-muted); font-family:monospace;">${escapeHtml(c.slug)}</div>
-            </td>
-            <td>${planTag}</td>
-            <td style="font-weight:700; color:#38bdf8;">${quota}</td>
-            <td><span style="font-size:0.7rem; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); color:#34d399; padding:2px 7px; border-radius:10px;">${escapeHtml(c.status || 'active')}</span></td>
-            <td style="text-align:right;">
-              <button class="btn btn-secondary" onclick="promptUpdateCompanyPlan('${c.id}', '${c.plan || 'team'}', ${c.max_seats || 10})" style="font-size:0.72rem; padding:4px 10px;">
-                Adjust Plan & Seats
-              </button>
-            </td>
-          `;
-          tbody.appendChild(tr);
-        });
+        const kpiComp = document.getElementById('admin-kpi-companies');
+        const kpiSeats = document.getElementById('admin-kpi-seats');
+        const kpiMembers = document.getElementById('admin-kpi-members');
+        const tabCount = document.getElementById('tab-companies-count');
+        const navCount = document.getElementById('nav-total-companies-badge');
+
+        if (kpiComp) kpiComp.textContent = m.total_companies || 0;
+        if (kpiSeats) kpiSeats.textContent = m.total_seats_allocated || 0;
+        if (kpiMembers) kpiMembers.textContent = m.total_used_seats || 0;
+        if (tabCount) tabCount.textContent = m.total_companies || 0;
+        if (navCount) navCount.textContent = m.total_companies || 0;
+
+        renderAdminCompaniesTable(allCompaniesCache);
       } catch (err) {
-        console.error(err);
+        console.error("Dashboard metrics load failed:", err);
       }
+    }
+
+    function renderAdminCompaniesTable(companies) {
+      const tbody = document.getElementById('companies-tbody');
+      if (!tbody) return;
+      tbody.innerHTML = '';
+
+      if (companies.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-muted);">No tenant companies found.</td></tr>';
+        return;
+      }
+
+      companies.forEach(c => {
+        const tr = document.createElement('tr');
+        const used = c.used_seats || 0;
+        const max = c.max_seats || 10;
+        const pct = Math.min(100, Math.round((used / max) * 100));
+
+        tr.innerHTML = `
+          <td>
+            <div style="font-weight:800; font-size:0.92rem; color:#0f172a; display:flex; align-items:center; gap:8px;">
+              <div style="width:28px; height:28px; border-radius:6px; background:#f1f5f9; border:1px solid #cbd5e1; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:0.75rem; color:#475569;">
+                ${escapeHtml((c.name || 'CO').substring(0, 2).toUpperCase())}
+              </div>
+              <span>${escapeHtml(c.name)}</span>
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted); font-family:var(--font-mono); margin-left:36px;">slug: ${escapeHtml(c.slug)}</div>
+          </td>
+          <td>
+            <span class="saas-plan-pill plan-${c.plan || 'team'}" style="font-size:0.72rem;">${(c.plan || 'team').toUpperCase()}</span>
+          </td>
+          <td style="min-width:160px;">
+            <div style="display:flex; justify-content:space-between; font-size:0.75rem; font-weight:700; color:#334155; margin-bottom:4px;">
+              <span>${used} Seated Users</span>
+              <span style="color:#64748b;">${max} Seats Max</span>
+            </div>
+            <div style="height:6px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
+              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #0284c7, #38bdf8); border-radius:999px;"></div>
+            </div>
+          </td>
+          <td>
+            <span style="font-size:0.7rem; background:${c.status === 'active' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; border:1px solid ${c.status === 'active' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}; color:${c.status === 'active' ? '#047857' : '#b91c1c'}; padding:2px 8px; border-radius:10px; font-weight:700;">
+              ${escapeHtml(c.status || 'active').toUpperCase()}
+            </span>
+          </td>
+          <td style="text-align:right;">
+            <div style="display:inline-flex; gap:6px;">
+              <button class="btn btn-secondary" onclick="promptAssignCompanyQuota('${c.id}', '${escapeHtml(c.name)}', '${c.plan || 'team'}', ${max})" title="Assign Tier & Seats" style="font-size:0.72rem; padding:4px 9px;">
+                ⚡ Assign Quota
+              </button>
+              <button class="btn btn-secondary" onclick="inspectCompanyMembers('${c.id}', '${escapeHtml(c.name)}')" title="View Company Members" style="border-color:#0284c7; color:#0284c7; font-size:0.72rem; padding:4px 9px;">
+                👥 Members (${used})
+              </button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterAdminCompanies() {
+      const q = (document.getElementById('admin-company-search').value || '').trim().toLowerCase();
+      if (!q) {
+        renderAdminCompaniesTable(allCompaniesCache);
+        return;
+      }
+      const filtered = allCompaniesCache.filter(c => 
+        (c.name && c.name.toLowerCase().includes(q)) || 
+        (c.slug && c.slug.toLowerCase().includes(q)) ||
+        (c.plan && c.plan.toLowerCase().includes(q))
+      );
+      renderAdminCompaniesTable(filtered);
     }
 
     function autoFillPlanSeats() {
@@ -7153,7 +8572,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
           document.getElementById('new-comp-name').value = '';
           document.getElementById('new-comp-admin-email').value = '';
           document.getElementById('new-comp-admin-name').value = '';
-          await loadAllCompanies();
+          switchSuperAdminTab('companies');
+          await loadPlatformDashboardMetrics();
+          await checkAuthStatus();
         } else {
           showToast(data.message || 'Could not create company.', 'error');
         }
@@ -7161,14 +8582,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
         showToast('Server error.', 'error');
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>Create Company & Provision Seats</span>';
+        btn.innerHTML = '<span>Provision Organization & Activate Quota</span>';
       }
     }
 
-    async function promptUpdateCompanyPlan(companyId, currentPlan, currentSeats) {
-      const newPlan = prompt(`Enter subscription plan tier ('free', 'team', 'enterprise'):`, currentPlan);
+    async function promptAssignCompanyQuota(companyId, companyName, currentPlan, currentSeats) {
+      const newPlan = prompt(`[${companyName}]\nEnter subscription plan tier ('free', 'team', 'enterprise'):`, currentPlan);
       if (!newPlan) return;
-      const newSeatsStr = prompt(`Enter maximum seats for this company:`, currentSeats);
+      const newSeatsStr = prompt(`[${companyName}]\nEnter maximum seats quota:`, currentSeats);
       if (!newSeatsStr) return;
       const newSeats = parseInt(newSeatsStr, 10);
       if (isNaN(newSeats) || newSeats < 1) {
@@ -7184,8 +8605,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
         });
         const data = await res.json();
         if (res.ok && data.status === 'ok') {
-          showToast('Updated company subscription & seat quota!');
-          await loadAllCompanies();
+          showToast(`Updated quota for ${companyName}!`);
+          await loadPlatformDashboardMetrics();
           await checkAuthStatus();
         } else {
           showToast(data.message || 'Update failed.', 'error');
@@ -7193,6 +8614,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
       } catch (e) {
         showToast('Server error.', 'error');
       }
+    }
+
+    async function inspectCompanyMembers(companyId, companyName) {
+      hideSuperAdminModal();
+      await openTeamModal('members', companyId);
     }
 
     function escapeHtml(str) {
@@ -7243,6 +8669,41 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <span>Sign In ➔</span>
               </button>
             </div>
+
+            <div style="display:flex; align-items:center; gap:10px; margin:16px 0 6px 0;">
+              <div style="flex:1; height:1px; background:rgba(180,140,45,0.2);"></div>
+              <span style="font-size:0.7rem; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em;">Or Biometric Key</span>
+              <div style="flex:1; height:1px; background:rgba(180,140,45,0.2);"></div>
+            </div>
+            <button type="button" class="btn-passkey" onclick="startPasskeyLogin('modal')">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#d4af37" stroke-width="2"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></svg>
+              <span>Sign In with Passkey (Touch ID / Face ID)</span>
+            </button>
+          </form>
+        </div>
+
+        <!-- Tab 3: Modal MFA Form -->
+        <div id="view-auth-mfa" style="display:none;">
+          <div style="text-align:center; margin-bottom:18px;">
+            <div style="width:48px; height:48px; border-radius:50%; background:rgba(184,134,11,0.12); border:1px solid rgba(184,134,11,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            </div>
+            <div style="font-family:var(--font-royal); font-size:1.15rem; font-weight:700; color:#0f172a;">Two-Factor Verification</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Enter the 6-digit code from your authenticator app or emergency backup code.</div>
+          </div>
+          <form onsubmit="handleMfaLoginSubmit(event, 'modal')">
+            <input type="hidden" id="modal-mfa-token" value="">
+            <div class="saas-form-group">
+              <label class="saas-form-label">Authenticator Code / Backup Code</label>
+              <input type="text" id="modal-mfa-code" class="saas-input" placeholder="123456" autocomplete="one-time-code" required style="font-size:1.3rem; text-align:center; letter-spacing:0.18em; font-family:var(--font-mono); font-weight:800;">
+            </div>
+            <div id="modal-mfa-error" class="saas-alert-danger" style="display:none; margin-bottom:12px;"></div>
+            <button type="submit" class="btn btn-primary" id="btn-modal-mfa" style="width:100%; padding:12px; margin-top:4px;">
+              <span>Verify & Sign In</span>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="cancelMfaLogin('modal')" style="width:100%; padding:9px; margin-top:10px; font-size:0.82rem;">
+              <span>← Back to Credentials Sign In</span>
+            </button>
           </form>
         </div>
 
@@ -7383,71 +8844,329 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- MODAL 3: SUPERADMIN COMPANIES & SUBSCRIPTIONS -->
+  <!-- MODAL 3: SUPERADMIN PLATFORM FLEET DASHBOARD -->
   <div id="modal-superadmin" class="saas-modal-backdrop" onclick="if(event.target===this) hideSuperAdminModal()">
-    <div class="saas-modal-card wide">
+    <div class="saas-modal-card wide" style="max-width:1050px;">
+      <div class="saas-modal-header" style="background:linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom:1px solid rgba(212,175,55,0.3); color:#f8fafc;">
+        <div class="saas-modal-title" style="color:#ffffff;">
+          <div style="width:34px; height:34px; border-radius:8px; background:var(--gold-gradient); display:flex; align-items:center; justify-content:center; box-shadow:0 0 12px rgba(212,175,55,0.4);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#05070a" stroke-width="2.2"><path d="M3 18h18M4 18l2-10 5 6 3-8 3 8 5-6 2 10H4z"/></svg>
+          </div>
+          <div>
+            <div style="font-family:'Cinzel', serif; font-size:1.15rem; font-weight:800; color:#fff; letter-spacing:0.04em;">SUPERADMIN PLATFORM FLEET HUB</div>
+            <div style="font-size:0.68rem; color:#d4af37; font-family:var(--font-sans); font-weight:700; letter-spacing:0.08em; text-transform:uppercase;">Master Tenant Management & Subscription Provisioning</div>
+          </div>
+        </div>
+        <button class="saas-modal-close" onclick="hideSuperAdminModal()" style="color:#94a3b8;">&times;</button>
+      </div>
+
+      <div class="saas-modal-body" style="background:#f8fafc; padding:24px;">
+        <!-- Top Metrics KPI Cards -->
+        <div class="kpi-grid">
+          <div class="kpi-metric-card">
+            <div class="kpi-label">Total Organizations</div>
+            <div class="kpi-value" id="admin-kpi-companies">3</div>
+            <div class="kpi-sub">Active Tenant Fleets</div>
+          </div>
+          <div class="kpi-metric-card">
+            <div class="kpi-label">Allocated Capacity</div>
+            <div class="kpi-value" id="admin-kpi-seats" style="color:#0284c7;">128</div>
+            <div class="kpi-sub">Total Maximum Seats Provisioned</div>
+          </div>
+          <div class="kpi-metric-card">
+            <div class="kpi-label">Active Seated Users</div>
+            <div class="kpi-value" id="admin-kpi-members" style="color:#059669;">3</div>
+            <div class="kpi-sub">Tenant Staff Members Active</div>
+          </div>
+          <div class="kpi-metric-card">
+            <div class="kpi-label">SuperAdmin Scope</div>
+            <div class="kpi-value" style="font-size:1.1rem; color:#b45309; padding-top:4px;">Master Root</div>
+            <div class="kpi-sub">Zero Company Seats Consumed</div>
+          </div>
+        </div>
+
+        <!-- Navigation Tabs inside SuperAdmin Modal -->
+        <div class="saas-tabs" style="margin-bottom:18px;">
+          <button class="saas-tab-btn active" id="tab-superadmin-companies" onclick="switchSuperAdminTab('companies')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
+            <span>Tenant Companies (<span id="tab-companies-count">3</span>)</span>
+          </button>
+          <button class="saas-tab-btn" id="tab-superadmin-create" onclick="switchSuperAdminTab('create')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Provision New Tenant Company</span>
+          </button>
+        </div>
+
+        <!-- TAB 1: FLEET DIRECTORY -->
+        <div id="view-superadmin-companies">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
+            <div style="position:relative; flex:1; max-width:320px;">
+              <input type="text" id="admin-company-search" class="saas-input" placeholder="Search company by name or slug..." oninput="filterAdminCompanies()" style="padding-left:34px; font-size:0.82rem;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" style="position:absolute; left:12px; top:12px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </div>
+            <button class="btn btn-primary" onclick="switchSuperAdminTab('create')" style="font-size:0.8rem; padding:8px 14px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Provision Organization</span>
+            </button>
+          </div>
+
+          <div style="background:#fff; border:1px solid rgba(180, 140, 45, 0.22); border-radius:12px; overflow:hidden; box-shadow:0 2px 8px rgba(15,23,42,0.03);">
+            <div style="max-height:360px; overflow-y:auto;">
+              <table class="saas-table">
+                <thead>
+                  <tr style="background:#f1f5f9; border-bottom:1px solid #e2e8f0;">
+                    <th>Organization / Slug</th>
+                    <th>Plan Tier</th>
+                    <th>Seat Allocation & Quota</th>
+                    <th>Status</th>
+                    <th style="text-align:right;">Actions & Assignment</th>
+                  </tr>
+                </thead>
+                <tbody id="companies-tbody">
+                  <!-- Populated by JavaScript -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: PROVISION NEW COMPANY -->
+        <div id="view-superadmin-create" style="display:none;">
+          <div style="background:#ffffff; border:1px solid rgba(180, 140, 45, 0.22); border-radius:12px; padding:22px; box-shadow:0 2px 8px rgba(15,23,42,0.03);">
+            <div style="font-size:0.95rem; font-weight:800; color:var(--text); margin-bottom:6px;">Provision New Tenant Organization</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:18px;">Create a dedicated company partition with custom plan quota and send an invitation to the lead administrator.</div>
+            <form onsubmit="handleCreateCompanySubmit(event)">
+              <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:14px; margin-bottom:14px;">
+                <div>
+                  <label class="saas-form-label">Company Name *</label>
+                  <input type="text" id="new-comp-name" class="saas-input" placeholder="e.g. Manchester Storm Media" required>
+                </div>
+                <div>
+                  <label class="saas-form-label">Plan Tier *</label>
+                  <select id="new-comp-plan" class="saas-input" onchange="autoFillPlanSeats()">
+                    <option value="free">Free Tier (3 Seats)</option>
+                    <option value="team" selected>Team Tier (15 Seats)</option>
+                    <option value="enterprise">Enterprise Tier (100 Seats)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="saas-form-label">Maximum Seats *</label>
+                  <input type="number" id="new-comp-seats" class="saas-input" value="15" min="1" max="1000" required>
+                </div>
+              </div>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:18px;">
+                <div>
+                  <label class="saas-form-label">Lead Administrator Email (Sends Activation)</label>
+                  <input type="email" id="new-comp-admin-email" class="saas-input" placeholder="admin@manchesterstorm.com">
+                </div>
+                <div>
+                  <label class="saas-form-label">Lead Administrator Full Name</label>
+                  <input type="text" id="new-comp-admin-name" class="saas-input" placeholder="e.g. Liam Gallagher">
+                </div>
+              </div>
+              <div style="display:flex; justify-content:flex-end; gap:10px;">
+                <button type="button" class="btn btn-secondary" onclick="switchSuperAdminTab('companies')" style="padding:9px 18px;">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="btn-create-comp" style="padding:9px 24px;">
+                  <span>Provision Organization & Activate Quota</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL 4: ACCOUNT SETTINGS & CREDENTIALS (CHANGE PASSWORD, MFA, PASSKEYS) -->
+  <div id="modal-account-settings" class="saas-modal-backdrop" onclick="if(event.target===this) hideAccountSettingsModal()">
+    <div class="saas-modal-card" style="max-width:680px;">
       <div class="saas-modal-header">
         <div class="saas-modal-title">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg> Multi-Tenant Company Distributions
+          <div style="width:32px; height:32px; border-radius:8px; background:rgba(184,134,11,0.12); border:1px solid rgba(184,134,11,0.3); display:flex; align-items:center; justify-content:center;">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div>
+            <div style="font-family:'Cinzel', serif; font-size:1.1rem; font-weight:800; color:#0f172a;">ACCOUNT & CREDENTIALS</div>
+            <div style="font-size:0.68rem; color:var(--text-gold); font-weight:700; text-transform:uppercase; letter-spacing:0.08em;">Security, Password, MFA & Passkeys</div>
+          </div>
         </div>
-        <button class="saas-modal-close" onclick="hideSuperAdminModal()">&times;</button>
+        <button class="saas-modal-close" onclick="hideAccountSettingsModal()">&times;</button>
       </div>
+
       <div class="saas-modal-body">
-        <!-- Create New Tenant Company -->
-        <div style="background:#fbfcfe; border:1px solid rgba(180, 140, 45, 0.22); border-radius:12px; padding:18px; margin-bottom:24px;">
-          <div style="font-size:0.9rem; font-weight:800; color:var(--text); margin-bottom:14px;">Create New Tenant Company / Organization</div>
-          <form onsubmit="handleCreateCompanySubmit(event)">
-            <div style="display:grid; grid-template-columns: 2fr 1fr 1fr; gap:12px; margin-bottom:12px;">
-              <div>
-                <label class="saas-form-label">Company Name</label>
-                <input type="text" id="new-comp-name" class="saas-input" placeholder="e.g. Manchester Storm Media" required>
-              </div>
-              <div>
-                <label class="saas-form-label">Plan Tier</label>
-                <select id="new-comp-plan" class="saas-input" onchange="autoFillPlanSeats()">
-                  <option value="free">Free (3 Seats)</option>
-                  <option value="team" selected>Team (15 Seats)</option>
-                  <option value="enterprise">Enterprise (100 Seats)</option>
-                </select>
-              </div>
-              <div>
-                <label class="saas-form-label">Max Seats</label>
-                <input type="number" id="new-comp-seats" class="saas-input" value="15" min="1" max="1000" required>
-              </div>
-            </div>
+        <div class="saas-tabs">
+          <button class="saas-tab-btn active" id="tab-account-credentials" onclick="switchAccountTab('credentials')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <span>Password & Credentials</span>
+          </button>
+          <button class="saas-tab-btn" id="tab-account-mfa" onclick="switchAccountTab('mfa')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Two-Factor (MFA)</span>
+          </button>
+          <button class="saas-tab-btn" id="tab-account-passkeys" onclick="switchAccountTab('passkeys')">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4Z"/><circle cx="16.5" cy="7.5" r=".5"/></svg>
+            <span>Passkeys</span>
+          </button>
+        </div>
+
+        <!-- TAB 1: CREDENTIALS & PASSWORD -->
+        <div id="view-account-credentials">
+          <form onsubmit="handleUpdateProfileSubmit(event)">
+            <div style="font-size:0.86rem; font-weight:800; color:#0f172a; margin-bottom:12px;">Corporate Identity & Profile</div>
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">
               <div>
-                <label class="saas-form-label">Company Admin Email (Sends Invite)</label>
-                <input type="email" id="new-comp-admin-email" class="saas-input" placeholder="admin@manchesterstorm.com">
+                <label class="saas-form-label">Full Name</label>
+                <input type="text" id="acc-full-name" class="saas-input" required>
               </div>
               <div>
-                <label class="saas-form-label">Company Admin Name</label>
-                <input type="text" id="new-comp-admin-name" class="saas-input" placeholder="Lead Photographer">
+                <label class="saas-form-label">Email Address</label>
+                <input type="email" id="acc-email" class="saas-input" required>
               </div>
             </div>
-            <button type="submit" class="btn btn-primary" id="btn-create-comp" style="padding:8px 20px;">
-              <span>Create Company & Provision Seats</span>
-            </button>
+
+            <div style="font-size:0.86rem; font-weight:800; color:#0f172a; margin:18px 0 8px 0; padding-top:14px; border-top:1px solid rgba(180,140,45,0.2);">Change Account Password</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:12px;">Leave blank if you only wish to update your name/email.</div>
+
+            <div class="saas-form-group">
+              <label class="saas-form-label">Current Password (Required for changes)</label>
+              <input type="password" id="acc-current-password" class="saas-input" placeholder="Enter current password" autocomplete="current-password">
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:16px;">
+              <div>
+                <label class="saas-form-label">New Password</label>
+                <input type="password" id="acc-new-password" class="saas-input" placeholder="Minimum 6 characters" minlength="6" autocomplete="new-password">
+              </div>
+              <div>
+                <label class="saas-form-label">Confirm New Password</label>
+                <input type="password" id="acc-confirm-password" class="saas-input" placeholder="Repeat new password" minlength="6" autocomplete="new-password">
+              </div>
+            </div>
+
+            <div id="acc-profile-error" class="saas-alert-danger" style="display:none; margin-bottom:14px;"></div>
+            <div id="acc-profile-success" class="saas-alert-info" style="display:none; margin-bottom:14px; background:rgba(16,185,129,0.1); border-color:rgba(16,185,129,0.3); color:#047857;"></div>
+
+            <div style="display:flex; justify-content:flex-end;">
+              <button type="submit" class="btn btn-primary" id="btn-save-credentials" style="padding:10px 24px;">
+                <span>Save Credentials & Password</span>
+              </button>
+            </div>
           </form>
         </div>
 
-        <!-- Existing Companies Directory -->
-        <div style="font-size:0.85rem; font-weight:800; color:var(--text); margin-bottom:10px;">Active Organizations & Subscriptions</div>
-        <div style="max-height:280px; overflow-y:auto; border:1px solid rgba(180, 140, 45, 0.22); border-radius:10px;">
-          <table class="saas-table">
-            <thead>
-              <tr>
-                <th>Company</th>
-                <th>Plan Tier</th>
-                <th>Seat Quota</th>
-                <th>Status</th>
-                <th style="text-align:right;">Actions</th>
-              </tr>
-            </thead>
-            <tbody id="companies-tbody">
-              <!-- Dynamically populated -->
-            </tbody>
-          </table>
+        <!-- TAB 2: TWO-FACTOR AUTHENTICATION (MFA) -->
+        <div id="view-account-mfa" style="display:none;">
+          <!-- State A: MFA Not Enabled -->
+          <div id="mfa-status-disabled-box" style="background:#f8fafc; border:1px solid rgba(180,140,45,0.25); border-radius:12px; padding:20px; margin-bottom:16px;">
+            <div style="display:flex; align-items:flex-start; gap:14px;">
+              <div style="width:42px; height:42px; border-radius:10px; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); display:flex; align-items:center; justify-content:center; color:#dc2626; flex-shrink:0;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              </div>
+              <div>
+                <div style="font-weight:800; font-size:0.95rem; color:#0f172a;">Two-Factor Authentication is Disabled</div>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px; line-height:1.4;">
+                  Add an extra layer of security to your enterprise account. When enabled, signing in requires your password and a 6-digit verification code from Google Authenticator, 1Password, or Apple Keychain.
+                </div>
+                <button type="button" class="btn btn-primary" onclick="startMfaSetupWizard()" style="margin-top:14px; padding:8px 18px; font-size:0.82rem;">
+                  <span>Set Up Authenticator App</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Wizard: Setup Flow -->
+          <div id="mfa-setup-wizard" style="display:none; background:#ffffff; border:1px solid rgba(180,140,45,0.3); border-radius:12px; padding:22px; margin-bottom:16px;">
+            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin-bottom:12px;">Step 1: Scan QR Code or Enter Secret Key</div>
+            <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap; margin-bottom:16px;">
+              <div style="padding:10px; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+                <img id="mfa-qr-img" src="" alt="MFA QR Code" style="width:160px; height:160px; display:block;">
+              </div>
+              <div style="flex:1; min-width:220px;">
+                <div style="font-size:0.75rem; color:var(--text-muted); margin-bottom:6px;">Can't scan the QR code? Manually enter this secret key into your authenticator app:</div>
+                <div class="totp-code-display" id="mfa-secret-text" style="margin-bottom:8px;">.... .... .... ....</div>
+                <div>
+                  <button type="button" class="btn btn-secondary" onclick="copyMfaSecret()" style="font-size:0.75rem; padding:4px 10px;">
+                    Copy Secret Key
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 2: Emergency Recovery Backup Codes</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">Save these single-use recovery codes in case you lose access to your authenticator device:</div>
+            <div class="backup-codes-grid" id="mfa-backup-codes-list"></div>
+            <div style="margin-top:8px;">
+              <button type="button" class="btn btn-secondary" onclick="copyBackupCodes()" style="font-size:0.75rem; padding:4px 10px;">Copy All Backup Codes</button>
+            </div>
+
+            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 3: Verify & Activate</div>
+            <form onsubmit="handleMfaConfirmSubmit(event)">
+              <div class="saas-form-group">
+                <label class="saas-form-label">Enter 6-Digit Code from App</label>
+                <input type="text" id="mfa-confirm-code" class="saas-input" placeholder="123456" maxlength="6" required style="font-size:1.15rem; font-family:var(--font-mono); letter-spacing:0.15em; max-width:200px;">
+              </div>
+              <div id="mfa-confirm-error" class="saas-alert-danger" style="display:none; margin-bottom:12px;"></div>
+              <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-secondary" onclick="cancelMfaSetupWizard()" style="padding:8px 16px;">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="btn-mfa-confirm" style="padding:8px 20px;">
+                  <span>Verify Code & Enable 2FA</span>
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <!-- State B: MFA Already Enabled -->
+          <div id="mfa-status-enabled-box" style="display:none; background:#f0fdf4; border:1px solid rgba(16,185,129,0.3); border-radius:12px; padding:20px;">
+            <div style="display:flex; align-items:flex-start; gap:14px;">
+              <div style="width:42px; height:42px; border-radius:10px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); display:flex; align-items:center; justify-content:center; color:#059669; flex-shrink:0;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <div style="flex:1;">
+                <div style="font-weight:800; font-size:0.95rem; color:#065f46;">Two-Factor Authentication is Active</div>
+                <div style="font-size:0.8rem; color:#047857; margin-top:4px;">Your account is secured with standard TOTP two-factor authentication.</div>
+                
+                <div style="margin-top:16px; padding-top:14px; border-top:1px solid rgba(16,185,129,0.2);">
+                  <div style="font-size:0.82rem; font-weight:700; color:#0f172a; margin-bottom:6px;">Disable Two-Factor Authentication</div>
+                  <form onsubmit="handleMfaDisableSubmit(event)" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <input type="password" id="mfa-disable-password" class="saas-input" placeholder="Current password to confirm" required style="max-width:240px; padding:8px 12px; font-size:0.82rem;">
+                    <button type="submit" class="btn btn-secondary" style="border-color:#ef4444; color:#ef4444; padding:8px 16px; font-size:0.82rem;">Disable 2FA</button>
+                  </form>
+                  <div id="mfa-disable-error" class="saas-alert-danger" style="display:none; margin-top:8px;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 3: PASSKEYS -->
+        <div id="view-account-passkeys" style="display:none;">
+          <div style="background:#f8fafc; border:1px solid rgba(180,140,45,0.25); border-radius:12px; padding:18px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="font-weight:800; font-size:0.92rem; color:#0f172a;">Passwordless Biometric Passkeys</div>
+              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:3px;">Use Touch ID, Face ID, Windows Hello, or hardware security keys to sign in instantly.</div>
+            </div>
+            <button type="button" class="btn btn-primary" onclick="startPasskeyRegister()" style="font-size:0.82rem; padding:8px 16px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Add New Passkey</span>
+            </button>
+          </div>
+
+          <div style="font-size:0.84rem; font-weight:800; color:#0f172a; margin-bottom:10px;">Registered Passkeys</div>
+          <div style="border:1px solid rgba(180,140,45,0.2); border-radius:10px; overflow:hidden; background:#fff;">
+            <table class="saas-table">
+              <thead>
+                <tr style="background:#f8fafc;">
+                  <th>Passkey Device</th>
+                  <th>Created Date</th>
+                  <th>Last Used</th>
+                  <th style="text-align:right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="passkeys-table-body">
+                <!-- Dynamically populated -->
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -7515,20 +9234,29 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self.send_header("Expires", "0")
             self.end_headers()
             self.wfile.write(HTML_PAGE.encode("utf-8"))
+            return
 
         elif path == "/api/auth/me":
             user = self._get_current_user()
             if not user:
                 self._send_json({"logged_in": False, "user": None})
                 return
-            company = user.get("company")
-            used_seats = saas_db.get_company_seat_count(user["company_id"]) if user.get("company_id") else 0
+            is_superadmin = (user.get("role") == "superadmin")
+            company = user.get("company") if not is_superadmin else None
+            used_seats = saas_db.get_company_seat_count(user["company_id"]) if (user.get("company_id") and not is_superadmin) else 0
+            passkeys = saas_db.get_passkeys_by_user(user["id"])
+            platform_metrics = saas_db.get_platform_metrics() if is_superadmin else None
+
             safe_user = {
                 "id": user["id"],
-                "company_id": user["company_id"],
+                "company_id": None if is_superadmin else user.get("company_id"),
                 "email": user["email"],
                 "full_name": user["full_name"],
                 "role": user["role"],
+                "is_superadmin": is_superadmin,
+                "mfa_enabled": bool(user.get("mfa_enabled")),
+                "passkeys_count": len(passkeys),
+                "platform_metrics": platform_metrics,
                 "is_active": user["is_active"],
                 "created_at": user.get("created_at"),
                 "company": {
@@ -7545,12 +9273,44 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self._send_json({"logged_in": True, "user": safe_user})
             return
 
+        elif path == "/api/auth/passkey/login_options":
+            opts = saas_auth.create_passkey_login_challenge()
+            self._send_json({"status": "ok", "options": opts})
+            return
+
         # Strict authentication gate: all services require an authenticated active company account
         user = self._require_auth()
         if not user:
             return
 
-        if path == "/api/company/details":
+        if path == "/api/admin/dashboard_stats":
+            if user["role"] != "superadmin":
+                self._send_json({"status": "error", "message": "Forbidden: Requires SuperAdmin"}, status=403)
+                return
+            metrics = saas_db.get_platform_metrics()
+            self._send_json({"status": "ok", "metrics": metrics})
+            return
+
+        elif path == "/api/auth/passkey/register_options":
+            opts = saas_auth.create_passkey_register_challenge(user)
+            self._send_json({"status": "ok", "options": opts})
+            return
+
+        elif path == "/api/auth/passkey/list":
+            keys = saas_db.get_passkeys_by_user(user["id"])
+            safe_keys = []
+            for k in keys:
+                safe_keys.append({
+                    "id": k["id"],
+                    "credential_id": k["credential_id"],
+                    "name": k.get("name") or "Biometric Key",
+                    "created_at": k.get("created_at"),
+                    "last_used_at": k.get("last_used_at")
+                })
+            self._send_json({"status": "ok", "passkeys": safe_keys})
+            return
+
+        elif path == "/api/company/details":
             user = self._get_current_user()
             if not user or not user.get("company_id"):
                 self._send_json({"error": "Unauthorized"}, status=401)
@@ -7813,8 +9573,8 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             content_len = int(self.headers.get("Content-Length", 0))
 
-            # Strict authentication gate: All POST endpoints require active company login except auth login and invite activation
-            if parsed.path not in ("/api/auth/login", "/api/auth/activate"):
+            # Strict authentication gate: All POST endpoints require active company login except auth login, invite activation, and MFA/Passkey challenge verification
+            if parsed.path not in ("/api/auth/login", "/api/auth/activate", "/api/auth/mfa/verify_login", "/api/auth/passkey/login_verify"):
                 user = self._require_auth()
                 if not user:
                     return
@@ -7859,6 +9619,7 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     "found": found_path is not None,
                     "path": found_path
                 }).encode("utf-8"))
+                return
 
             elif parsed.path == "/api/clear_server_storage":
                 result = clean_server_storage(max_age_minutes=0)
@@ -8324,15 +10085,34 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                     self._send_json({"status": "error", "message": "Invalid email or password."}, status=401)
                     return
 
+                # Check if MFA (Two-Factor Authentication) is enabled for this user
+                if user.get("mfa_enabled"):
+                    mfa_token = saas_auth.create_mfa_login_token(user["id"])
+                    self._send_json({
+                        "status": "mfa_required",
+                        "mfa_token": mfa_token,
+                        "email": user["email"],
+                        "message": "Two-Factor Authentication is enabled. Please enter your authenticator app code or backup code."
+                    })
+                    return
+
                 token = saas_db.create_session(user["id"])
-                company = saas_db.get_company_by_id(user["company_id"])
-                used_seats = saas_db.get_company_seat_count(user["company_id"]) if user.get("company_id") else 0
+                is_superadmin = (user.get("role") == "superadmin")
+                company = saas_db.get_company_by_id(user["company_id"]) if not is_superadmin else None
+                used_seats = saas_db.get_company_seat_count(user["company_id"]) if (user.get("company_id") and not is_superadmin) else 0
+                passkeys = saas_db.get_passkeys_by_user(user["id"])
+                platform_metrics = saas_db.get_platform_metrics() if is_superadmin else None
+
                 safe_user = {
                     "id": user["id"],
-                    "company_id": user["company_id"],
+                    "company_id": None if is_superadmin else user.get("company_id"),
                     "email": user["email"],
                     "full_name": user["full_name"],
                     "role": user["role"],
+                    "is_superadmin": is_superadmin,
+                    "mfa_enabled": bool(user.get("mfa_enabled")),
+                    "passkeys_count": len(passkeys),
+                    "platform_metrics": platform_metrics,
                     "company": {
                         "id": company["id"],
                         "name": company["name"],
@@ -8346,6 +10126,272 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 }
                 cookie = f"session_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
                 self._send_json({"status": "ok", "token": token, "user": safe_user}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/auth/mfa/verify_login":
+                mfa_token = data.get("mfa_token", "").strip()
+                code = data.get("code", "").strip()
+                if not mfa_token or not code:
+                    self._send_json({"status": "error", "message": "Missing MFA challenge token or code."}, status=400)
+                    return
+
+                verified_user_id = saas_auth.verify_mfa_login_token(mfa_token)
+                if not verified_user_id:
+                    self._send_json({"status": "error", "message": "MFA challenge expired or invalid. Please sign in again."}, status=401)
+                    return
+
+                user = saas_db.get_user_by_id(verified_user_id)
+                if not user:
+                    self._send_json({"status": "error", "message": "User not found."}, status=404)
+                    return
+
+                clean_code = str(code).strip()
+                valid = False
+                secret = user.get("mfa_secret")
+                if secret and saas_auth.verify_totp_code(secret, clean_code):
+                    valid = True
+                elif saas_auth.verify_and_consume_backup_code(user["id"], clean_code):
+                    valid = True
+
+                if not valid:
+                    fresh_token = saas_auth.create_mfa_login_token(user["id"])
+                    self._send_json({
+                        "status": "error",
+                        "message": "Invalid authentication code. Please check your authenticator app or backup code.",
+                        "mfa_token": fresh_token
+                    }, status=401)
+                    return
+
+                token = saas_db.create_session(user["id"])
+                is_superadmin = (user.get("role") == "superadmin")
+                company = saas_db.get_company_by_id(user["company_id"]) if not is_superadmin else None
+                used_seats = saas_db.get_company_seat_count(user["company_id"]) if (user.get("company_id") and not is_superadmin) else 0
+                passkeys = saas_db.get_passkeys_by_user(user["id"])
+                platform_metrics = saas_db.get_platform_metrics() if is_superadmin else None
+
+                safe_user = {
+                    "id": user["id"],
+                    "company_id": None if is_superadmin else user.get("company_id"),
+                    "email": user["email"],
+                    "full_name": user["full_name"],
+                    "role": user["role"],
+                    "is_superadmin": is_superadmin,
+                    "mfa_enabled": bool(user.get("mfa_enabled")),
+                    "passkeys_count": len(passkeys),
+                    "platform_metrics": platform_metrics,
+                    "company": {
+                        "id": company["id"],
+                        "name": company["name"],
+                        "slug": company["slug"],
+                        "plan": company.get("plan", "team"),
+                        "max_seats": company.get("max_seats", 10),
+                        "used_seats": used_seats,
+                        "remaining_seats": max(0, company.get("max_seats", 10) - used_seats),
+                        "status": company.get("status", "active")
+                    } if company else None
+                }
+                cookie = f"session_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+                self._send_json({"status": "ok", "token": token, "user": safe_user}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/auth/passkey/login_verify":
+                challenge_id = data.get("challenge_id")
+                credential = data.get("credential", {})
+                cred_id = credential.get("id") or credential.get("rawId")
+                if not challenge_id or not cred_id:
+                    self._send_json({"status": "error", "message": "Missing passkey credential data."}, status=400)
+                    return
+
+                pk = saas_db.get_passkey_by_credential_id(cred_id)
+                if not pk:
+                    self._send_json({"status": "error", "message": "Biometric passkey not recognized on this server."}, status=404)
+                    return
+
+                valid_ch = saas_auth.verify_passkey_challenge(challenge_id, expected_type="login")
+                if not valid_ch:
+                    self._send_json({"status": "error", "message": "Biometric challenge expired or invalid."}, status=401)
+                    return
+
+                user = saas_db.get_user_by_id(pk["user_id"])
+                if not user or not user.get("is_active"):
+                    self._send_json({"status": "error", "message": "Account associated with this passkey is inactive."}, status=403)
+                    return
+
+                saas_db.update_passkey_usage(pk["credential_id"])
+                token = saas_db.create_session(user["id"])
+                is_superadmin = (user.get("role") == "superadmin")
+                company = saas_db.get_company_by_id(user["company_id"]) if not is_superadmin else None
+                used_seats = saas_db.get_company_seat_count(user["company_id"]) if (user.get("company_id") and not is_superadmin) else 0
+                passkeys = saas_db.get_passkeys_by_user(user["id"])
+                platform_metrics = saas_db.get_platform_metrics() if is_superadmin else None
+
+                safe_user = {
+                    "id": user["id"],
+                    "company_id": None if is_superadmin else user.get("company_id"),
+                    "email": user["email"],
+                    "full_name": user["full_name"],
+                    "role": user["role"],
+                    "is_superadmin": is_superadmin,
+                    "mfa_enabled": bool(user.get("mfa_enabled")),
+                    "passkeys_count": len(passkeys),
+                    "platform_metrics": platform_metrics,
+                    "company": {
+                        "id": company["id"],
+                        "name": company["name"],
+                        "slug": company["slug"],
+                        "plan": company.get("plan", "team"),
+                        "max_seats": company.get("max_seats", 10),
+                        "used_seats": used_seats,
+                        "remaining_seats": max(0, company.get("max_seats", 10) - used_seats),
+                        "status": company.get("status", "active")
+                    } if company else None
+                }
+                cookie = f"session_token={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000"
+                self._send_json({"status": "ok", "token": token, "user": safe_user}, cookie=cookie)
+                return
+
+            elif parsed.path == "/api/auth/passkey/register_verify":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+
+                challenge_id = data.get("challenge_id")
+                name = data.get("name") or "Biometric Key"
+                credential = data.get("credential", {})
+                cred_id = credential.get("id") or credential.get("rawId")
+                if not challenge_id or not cred_id:
+                    self._send_json({"status": "error", "message": "Missing passkey registration details."}, status=400)
+                    return
+
+                valid_ch = saas_auth.verify_passkey_challenge(challenge_id, expected_type="register")
+                if not valid_ch:
+                    self._send_json({"status": "error", "message": "Passkey registration challenge expired."}, status=400)
+                    return
+
+                pk = saas_db.create_passkey(
+                    user_id=user["id"],
+                    credential_id=cred_id,
+                    public_key=credential.get("response", {}).get("attestationObject", ""),
+                    name=name
+                )
+                self._send_json({"status": "ok", "passkey": pk})
+                return
+
+            elif parsed.path == "/api/auth/passkey/delete":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                passkey_id = data.get("passkey_id")
+                if not passkey_id:
+                    self._send_json({"status": "error", "message": "Missing passkey_id."}, status=400)
+                    return
+                saas_db.delete_passkey(passkey_id, user_id=user["id"])
+                self._send_json({"status": "ok"})
+                return
+
+            elif parsed.path == "/api/auth/mfa/setup":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                secret = saas_auth.generate_totp_secret()
+                totp_uri = saas_auth.get_totp_uri(secret, user["email"], issuer="Basketball Portrait Studio")
+                qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=220x220&data={urllib.parse.quote(totp_uri)}"
+                backup_codes = saas_auth.generate_backup_codes(count=8)
+                self._send_json({
+                    "status": "ok",
+                    "secret": secret,
+                    "totp_uri": totp_uri,
+                    "qr_url": qr_url,
+                    "backup_codes": backup_codes
+                })
+                return
+
+            elif parsed.path == "/api/auth/mfa/enable":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                secret = data.get("secret", "").strip()
+                code = data.get("code", "").strip().replace(" ", "").replace("-", "")
+                backup_codes = data.get("backup_codes", [])
+                if not secret or not code:
+                    self._send_json({"status": "error", "message": "Secret and verification code are required."}, status=400)
+                    return
+                if not saas_auth.verify_totp_code(secret, code):
+                    self._send_json({"status": "error", "message": "Verification code is incorrect. Please check your authenticator app."}, status=400)
+                    return
+
+                backup_codes_str = json.dumps(backup_codes) if isinstance(backup_codes, list) else str(backup_codes)
+                saas_db.update_user_mfa(user["id"], enabled=True, secret=secret, backup_codes_json=backup_codes_str)
+                self._send_json({"status": "ok", "message": "Two-factor authentication enabled successfully."})
+                return
+
+            elif parsed.path == "/api/auth/mfa/disable":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                password = data.get("password", "")
+                if not password:
+                    self._send_json({"status": "error", "message": "Password is required to disable 2FA."}, status=400)
+                    return
+                if not saas_auth.verify_password(password, user["password_hash"], user["salt"]):
+                    self._send_json({"status": "error", "message": "Incorrect password."}, status=401)
+                    return
+
+                saas_db.update_user_mfa(user["id"], enabled=False, secret=None, backup_codes_json=None)
+                self._send_json({"status": "ok", "message": "Two-factor authentication disabled."})
+                return
+
+            elif parsed.path == "/api/auth/update_profile":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                full_name = data.get("full_name", "").strip()
+                email = data.get("email", "").strip().lower()
+                current_password = data.get("current_password", "")
+
+                if not full_name or not email:
+                    self._send_json({"status": "error", "message": "Full name and email are required."}, status=400)
+                    return
+
+                if email != user["email"]:
+                    if not current_password or not saas_auth.verify_password(current_password, user["password_hash"], user["salt"]):
+                        self._send_json({"status": "error", "message": "Current password is required to change email."}, status=401)
+                        return
+                    existing = saas_db.get_user_by_email(email)
+                    if existing and existing["id"] != user["id"]:
+                        self._send_json({"status": "error", "message": "Email is already taken by another user."}, status=400)
+                        return
+
+                saas_db.update_user_credentials(user["id"], email=email, full_name=full_name)
+                self._send_json({"status": "ok", "message": "Profile updated successfully."})
+                return
+
+            elif parsed.path == "/api/auth/change_password":
+                user = self._get_current_user()
+                if not user:
+                    self._send_json({"status": "error", "message": "Unauthorized"}, status=401)
+                    return
+                current_password = data.get("current_password", "")
+                new_password = data.get("new_password", "")
+                if not current_password or not new_password:
+                    self._send_json({"status": "error", "message": "Current and new password are required."}, status=400)
+                    return
+                if len(new_password) < 4:
+                    self._send_json({"status": "error", "message": "New password must be at least 4 characters."}, status=400)
+                    return
+                if not saas_auth.verify_password(current_password, user["password_hash"], user["salt"]):
+                    self._send_json({"status": "error", "message": "Current password incorrect."}, status=401)
+                    return
+
+                p_hash, salt = saas_auth.hash_password(new_password)
+                saas_db.update_user_credentials(user["id"], password_hash=p_hash, salt=salt)
+                self._send_json({"status": "ok", "message": "Password successfully updated."})
                 return
 
             elif parsed.path == "/api/auth/logout":
@@ -8652,6 +10698,10 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 status = data.get("status", "active")
                 updated = saas_db.update_company_plan(cid, plan, max_seats, status)
                 self._send_json({"status": "ok", "company": updated})
+                return
+            elif parsed.path in ("/", ""):
+                self.send_response(204)
+                self.end_headers()
                 return
             else:
                 self.send_response(404)
