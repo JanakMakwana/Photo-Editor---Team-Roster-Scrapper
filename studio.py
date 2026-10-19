@@ -27,7 +27,7 @@ import shutil
 import zlib
 import struct
 import http.cookiejar
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 # Optimize thread allocation for low-resource cloud environments (Render Free tier)
@@ -9001,19 +9001,114 @@ HTML_PAGE = r"""<!DOCTYPE html>
     function switchSuperAdminTab(tab) {
       const tabComp = document.getElementById('tab-superadmin-companies');
       const tabCreate = document.getElementById('tab-superadmin-create');
+      const tabKeep = document.getElementById('tab-superadmin-keepalive');
       const viewComp = document.getElementById('view-superadmin-companies');
       const viewCreate = document.getElementById('view-superadmin-create');
+      const viewKeep = document.getElementById('view-superadmin-keepalive');
 
       if (tab === 'companies') {
         if (tabComp) tabComp.classList.add('active');
         if (tabCreate) tabCreate.classList.remove('active');
+        if (tabKeep) tabKeep.classList.remove('active');
         if (viewComp) viewComp.style.display = 'block';
         if (viewCreate) viewCreate.style.display = 'none';
-      } else {
+        if (viewKeep) viewKeep.style.display = 'none';
+      } else if (tab === 'create') {
         if (tabCreate) tabCreate.classList.add('active');
         if (tabComp) tabComp.classList.remove('active');
+        if (tabKeep) tabKeep.classList.remove('active');
         if (viewCreate) viewCreate.style.display = 'block';
         if (viewComp) viewComp.style.display = 'none';
+        if (viewKeep) viewKeep.style.display = 'none';
+      } else if (tab === 'keepalive') {
+        if (tabKeep) tabKeep.classList.add('active');
+        if (tabComp) tabComp.classList.remove('active');
+        if (tabCreate) tabCreate.classList.remove('active');
+        if (viewKeep) viewKeep.style.display = 'block';
+        if (viewComp) viewComp.style.display = 'none';
+        if (viewCreate) viewCreate.style.display = 'none';
+        loadKeepAliveStatus();
+      }
+    }
+
+    async function loadKeepAliveStatus() {
+      try {
+        const res = await fetch('/api/keep_alive/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        const badgeEl = document.getElementById('ka-status-badge');
+        const urlEl = document.getElementById('ka-target-url');
+        const intervalEl = document.getElementById('ka-interval');
+        const pingsEl = document.getElementById('ka-total-pings');
+        const lastPingEl = document.getElementById('ka-last-ping');
+        const latencyEl = document.getElementById('ka-latency');
+        const hostBadgeEl = document.getElementById('ka-host-badge');
+        const inputUrl = document.getElementById('ka-custom-url-input');
+
+        if (badgeEl) {
+          badgeEl.innerHTML = data.enabled
+            ? '<span style="display:inline-flex; align-items:center; gap:6px; color:#16a34a; font-weight:700;"><span style="width:8px; height:8px; border-radius:50%; background:#16a34a; box-shadow:0 0 8px #16a34a;"></span> Active (Anti-Idle Running)</span>'
+            : '<span style="color:#dc2626; font-weight:700;">Disabled</span>';
+        }
+        if (urlEl) urlEl.textContent = data.target_url || 'Detecting upon first public request...';
+        if (inputUrl && !inputUrl.value && data.target_url) inputUrl.value = data.target_url;
+        if (intervalEl) intervalEl.textContent = (data.interval_seconds / 60) + ' min (' + data.interval_seconds + 's)';
+        if (pingsEl) pingsEl.textContent = data.successful_pings + ' success / ' + data.total_pings + ' total';
+        if (lastPingEl) {
+          lastPingEl.textContent = data.last_ping_time ? (new Date(data.last_ping_time).toLocaleTimeString() + ' (' + (data.last_ping_status || 'OK') + ')') : 'Awaiting first interval';
+        }
+        if (latencyEl) latencyEl.textContent = data.last_ping_latency_ms ? (data.last_ping_latency_ms + ' ms') : '-';
+        if (hostBadgeEl) {
+          hostBadgeEl.textContent = data.is_render ? 'Render Cloud (Active)' : 'Local / Custom Server';
+        }
+      } catch (e) {
+        console.error('Failed to load keep-alive status:', e);
+      }
+    }
+
+    async function triggerKeepAliveTest() {
+      const btn = document.getElementById('btn-ka-ping-now');
+      const resultEl = document.getElementById('ka-ping-result');
+      if (btn) btn.disabled = true;
+      if (resultEl) resultEl.innerHTML = '<span style="color:#64748b;">Pinging edge proxy...</span>';
+      try {
+        const res = await fetch('/api/keep_alive/ping_now', { method: 'POST' });
+        const data = await res.json();
+        if (btn) btn.disabled = false;
+        if (resultEl) {
+          if (data.success) {
+            resultEl.innerHTML = '<span style="color:#16a34a; font-weight:700;">✓ Edge Ping Success (' + data.latency_ms + 'ms) -> ' + escapeHtml(data.target_url) + '</span>';
+          } else {
+            resultEl.innerHTML = '<span style="color:#dc2626; font-weight:700;">⚠ ' + escapeHtml(data.status) + '</span>';
+          }
+        }
+        loadKeepAliveStatus();
+      } catch (e) {
+        if (btn) btn.disabled = false;
+        if (resultEl) resultEl.innerHTML = '<span style="color:#dc2626;">Error: ' + escapeHtml(e.message) + '</span>';
+      }
+    }
+
+    async function saveKeepAliveCustomUrl(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById('ka-custom-url-input');
+      const resultEl = document.getElementById('ka-url-save-result');
+      if (!input) return;
+      try {
+        const res = await fetch('/api/keep_alive/set_url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: input.value.trim() })
+        });
+        const data = await res.json();
+        if (resultEl) {
+          resultEl.innerHTML = '<span style="color:#16a34a; font-weight:700;">✓ Saved target URL: ' + escapeHtml(data.target_url) + '</span>';
+          setTimeout(() => { if (resultEl) resultEl.innerHTML = ''; }, 4000);
+        }
+        loadKeepAliveStatus();
+      } catch (e) {
+        if (resultEl) resultEl.innerHTML = '<span style="color:#dc2626;">Error: ' + escapeHtml(e.message) + '</span>';
       }
     }
 
@@ -9205,6 +9300,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
     }
+
+    // Anti-Idle Browser Heartbeat: Keeps Render cloud service warm while tab is open
+    setInterval(() => {
+      fetch('/healthz', { cache: 'no-store' }).catch(() => {});
+    }, 4 * 60 * 1000); // Every 4 minutes (Render inactivity cutoff is 15 minutes)
 
     window.onload = init;
   </script>
@@ -9470,6 +9570,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             <span>Provision New Tenant Company</span>
           </button>
+          <button class="saas-tab-btn" id="tab-superadmin-keepalive" onclick="switchSuperAdminTab('keepalive')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span>Cloud Keep-Alive & Anti-Idle</span>
+          </button>
         </div>
 
         <!-- TAB 1: FLEET DIRECTORY -->
@@ -9546,6 +9650,83 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+
+        <!-- TAB 3: CLOUD KEEP-ALIVE & ANTI-IDLE MONITOR -->
+        <div id="view-superadmin-keepalive" style="display:none;">
+          <div style="background:#ffffff; border:1px solid rgba(180, 140, 45, 0.22); border-radius:12px; padding:22px; box-shadow:0 2px 8px rgba(15,23,42,0.03);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+              <div>
+                <div style="font-size:1.05rem; font-weight:800; color:var(--text); display:flex; align-items:center; gap:8px;">
+                  <span>Cloud Keep-Alive & Anti-Idle Heartbeat</span>
+                  <span id="ka-host-badge" class="badge" style="background:rgba(59,130,246,0.1); color:#2563eb; font-size:0.72rem; padding:3px 8px; border-radius:6px; border:1px solid rgba(59,130,246,0.25);">Render Cloud</span>
+                </div>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:3px;">Prevents Render Free tier from spinning down into cold sleep due to 15-minute inactivity.</div>
+              </div>
+              <div id="ka-status-badge">
+                <span style="display:inline-flex; align-items:center; gap:6px; color:#16a34a; font-weight:700;">
+                  <span style="width:8px; height:8px; border-radius:50%; background:#16a34a; box-shadow:0 0 8px #16a34a;"></span>
+                  Active (Anti-Idle Running)
+                </span>
+              </div>
+            </div>
+
+            <!-- Metric Grid -->
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:12px; margin-bottom:20px;">
+              <div class="kpi-metric-card" style="padding:14px;">
+                <div class="kpi-label">Ping Interval</div>
+                <div class="kpi-value" id="ka-interval" style="font-size:1.15rem; color:#0f172a;">10 min (600s)</div>
+                <div class="kpi-sub">Safe buffer (Render timeout: 15m)</div>
+              </div>
+              <div class="kpi-metric-card" style="padding:14px;">
+                <div class="kpi-label">Total Heartbeats</div>
+                <div class="kpi-value" id="ka-total-pings" style="font-size:1.15rem; color:#16a34a;">0 pings</div>
+                <div class="kpi-sub">Outbound-to-edge roundtrips</div>
+              </div>
+              <div class="kpi-metric-card" style="padding:14px;">
+                <div class="kpi-label">Last Roundtrip Latency</div>
+                <div class="kpi-value" id="ka-latency" style="font-size:1.15rem; color:#2563eb;">-</div>
+                <div class="kpi-sub">Edge proxy response time</div>
+              </div>
+              <div class="kpi-metric-card" style="padding:14px;">
+                <div class="kpi-label">Last Edge Ping Time</div>
+                <div class="kpi-value" id="ka-last-ping" style="font-size:0.85rem; color:#0f172a; padding-top:6px; word-break:break-word;">Initializing...</div>
+                <div class="kpi-sub">UTC Timestamp</div>
+              </div>
+            </div>
+
+            <!-- Target URL & Action Controls -->
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:16px; margin-bottom:18px;">
+              <div style="font-size:0.85rem; font-weight:700; color:#1e293b; margin-bottom:6px;">Current Edge Health Target:</div>
+              <div style="font-family:monospace; font-size:0.85rem; color:#0284c7; background:#fff; padding:8px 12px; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:12px; word-break:break-all;" id="ka-target-url">
+                Detecting from live traffic...
+              </div>
+
+              <form onsubmit="saveKeepAliveCustomUrl(event)" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+                <input type="text" id="ka-custom-url-input" class="saas-input" placeholder="Custom URL (e.g. https://portrait-studio-pro.onrender.com/healthz)" style="flex:1; min-width:260px; font-size:0.82rem;">
+                <button type="submit" class="btn btn-secondary" style="font-size:0.8rem; padding:8px 14px;">Update Target</button>
+                <button type="button" class="btn btn-primary" id="btn-ka-ping-now" onclick="triggerKeepAliveTest()" style="font-size:0.8rem; padding:8px 16px;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                  <span>Test Ping Now</span>
+                </button>
+              </form>
+              <div id="ka-url-save-result" style="font-size:0.78rem;"></div>
+              <div id="ka-ping-result" style="font-size:0.78rem; margin-top:4px;"></div>
+            </div>
+
+            <!-- Architecture Info Box -->
+            <div style="background:rgba(180, 140, 45, 0.08); border:1px solid rgba(180, 140, 45, 0.25); border-radius:10px; padding:16px;">
+              <div style="font-size:0.85rem; font-weight:800; color:#855f19; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                <span>Triple-Layer 24/7 Keep-Alive Architecture</span>
+              </div>
+              <div style="font-size:0.78rem; color:#475569; line-height:1.55;">
+                <strong>1. Python Server Daemon:</strong> Runs continuously on a dedicated background thread in <code>studio.py</code>. Pings the public edge URL every 10 minutes (600s), resetting Render's 15-minute inactivity counter.<br>
+                <strong>2. Browser Tab Heartbeat:</strong> Sends a lightweight <code>/healthz</code> ping every 4 minutes whenever any photographer or team member has the Studio open.<br>
+                <strong>3. External Monitor (Optional):</strong> For 100% cloud redundancy, you can configure a free monitor at <a href="https://uptimerobot.com" target="_blank" style="color:#b45309; text-decoration:underline; font-weight:700;">UptimeRobot.com</a> or <a href="https://cron-job.org" target="_blank" style="color:#b45309; text-decoration:underline; font-weight:700;">cron-job.org</a> to ping your public URL <code>https://&lt;your-app&gt;.onrender.com/healthz</code> every 5-10 minutes.
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -9751,6 +9932,164 @@ HTML_PAGE = r"""<!DOCTYPE html>
 """
 
 
+class KeepAliveService:
+    """
+    Autonomous Keep-Alive & Anti-Idle Heartbeat Service.
+    Prevents Render and other cloud host containers from spinning down
+    due to inactivity on free/idle tiers (15-minute inactivity timeout).
+    Pings the public edge URL every 10 minutes (600s).
+    """
+    enabled = os.environ.get("KEEP_ALIVE_ENABLED", "true").lower() in ("true", "1", "yes")
+    interval = int(os.environ.get("KEEP_ALIVE_INTERVAL", "600"))  # Default 10 min (Render spins down at 15m)
+    target_url = os.environ.get("KEEP_ALIVE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("APP_URL") or ""
+
+    total_pings = 0
+    successful_pings = 0
+    failed_pings = 0
+    last_ping_time = None
+    last_ping_status = None
+    last_ping_latency_ms = None
+    last_error = None
+    discovered_url = None
+    _thread = None
+    _lock = threading.Lock()
+
+    @classmethod
+    def get_effective_target_url(cls):
+        url = ""
+        if cls.target_url and cls.target_url.strip():
+            url = cls.target_url.strip()
+        elif os.environ.get("RENDER_EXTERNAL_URL"):
+            url = os.environ.get("RENDER_EXTERNAL_URL").strip()
+        elif os.environ.get("RENDER_EXTERNAL_HOSTNAME"):
+            url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME').strip()}"
+        elif cls.discovered_url:
+            url = cls.discovered_url.strip()
+        elif os.environ.get("RENDER"):
+            url = "https://portrait-studio-pro.onrender.com"
+
+        if url:
+            parsed = urllib.parse.urlparse(url)
+            scheme = parsed.scheme or "https"
+            netloc = parsed.netloc or parsed.path.split("/")[0]
+            if not netloc:
+                netloc = url.replace("https://", "").replace("http://", "").split("/")[0]
+            base = f"{scheme}://{netloc}"
+            return f"{base.rstrip('/')}/healthz"
+        return ""
+
+    @classmethod
+    def register_public_origin(cls, host: str, proto: str = "https"):
+        if not host:
+            return
+        h_clean = host.split(":")[0].lower()
+        if h_clean in ("localhost", "127.0.0.1", "0.0.0.0") or h_clean.startswith("192.168.") or h_clean.startswith("10.") or h_clean.startswith("172."):
+            return
+        with cls._lock:
+            if not cls.discovered_url:
+                cls.discovered_url = f"{proto}://{host}"
+                print(f"[Keep-Alive] Dynamically learned public origin: {cls.discovered_url}")
+
+    @classmethod
+    def ping_now(cls):
+        target = cls.get_effective_target_url()
+        if not target:
+            return {
+                "success": False,
+                "status": "No public target URL detected yet. Set RENDER_EXTERNAL_URL / KEEP_ALIVE_URL or visit the app from your public domain.",
+                "latency_ms": 0,
+                "target_url": ""
+            }
+
+        start_t = time.time()
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        req = urllib.request.Request(target, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) StudioAntiIdle/1.0",
+            "X-Keep-Alive-Ping": "true"
+        })
+        try:
+            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
+                status_code = resp.getcode()
+                latency = round((time.time() - start_t) * 1000, 2)
+                with cls._lock:
+                    cls.total_pings += 1
+                    cls.successful_pings += 1
+                    cls.last_ping_time = datetime.now(timezone.utc).isoformat()
+                    cls.last_ping_status = f"{status_code} OK"
+                    cls.last_ping_latency_ms = latency
+                    cls.last_error = None
+                print(f"[Keep-Alive] Edge heartbeat ping to {target} -> {status_code} OK ({latency}ms)")
+                return {
+                    "success": True,
+                    "status": f"{status_code} OK",
+                    "latency_ms": latency,
+                    "target_url": target
+                }
+        except Exception as e:
+            latency = round((time.time() - start_t) * 1000, 2)
+            with cls._lock:
+                cls.total_pings += 1
+                cls.failed_pings += 1
+                cls.last_ping_time = datetime.now(timezone.utc).isoformat()
+                cls.last_ping_status = f"Error: {e}"
+                cls.last_ping_latency_ms = latency
+                cls.last_error = str(e)
+            print(f"[Keep-Alive] Warning: Heartbeat ping to {target} failed: {e}")
+            return {
+                "success": False,
+                "status": str(e),
+                "latency_ms": latency,
+                "target_url": target
+            }
+
+    @classmethod
+    def _loop(cls):
+        time.sleep(25)  # Wait for server to bind and initial requests
+        print(f"[Keep-Alive] Anti-idle heartbeat daemon started. Interval: {cls.interval}s.")
+        while cls.enabled:
+            try:
+                target = cls.get_effective_target_url()
+                if target:
+                    cls.ping_now()
+                else:
+                    if cls.total_pings == 0:
+                        print("[Keep-Alive] Standby: Waiting for public domain detection or RENDER_EXTERNAL_URL...")
+            except Exception as e:
+                print(f"[Keep-Alive] Exception in loop: {e}")
+            time.sleep(max(60, cls.interval))
+
+    @classmethod
+    def start(cls):
+        if not cls.enabled:
+            print("[Keep-Alive] Service disabled via KEEP_ALIVE_ENABLED=false.")
+            return
+        if cls._thread and cls._thread.is_alive():
+            return
+        cls._thread = threading.Thread(target=cls._loop, daemon=True, name="StudioKeepAliveDaemon")
+        cls._thread.start()
+
+    @classmethod
+    def get_status(cls):
+        return {
+            "enabled": cls.enabled,
+            "target_url": cls.get_effective_target_url(),
+            "interval_seconds": cls.interval,
+            "total_pings": cls.total_pings,
+            "successful_pings": cls.successful_pings,
+            "failed_pings": cls.failed_pings,
+            "last_ping_time": cls.last_ping_time,
+            "last_ping_status": cls.last_ping_status,
+            "last_ping_latency_ms": cls.last_ping_latency_ms,
+            "last_error": cls.last_error,
+            "is_render": bool(os.environ.get("RENDER")),
+            "render_service_name": os.environ.get("RENDER_SERVICE_NAME", "portrait-studio-pro"),
+            "discovered_url": cls.discovered_url
+        }
+
+
 class StudioServerHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status=200, cookie=None):
         self.send_response(status)
@@ -9785,11 +10124,18 @@ class StudioServerHandler(BaseHTTPRequestHandler):
         return user
 
     def do_HEAD(self):
+        proto = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+        host = self.headers.get("Host", "")
+        KeepAliveService.register_public_origin(host, proto)
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
 
     def do_GET(self):
+        proto = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+        host = self.headers.get("Host", "")
+        KeepAliveService.register_public_origin(host, proto)
+
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         params = urllib.parse.parse_qs(parsed.query)
@@ -9797,8 +10143,13 @@ class StudioServerHandler(BaseHTTPRequestHandler):
         if path == "/healthz" or path == "/health":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             self.end_headers()
             self.wfile.write(b"OK")
+            return
+
+        elif path == "/api/keep_alive/status":
+            self._send_json(KeepAliveService.get_status())
             return
 
         if path == "/" or path == "/index.html":
@@ -10144,6 +10495,10 @@ class StudioServerHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
+            proto = "https" if self.headers.get("X-Forwarded-Proto") == "https" else "http"
+            host = self.headers.get("Host", "")
+            KeepAliveService.register_public_origin(host, proto)
+
             parsed = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed.query)
             content_len = int(self.headers.get("Content-Length", 0))
@@ -10183,7 +10538,19 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             body = self.rfile.read(content_len).decode("utf-8") if content_len > 0 else "{}"
             data = json.loads(body) if body else {}
 
-            if parsed.path == "/api/resolve_folder_name":
+            if parsed.path == "/api/keep_alive/ping_now":
+                res = KeepAliveService.ping_now()
+                self._send_json(res)
+                return
+
+            elif parsed.path == "/api/keep_alive/set_url":
+                new_url = data.get("url", "").strip()
+                if new_url:
+                    KeepAliveService.target_url = new_url
+                self._send_json({"status": "ok", "target_url": KeepAliveService.get_effective_target_url()})
+                return
+
+            elif parsed.path == "/api/resolve_folder_name":
                 fname = data.get("folder_name", "")
                 found_path = resolve_input_path(fname)
 
@@ -11315,6 +11682,9 @@ def launch_studio(port: int = None):
         print("[Studio] Multi-tenant SaaS database initialized.")
     except Exception as e:
         print(f"[Studio] Database init error: {e}")
+
+    # Start autonomous Keep-Alive anti-idle heartbeat daemon
+    KeepAliveService.start()
 
     ports_to_try = [target_port] if env_port else [target_port, 8081, 8082, 8888, 5050]
 

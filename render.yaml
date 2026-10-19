@@ -10,3 +10,9 @@ services:
         value: 3.11.9
       - key: REMBG_MODEL
         value: u2netp
+      - key: KEEP_ALIVE_ENABLED
+        value: "true"
+      - key: KEEP_ALIVE_INTERVAL
+        value: "600"
+      - key: KEEP_ALIVE_URL
+        value: "https://portrait-studio-pro.onrender.com/healthz"
