@@ -2,8 +2,8 @@ services:
   - type: web
     name: veloroster-ai
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python studio.py
+    buildCommand: pip install -r requirements.txt && (if command -v npm > /dev/null; then cd frontend && npm install && npm run build && cd ..; fi)
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
@@ -16,3 +16,13 @@ services:
         value: "600"
       - key: KEEP_ALIVE_URL
         value: "https://veloroster-ai.onrender.com/healthz"
+      # For production persistence on Render:
+      # Attach a Render PostgreSQL database and set DATABASE_URL, OR attach a persistent disk.
+      # - key: DATABASE_URL
+      #   fromDatabase:
+      #     name: veloroster-db
+      #     property: connectionString
+      # - key: SUPERADMIN_EMAIL
+      #   value: admin@athletics.com
+      # - key: SUPERADMIN_PASSWORD
+      #   sync: false

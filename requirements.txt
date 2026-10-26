@@ -7,3 +7,7 @@ mediapipe>=0.10.14
 requests>=2.31.0
 psycopg2-binary>=2.9.9
 pg8000>=1.30.0
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic>=2.0.0
+python-multipart>=0.0.9

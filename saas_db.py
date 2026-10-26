@@ -231,23 +231,20 @@ def _seed_defaults():
 
         print(f"[SaaS DB] Initialized demo company 'Athletics Media Group' with superadmin '{super_email}'")
     else:
-        # Check if an active superadmin user exists
-        existing_super = execute_query("SELECT id, email FROM users WHERE role = 'superadmin' LIMIT 1")
-        if not existing_super:
-            first_company_id = companies[0]["id"]
-            admin_id = str(uuid.uuid4())
-            salt = "4f8a1290bcde5678"
-            p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+        # Ensure the configured superadmin exists
+        target_super = execute_query("SELECT id, email, role FROM users WHERE LOWER(email) = ?", (super_email,))
+        first_company_id = companies[0]["id"]
+        salt = "4f8a1290bcde5678"
+        p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
 
+        if not target_super:
+            admin_id = str(uuid.uuid4())
             execute_query("""
                 INSERT INTO users (id, company_id, email, password_hash, salt, full_name, role, is_active, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
             """, (admin_id, first_company_id, super_email, p_hash, salt, super_name, "superadmin", now), commit=True)
-            print(f"[SaaS DB] Created missing platform superadmin '{super_email}'")
+            print(f"[SaaS DB] Created platform superadmin '{super_email}'")
         elif os.environ.get("SUPERADMIN_PASSWORD"):
-            # If explicit SUPERADMIN_PASSWORD is set in environment, ensure superadmin password matches
-            salt = "4f8a1290bcde5678"
-            p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
             execute_query("""
                 UPDATE users SET password_hash = ?, salt = ?, is_active = 1 WHERE role = 'superadmin'
             """, (p_hash, salt), commit=True)
