@@ -20,29 +20,49 @@ if IS_POSTGRES and DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 
+def get_sqlite_path() -> str:
+    """Returns the resolved SQLite database file path, honoring persistent disk mounts."""
+    # Check for Render persistent disk or custom data directory
+    data_dir = os.environ.get("DATA_DIR") or os.environ.get("RENDER_DISK_PATH")
+    if data_dir and os.path.isdir(data_dir):
+        return os.path.join(data_dir, "studio_saas.db")
+    if os.environ.get("SQLITE_DB_PATH"):
+        return os.environ.get("SQLITE_DB_PATH")
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_saas.db")
+
+
 def get_connection():
     """Returns an active database connection (PostgreSQL or SQLite)."""
     if IS_POSTGRES:
         try:
             import psycopg2
-            return psycopg2.connect(DATABASE_URL)
-        except Exception:
+            db_url = DATABASE_URL
+            if "sslmode=" not in db_url and "localhost" not in db_url and "127.0.0.1" not in db_url:
+                db_url += ("&" if "?" in db_url else "?") + "sslmode=require"
+            return psycopg2.connect(db_url)
+        except Exception as e_psycopg2:
             try:
                 import pg8000.dbapi
+                import ssl
                 parsed = urllib.parse.urlparse(DATABASE_URL)
+                ssl_ctx = ssl.create_default_context()
+                ssl_ctx.check_hostname = False
+                ssl_ctx.verify_mode = ssl.CERT_NONE
                 return pg8000.dbapi.connect(
                     user=parsed.username,
                     password=parsed.password,
                     host=parsed.hostname,
                     port=parsed.port or 5432,
-                    database=parsed.path.lstrip("/")
+                    database=parsed.path.lstrip("/").split("?")[0],
+                    ssl_context=ssl_ctx
                 )
-            except Exception as e:
-                print(f"[SaaS DB Warning] Failed to connect to PostgreSQL ({e}), falling back to SQLite.")
+            except Exception as e_pg8000:
+                print(f"[SaaS DB Warning] Failed to connect to PostgreSQL (psycopg2: {e_psycopg2}, pg8000: {e_pg8000}), falling back to SQLite.")
 
-    # SQLite fallback
+    # SQLite fallback (with persistent disk detection)
     import sqlite3
-    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "studio_saas.db")
+    db_path = get_sqlite_path()
+    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -164,38 +184,73 @@ def init_db():
         cur.close()
         conn.close()
 
+    # Diagnostic storage logging
+    if IS_POSTGRES:
+        print("[SaaS DB] Database engine: PostgreSQL (Persistent storage across all cloud deploys & restarts).")
+    elif os.environ.get("DATA_DIR") or os.environ.get("RENDER_DISK_PATH") or os.environ.get("SQLITE_DB_PATH"):
+        print(f"[SaaS DB] Database engine: SQLite Persistent Disk at: {get_sqlite_path()}")
+    else:
+        print(f"[SaaS DB Notice] Database engine: Local SQLite ({get_sqlite_path()}).")
+        if os.environ.get("RENDER"):
+            print("[SaaS DB Warning] Ephemeral Render storage detected! Set DATABASE_URL or attach a Persistent Disk to prevent data reset on service restart.")
+
     # Seed default platform admin and demo organization if DB is empty
     _seed_defaults()
 
 
 def _seed_defaults():
     """Seeds initial platform admin and default sports organization if database is clean."""
-    companies = execute_query("SELECT id FROM companies LIMIT 1")
-    if companies:
-        return
-
     import hashlib
+
+    # Allow custom SuperAdmin credentials from environment variables (essential for Render / Cloud deployments)
+    super_email = (os.environ.get("SUPERADMIN_EMAIL") or "admin@athletics.com").strip().lower()
+    super_pass = os.environ.get("SUPERADMIN_PASSWORD") or "admin"
+    super_name = (os.environ.get("SUPERADMIN_NAME") or "Platform Administrator").strip()
+
+    companies = execute_query("SELECT id FROM companies LIMIT 1")
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    company_id = str(uuid.uuid4())
-    admin_id = str(uuid.uuid4())
 
-    # Create default demo company
-    execute_query("""
-        INSERT INTO companies (id, name, slug, plan, max_seats, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (company_id, "Athletics Media Group", "athletics-media", "team", 15, "active", now), commit=True)
+    if not companies:
+        company_id = str(uuid.uuid4())
+        admin_id = str(uuid.uuid4())
 
-    # Hash default password: "admin"
-    salt = "4f8a1290bcde5678"
-    p_hash = hashlib.pbkdf2_hmac("sha256", "admin".encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+        # Create default demo company
+        execute_query("""
+            INSERT INTO companies (id, name, slug, plan, max_seats, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (company_id, "Athletics Media Group", "athletics-media", "team", 15, "active", now), commit=True)
 
-    # Create SuperAdmin user
-    execute_query("""
-        INSERT INTO users (id, company_id, email, password_hash, salt, full_name, role, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
-    """, (admin_id, company_id, "admin@athletics.com", p_hash, salt, "Platform Administrator", "superadmin", now), commit=True)
+        salt = "4f8a1290bcde5678"
+        p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
 
-    print(f"[SaaS DB] Seeded default company 'Athletics Media Group' with superadmin 'admin@athletics.com' (password: admin)")
+        # Create SuperAdmin user
+        execute_query("""
+            INSERT INTO users (id, company_id, email, password_hash, salt, full_name, role, is_active, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        """, (admin_id, company_id, super_email, p_hash, salt, super_name, "superadmin", now), commit=True)
+
+        print(f"[SaaS DB] Initialized demo company 'Athletics Media Group' with superadmin '{super_email}'")
+    else:
+        # Check if an active superadmin user exists
+        existing_super = execute_query("SELECT id, email FROM users WHERE role = 'superadmin' LIMIT 1")
+        if not existing_super:
+            first_company_id = companies[0]["id"]
+            admin_id = str(uuid.uuid4())
+            salt = "4f8a1290bcde5678"
+            p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+
+            execute_query("""
+                INSERT INTO users (id, company_id, email, password_hash, salt, full_name, role, is_active, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+            """, (admin_id, first_company_id, super_email, p_hash, salt, super_name, "superadmin", now), commit=True)
+            print(f"[SaaS DB] Created missing platform superadmin '{super_email}'")
+        elif os.environ.get("SUPERADMIN_PASSWORD"):
+            # If explicit SUPERADMIN_PASSWORD is set in environment, ensure superadmin password matches
+            salt = "4f8a1290bcde5678"
+            p_hash = hashlib.pbkdf2_hmac("sha256", super_pass.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
+            execute_query("""
+                UPDATE users SET password_hash = ?, salt = ?, is_active = 1 WHERE role = 'superadmin'
+            """, (p_hash, salt), commit=True)
 
 
 # --------------------------------------------------------------------------
