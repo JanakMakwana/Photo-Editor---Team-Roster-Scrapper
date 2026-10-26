@@ -35,7 +35,7 @@ def send_invitation_email(
     clean_base = base_url.rstrip("/")
     activation_url = f"{clean_base}/#activate?token={invite_token}"
 
-    subject = f"You're invited to join {company_name} on Portrait Studio Pro"
+    subject = f"You're invited to join {company_name} on VeloRoster AI"
     display_name = recipient_name.strip() or "Team Member"
 
     # HTML Email Template
@@ -46,25 +46,23 @@ def send_invitation_email(
       <meta charset="utf-8">
       <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #090d16; color: #f3f4f6; margin: 0; padding: 24px; }}
-        .card {{ max-width: 540px; margin: 0 auto; background: #111827; border: 1px solid #1f293d; border-radius: 12px; padding: 36px 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
-        .logo {{ font-size: 28px; margin-bottom: 12px; display: inline-block; }}
+        .card {{ max-width: 540px; margin: 0 auto; background: #111827; border: 1px solid #1f293d; border-radius: 8px; padding: 36px 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
+        .badge {{ display: inline-block; background: rgba(255, 87, 34, 0.15); border: 1px solid rgba(255, 87, 34, 0.35); color: #ff7043; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: 700; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; }}
         h1 {{ font-size: 20px; font-weight: 800; color: #ffffff; margin-top: 0; margin-bottom: 12px; }}
         p {{ font-size: 14px; line-height: 1.6; color: #9ca3af; margin-bottom: 24px; }}
-        .badge {{ display: inline-block; background: rgba(249, 115, 22, 0.15); border: 1px solid rgba(249, 115, 22, 0.35); color: #fb923c; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; margin-bottom: 20px; }}
-        .btn {{ display: inline-block; background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: #ffffff !important; text-decoration: none; padding: 13px 32px; border-radius: 8px; font-weight: 700; font-size: 14px; box-shadow: 0 4px 14px rgba(249,115,22,0.4); }}
+        .btn {{ display: inline-block; background: linear-gradient(135deg, #ff5722 0%, #ea580c 100%); color: #ffffff !important; text-decoration: none; padding: 13px 32px; border-radius: 6px; font-weight: 700; font-size: 14px; box-shadow: 0 4px 14px rgba(255,87,34,0.35); }}
         .btn:hover {{ opacity: 0.95; }}
-        .url-box {{ margin-top: 24px; padding: 12px; background: #060911; border: 1px solid #1e293b; border-radius: 6px; font-family: monospace; font-size: 12px; color: #38bdf8; word-break: break-all; }}
+        .url-box {{ margin-top: 24px; padding: 12px; background: #060911; border: 1px solid #1e293b; border-radius: 4px; font-family: monospace; font-size: 12px; color: #38bdf8; word-break: break-all; }}
         .footer {{ margin-top: 32px; font-size: 12px; color: #6b7280; text-align: center; }}
       </style>
     </head>
     <body>
       <div class="card">
-        <div class="logo">🏀</div>
-        <div class="badge">Portrait Studio Pro</div>
+        <div class="badge">VeloRoster AI &bull; Ecstaticloud Technologies</div>
         <h1>Welcome, {display_name}!</h1>
         <p>
-          You have been invited by <strong>{company_name}</strong> to access <strong>Basketball Portrait Studio Pro</strong>.
-          You can now scrape team rosters, extract player high-res headshots, and frame transparent 180×180 graphics.
+          You have been invited by <strong>{company_name}</strong> to access <strong>VeloRoster AI</strong>.
+          You can now search athletic player portraits, ingest team rosters, assign player numbers, and standardize photos into 180×180 transparent headshots.
         </p>
         <div style="text-align: center; margin: 32px 0;">
           <a href="{activation_url}" class="btn" target="_blank">Set Password & Activate Account</a>
@@ -75,7 +73,7 @@ def send_invitation_email(
         <div class="url-box">{activation_url}</div>
         <div class="footer">
           This invitation link expires in 7 days.<br>
-          © 2026 Basketball Portrait Studio Pro
+          &copy; 2026 Ecstaticloud Technologies. VeloRoster AI&trade; is proprietary commercial software. All rights reserved.
         </div>
       </div>
     </body>
@@ -84,18 +82,19 @@ def send_invitation_email(
 
     plain_body = f"""Hello {display_name},
 
-You have been invited by {company_name} to access Basketball Portrait Studio Pro.
+You have been invited by {company_name} to access VeloRoster AI (Commercial Athletic Media & Roster Studio).
 
 To activate your account and choose your password, please open the following link:
 {activation_url}
 
 This invitation link expires in 7 days.
+&copy; 2026 Ecstaticloud Technologies. VeloRoster AI is proprietary commercial software.
 """
 
     if not is_smtp_configured():
         print("=" * 70)
-        print(f"📧 [DEV EMAIL SIMULATOR] To: {recipient_email}")
-        print(f"🔗 Activation Link: {activation_url}")
+        print(f"[VeloRoster AI Email Engine] To: {recipient_email}")
+        print(f"Activation Link: {activation_url}")
         print("=" * 70)
         return {
             "status": "ok",
@@ -109,7 +108,7 @@ This invitation link expires in 7 days.
     try:
         msg = MIMEMultipart("alternative")
         msg["Subject"] = subject
-        msg["From"] = f"Portrait Studio Pro <{SMTP_FROM}>"
+        msg["From"] = f"VeloRoster AI by Ecstaticloud Technologies <{SMTP_FROM}>"
         msg["To"] = recipient_email
 
         msg.attach(MIMEText(plain_body, "plain"))

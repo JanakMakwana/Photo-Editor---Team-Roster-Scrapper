@@ -1,26 +1,29 @@
-# 🏀 Basketball Portrait Studio Pro & Roster Scraper
+# ⚡ VeloRoster AI — Athletic Roster & Headshot Studio
 
-An interactive web studio and automated portrait processing system to:
-1. **Scrape athletic roster URLs** (Sidearm Sports, NCAA, NHL, etc.) with automatic high-resolution URL quality boosting (`width=1200+`), standardizing down to crisp `width=800` portraits.
-2. **Assign custom player IDs** via a dedicated visual table UI or bulk spreadsheet paste, with live filename previews and automatic fallback to player names.
-3. **Download Roster & Export ZIP** directly in your browser.
+**Proprietary Commercial Software engineered and built from scratch by Ecstaticloud Technologies.**  
+*Full commercial rights owned exclusively by Ecstaticloud Technologies.*
+
+An interactive web studio and automated portrait processing system for:
+1. **Multi-Source Athletic Roster Ingestion**: Scrapes athletic roster URLs (Sidearm Sports, NCAA, NHL, BCHL / HockeyTech, etc.) with automatic high-resolution URL quality boosting (`width=1200+`), standardizing down to crisp `width=800` portraits.
+2. **Direct Athlete & Stint Search Engine**: Multi-tier search (HockeyTech/LeagueStat, NHL, Wikidata, and Wikimedia) with strict athlete name validation and instant portrait resolution.
+3. **Custom Athletic ID Assignment**: Visual table UI with inline editing, bulk spreadsheet paste, and real-time filename previews.
 4. **Interactive 180×180 Portrait Studio**: Pan, zoom, auto-align with MediaPipe face detection, AI background cutout (`rembg`), and precision retouch brushes (Recover / Erase).
-5. **Standardized Transparent Headshots**: One-click batch processing and ZIP export of all edited transparent PNGs.
+5. **Standardized Transparent Headshots**: One-click batch processing and ZIP export of 180×180 transparent PNGs formatted by player number, ready for team rosters, video analyzers, and broadcast graphics.
 
 ---
 
 ## 🚀 Deploy to Render (Cloud Hosting)
 
-You can easily host this application on the web using [Render](https://render.com).
+You can host **VeloRoster AI** on the web using [Render](https://render.com).
 
 ### Method A: Connect Repository as a Web Service (Quickest)
 
 1. Sign in to your dashboard on [Render](https://dashboard.render.com).
 2. Click **New +** > **Web Service**.
 3. Choose **Build and deploy from a Git repository**.
-4. Connect and select your repository: `Photo-Editor---Team-Roster-Scrapper`.
+4. Connect and select your repository.
 5. Configure the service settings:
-   - **Name**: `photo-editor-studio` (or your choice)
+   - **Name**: `veloroster-ai`
    - **Language / Runtime**: `Python`
    - **Branch**: `main`
    - **Build Command**: `pip install -r requirements.txt`
@@ -29,7 +32,7 @@ You can easily host this application on the web using [Render](https://render.co
 6. Add the following **Environment Variable** under *Advanced*:
    - Key: `PYTHON_VERSION`
    - Value: `3.11.9`
-7. Click **Create Web Service**. Render will install the dependencies and deploy your web app. Once complete, your live URL will be active (e.g. `https://photo-editor-studio.onrender.com`).
+7. Click **Create Web Service**. Render will install the dependencies and deploy your web app. Once complete, your live URL will be active (e.g. `https://veloroster-ai.onrender.com`).
 
 ---
 
@@ -75,3 +78,8 @@ Open **[http://localhost:8080](http://localhost:8080)** in your browser.
   - **Erase Brush**: Clean up any background halos.
 - **📦 Cloud ZIP Export**:
   - Download all edited transparent PNG headshots in a single `.zip` file from anywhere.
+
+---
+
+&copy; 2026 Ecstaticloud Technologies. All rights reserved.  
+*VeloRoster AI™ is proprietary commercial software developed and owned by Ecstaticloud Technologies.*

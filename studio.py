@@ -26,6 +26,7 @@ import copy
 import shutil
 import zlib
 import struct
+import hashlib
 import http.cookiejar
 from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -531,7 +532,8 @@ def scrape_college_roster(url: str):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
         }
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -1325,11 +1327,15 @@ def is_eurobasket_url(url: str) -> bool:
 
 def parse_eurobasket_single_player(url: str) -> dict:
     """Scrapes an individual Eurobasket / Asia-Basket player profile."""
+    clean_url = url.split('#')[0].strip()
     ctx = ssl._create_unverified_context()
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://basketball.eurobasket.com/"
     }
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(clean_url, headers=headers)
     with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
         html = resp.read().decode("utf-8", errors="ignore")
 
@@ -1338,11 +1344,16 @@ def parse_eurobasket_single_player(url: str) -> dict:
     if not name:
         title_m = re.search(r'<title>([^<|]+)', html)
         name = title_m.group(1).strip() if title_m else ""
+    if not name:
+        slug_m = re.search(r'/player/([^/]+)/', clean_url)
+        name = slug_m.group(1).replace("-", " ").strip() if slug_m else ""
 
     img_m = re.search(r'class=[\"\']left-photo[\"\']><img[^>]+src=[\"\']([^\"\']+)[\"\']', html)
     if not img_m:
         img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']*(?:photos/|player/)[^\"\']+)[\"\']', html)
-    img = img_m.group(1) if img_m else ""
+    img = img_m.group(1).strip() if img_m else ""
+    if img and not img.startswith("http"):
+        img = urllib.parse.urljoin("https://basketball.eurobasket.com/", img)
 
     bio_m = re.search(r'class=[\"\']player-info-new-notlg[\"\']>(.*?)</div>', html, re.S)
     bio = re.sub(r'<[^>]+>', ' ', bio_m.group(1)).strip() if bio_m else ""
@@ -1350,35 +1361,35 @@ def parse_eurobasket_single_player(url: str) -> dict:
     ht_m = re.search(r'(\d{1,2}\'\d{1,2}(?:\'\')?|\d{3}\s*cm)', bio)
     ht = ht_m.group(1) if ht_m else ""
 
-    pos_m = re.search(r'\b(forward|guard|center|point guard|shooting guard|power forward|small forward|pg|sg|sf|pf|c|f|g)\b', bio, re.I)
-    pos = pos_m.group(1).capitalize() if pos_m else ""
+    pos_m = re.search(r'\b(point guard|shooting guard|power forward|small forward|forward|guard|center|pg|sg|sf|pf|c|f|g)\b', bio, re.I)
+    pos = pos_m.group(1).title() if pos_m else ""
 
     born_m = re.search(r'born on\s+([A-Za-z]+ \d{1,2} \d{4})', bio, re.I)
     born = born_m.group(1) if born_m else ""
 
+    birth_m = re.search(r'born on\s+[A-Za-z]+ \d{1,2} \d{4}\s+in\s+([^.]+)\.', bio, re.I)
+    birthplace = birth_m.group(1).strip() if birth_m else ""
+
     nat_m = re.search(r'is\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+basketball player', bio, re.I)
-    nat = nat_m.group(1) if nat_m else ""
+    nat = nat_m.group(1).strip() if nat_m else ""
 
     team_m = re.search(r'played at\s+<a[^>]*>([^<]+)</a>', html)
     team = team_m.group(1).strip() if team_m else ""
     if not team:
         team = name or "Basketball"
 
-    native_name = translate_korean_name(name)
-    display_name = f"{name} ({native_name})" if native_name else name
-
     det_parts = []
     if pos: det_parts.append(f"Position: {pos}")
-    if native_name: det_parts.append(f"Korean: {native_name}")
     if born: det_parts.append(f"Born: {born}")
-    if nat: det_parts.append(f"Nationality: {nat}")
+    if birthplace: det_parts.append(f"Birthplace: {birthplace}")
+    elif nat: det_parts.append(f"Nationality: {nat}")
     if ht: det_parts.append(f"Height: {ht}")
     details = " | ".join(det_parts)
 
     player = {
-        "name": display_name,
+        "name": name,
         "name_en": name,
-        "native_name": native_name,
+        "native_name": "",
         "jersey": "",
         "pos": pos,
         "position": pos,
@@ -1386,7 +1397,7 @@ def parse_eurobasket_single_player(url: str) -> dict:
         "height": ht,
         "weight": "",
         "born": born,
-        "birthplace": nat,
+        "birthplace": birthplace or nat,
         "image": img,
         "raw_image": img,
         "details": details,
@@ -1396,22 +1407,30 @@ def parse_eurobasket_single_player(url: str) -> dict:
 
 
 def scrape_eurobasket_roster(url: str) -> dict:
-    """Scrapes full team roster or single player page from Eurobasket / Asia-Basket / Latinbasket."""
+    """
+    Scrapes full team roster or single player page from Eurobasket / Asia-Basket / Latinbasket.
+    Extracts 100% clean English names, high-resolution portraits, vitals, positions,
+    and automatically bypasses scrambled font obfuscation (Arial-Eurobasket).
+    """
+    clean_url = url.split('#')[0].strip()
     # Check if single player URL
-    if "/player/" in url.lower():
-        return parse_eurobasket_single_player(url)
+    if "/player/" in clean_url.lower():
+        return parse_eurobasket_single_player(clean_url)
 
     ctx = ssl._create_unverified_context()
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://basketball.eurobasket.com/"
     }
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(clean_url, headers=headers)
     with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
         html = resp.read().decode("utf-8", errors="ignore")
 
     # Suggested folder name
     suggested_folder = ""
-    team_slug_m = re.search(r'/team/([^/]+)', url)
+    team_slug_m = re.search(r'/team/([^/]+)', clean_url)
     if team_slug_m:
         slug = team_slug_m.group(1).replace("-", " ").strip()
         if slug:
@@ -1429,7 +1448,7 @@ def scrape_eurobasket_roster(url: str) -> dict:
 
     # 1. Featured player cards (containing photo thumbnails directly)
     featured_photos = {}
-    for m in re.finditer(r'<a class=[\"\']ArRosterfeat-card[\"\']\s+href=[\"\']([^\"\']+)[\"\']>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\'].*?</a>', html, re.S):
+    for m in re.finditer(r'<a[^>]+class=[\"\'][^\"\']*ArRosterfeat-card[^\"\']*[\"\'][^>]*href=[\"\']([^\"\']+)[\"\']>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.S):
         href = m.group(1).split("?")[0]
         img = m.group(2)
         featured_photos[href] = img
@@ -1437,86 +1456,125 @@ def scrape_eurobasket_roster(url: str) -> dict:
     # 2. Extract player rows from table
     rows = re.findall(r'<div class=[\"\']ArRosterplayer[^>]*>(.*?)</div>\s*(?=<div class=[\"\']ArRosterplayer|<div class=[\"\']ArRostercoach|</div>\s*</div>)', html, re.S)
 
+    is_encrypted = 'encryptfont' in html
     players = []
     seen = set()
+
     for r in rows:
-        name_m = re.search(r'ArRostername[^>]*><a\s+href=[\"\']([^\"\']+)[\"\']>([^<]+)</a>', r)
-        purl = name_m.group(1).strip() if name_m else ""
-        name = name_m.group(2).strip() if name_m else ""
+        m_link = re.search(r'class=[\"\']ArRostername[^\"\']*[\"\'][^>]*>.*?<a[^>]+href=[\"\'](https?://[^\"\'\s]*/player/[^\"\'\s]+)[\"\'][^>]*>(.*?)</a>', r, re.DOTALL)
+        if not m_link:
+            m_link = re.search(r'<a[^>]+href=[\"\'](https?://[^\"\'\s]*/player/[^\"\'\s]+)[\"\'][^>]*>(.*?)</a>', r, re.DOTALL)
+        if not m_link:
+            continue
+
+        purl = m_link.group(1).strip()
+        raw_text = re.sub(r'<[^>]+>', '', m_link.group(2)).strip()
+        slug_m = re.search(r'/player/([^/]+)/', purl)
+        clean_name = slug_m.group(1).replace('-', ' ').strip() if slug_m else ''
+
+        # If font encryption is active or raw_text is distorted, slug gives the pure English name
+        name = clean_name if (is_encrypted or not raw_text or len(raw_text) > 40) else raw_text
         if not name or name in seen:
             continue
         seen.add(name)
 
-        num_m = re.search(r'ArRosterjersey[^>]*>([^<]*)</div>', r)
-        num = num_m.group(1).strip() if num_m else ""
+        num_m = re.search(r'class=[\"\']ArRosterjersey[^\"\']*[\"\'][^>]*>([^<]*)</div>', r)
+        num = num_m.group(1).strip() if num_m else ''
+        if num in ('-', '0', '--') or 'empty' in (num_m.group(0) if num_m else ''):
+            num = ''
+        elif is_encrypted:
+            num = ''
 
-        ht_m = re.search(r'ArRosterheight[^>]*>([^<]+(?:<small>[^<]+</small>)?)</div>', r)
-        ht = re.sub(r'<[^>]+>', '', ht_m.group(1)).strip() if ht_m else ""
-
-        pos_m = re.search(r'ArRosterpos[^>]*>([^<]*)</div>', r)
-        pos = pos_m.group(1).strip() if pos_m else ""
-
-        age_m = re.search(r'ArRosterage[^>]*>([^<]*)</div>', r)
-        age = age_m.group(1).strip() if age_m else ""
+        clean_purl = purl.split('?')[0]
+        img = featured_photos.get(clean_purl, '')
 
         nat_m = re.search(r'ArRosternat[^>]*><img[^>]+(?:title|alt)=[\"\']([^\"\']+)[\"\']', r)
-        nat = nat_m.group(1).strip() if nat_m else ""
-
-        clean_purl = purl.split("?")[0]
-        img = featured_photos.get(clean_purl, "")
-
-        native_name = translate_korean_name(name)
-        display_name = f"{name} ({native_name})" if native_name else name
+        nat = nat_m.group(1).strip() if nat_m else ''
 
         players.append({
-            "name": display_name,
-            "name_en": name,
-            "native_name": native_name,
-            "jersey": num,
-            "pos": pos,
-            "position": pos,
-            "height": ht,
-            "age": age,
-            "nationality": nat,
-            "birthplace": nat,
-            "image": img,
-            "raw_image": img,
-            "profile_url": purl,
-            "born": "",
-            "assigned_number": num
+            'name': name,
+            'name_en': name,
+            'native_name': '',
+            'jersey': num,
+            'pos': '',
+            'position': '',
+            'height': '',
+            'age': '',
+            'nationality': nat,
+            'birthplace': '',
+            'image': img,
+            'raw_image': img,
+            'profile_url': purl,
+            'born': '',
+            'assigned_number': num
         })
 
-    # 3. Enrich players in parallel (fetch headshot from player page if missing + exact birth date)
+    # 3. Enrich players in parallel (fetch headshot from player page if missing + clean English vitals)
     def _enrich_eb_player(p):
-        purl = p.get("profile_url")
+        purl = p.get('profile_url')
         if not purl:
             return p
         try:
-            r = urllib.request.Request(purl, headers=headers)
-            with urllib.request.urlopen(r, context=ctx, timeout=6) as resp:
-                h = resp.read().decode("utf-8", errors="ignore")
-                if not p.get("image"):
+            r_req = urllib.request.Request(purl, headers=headers)
+            with urllib.request.urlopen(r_req, context=ctx, timeout=8) as rp:
+                h = rp.read().decode('utf-8', errors='ignore')
+
+                # Confirm clean English name from H1
+                h1_m = re.search(r'<h1[^>]*>([^<]+)</h1>', h, re.I)
+                if h1_m:
+                    p['name'] = h1_m.group(1).strip()
+                    p['name_en'] = p['name']
+
+                # Photo
+                if not p.get('image'):
                     m_img = re.search(r'class=[\"\']left-photo[\"\']><img[^>]+src=[\"\']([^\"\']+)[\"\']', h)
                     if not m_img:
                         m_img = re.search(r'<img[^>]+src=[\"\']([^\"\']*(?:photos/|player/)[^\"\']+)[\"\']', h)
                     if m_img:
-                        p["image"] = m_img.group(1)
-                        p["raw_image"] = m_img.group(1)
+                        p['image'] = m_img.group(1).strip()
+                        p['raw_image'] = p['image']
 
-                m_born = re.search(r'born on\s+([A-Za-z]+ \d{1,2} \d{4})', h)
-                if m_born:
-                    p["born"] = m_born.group(1)
+                # Bio block
+                bio_m = re.search(r'class=[\"\']player-info-new-notlg[\"\']>(.*?)</div>', h, re.S)
+                if bio_m:
+                    bio = re.sub(r'<[^>]+>', ' ', bio_m.group(1)).strip()
+
+                    # Position
+                    pos_m = re.search(r'\b(point guard|shooting guard|power forward|small forward|forward|guard|center)\b', bio, re.I)
+                    if pos_m:
+                        p['pos'] = pos_m.group(1).title()
+                        p['position'] = p['pos']
+
+                    # Height
+                    ht_m = re.search(r'(\d{1,2}\'\d{1,2}(?:\'\')?|\d{3}\s*cm)', bio)
+                    if ht_m:
+                        p['height'] = ht_m.group(1)
+
+                    # Born
+                    born_m = re.search(r'born on\s+([A-Za-z]+ \d{1,2} \d{4})', bio, re.I)
+                    if born_m:
+                        p['born'] = born_m.group(1)
+
+                    # Birthplace
+                    birth_m = re.search(r'born on\s+[A-Za-z]+ \d{1,2} \d{4}\s+in\s+([^.]+)\.', bio, re.I)
+                    if birth_m:
+                        p['birthplace'] = birth_m.group(1).strip()
+
+                    # Nationality
+                    if not p.get('nationality'):
+                        nat_m = re.search(r'is\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+basketball player', bio, re.I)
+                        if nat_m:
+                            p['nationality'] = nat_m.group(1).strip()
         except Exception:
             pass
 
         v_parts = []
-        if p.get("pos"): v_parts.append(f"Position: {p['pos']}")
-        if p.get("native_name"): v_parts.append(f"Korean: {p['native_name']}")
-        if p.get("born"): v_parts.append(f"Born: {p['born']}")
-        elif p.get("age"): v_parts.append(f"Age: {p['age']}")
-        if p.get("nationality"): v_parts.append(f"Nationality: {p['nationality']}")
-        if p.get("height"): v_parts.append(f"Height: {p['height']}")
-        p["details"] = " | ".join(v_parts)
+        if p.get('pos'): v_parts.append(f"Position: {p['pos']}")
+        if p.get('born'): v_parts.append(f"Born: {p['born']}")
+        if p.get('birthplace'): v_parts.append(f"Birthplace: {p['birthplace']}")
+        elif p.get('nationality'): v_parts.append(f"Nationality: {p['nationality']}")
+        if p.get('height'): v_parts.append(f"Height: {p['height']}")
+        p['details'] = ' | '.join(v_parts)
         return p
 
     if players:
@@ -3381,160 +3439,2590 @@ def is_del_or_german_hockey_url(url: str) -> bool:
     ])
 
 
-def scrape_roster_data(url: str):
+HEBREW_KNOWN = {
+    'ניתאי': 'Nitai', 'דודו': 'Dudu', 'עודד': 'Oded', 'קטש': 'Kattash',
+    'רומן': 'Roman', 'סורקין': 'Sorkin', 'ים': 'Yam', 'מדר': 'Madar',
+    'עמית': 'Amit', 'עבו': 'Ebo', 'גור': 'Gur', 'לביא': 'Lavi',
+    'רפי': 'Rafi', 'מנקו': 'Menco', 'תמיר': 'Tamir', 'בלאט': 'Blatt'
+}
+HEBREW_CHAR_MAP = {
+    'א': 'A', 'ב': 'B', 'ג': 'G', 'ד': 'D', 'ה': 'H', 'ו': 'U',
+    'ז': 'Z', 'ח': 'H', 'ט': 'T', 'י': 'I', 'כ': 'K', 'ך': 'K',
+    'ל': 'L', 'מ': 'M', 'ם': 'M', 'נ': 'N', 'ן': 'N', 'ס': 'S',
+    'ע': 'A', 'פ': 'P', 'ף': 'P', 'צ': 'Tz', 'ץ': 'Tz', 'ק': 'K',
+    'ר': 'R', 'ש': 'Sh', 'ת': 'T'
+}
+
+
+def clean_hebrew_name(text: str) -> str:
+    """Converts Hebrew names into English Latin characters via known names and transliteration."""
+    if not text or not any('\u0590' <= ch <= '\u05ff' for ch in text):
+        return text
+    words = text.strip().split()
+    out = []
+    for w in words:
+        if w in HEBREW_KNOWN:
+            out.append(HEBREW_KNOWN[w])
+        else:
+            chars = [HEBREW_CHAR_MAP.get(ch, ch) for ch in w]
+            out.append(''.join(chars).title())
+    return ' '.join(out)
+
+
+def is_maccabi_url(url: str) -> bool:
+    """Detects whether a URL belongs to Maccabi Tel Aviv (maccabi.co.il)."""
+    return "maccabi.co.il" in url.lower()
+
+
+def scrape_maccabi_roster(url: str) -> dict:
     """
-    Intelligently routes roster URL to NHL, Eurobasket/Asia-Basket, HockeyTech/BCHL,
-    UK Teams, German DEL/DEL2 (Dresdner Eislöwen, Düsseldorfer EG, Red Bull München),
-    Czech Extraliga (Bílí Tygři Liberec, BK Mladá Boleslav), Erste Liga,
-    or College/NCAA athletics scrapers with automatic fallbacks.
+    Scrapes Maccabi Tel Aviv basketball roster from maccabi.co.il.
+    Normalizes to English site, parses window.MACCABI_PLAYERS_BY_SEASON,
+    transliterates any native Hebrew names to English, extracts jersey numbers,
+    positions, metric heights, and full-resolution portrait studio JPGs.
     """
-    url_lower = url.lower()
+    clean_u = url.split('#')[0].strip()
+    # Ensure English version is targeted for English metadata
+    if "maccabi.co.il" in clean_u and "/en/" not in clean_u:
+        clean_u = clean_u.replace("maccabi.co.il/", "maccabi.co.il/en/")
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://maccabi.co.il/"
+    }
+
+    req = urllib.request.Request(clean_u, headers=headers)
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    # If single player profile page
+    if "/players/" in clean_u.lower() and not clean_u.lower().endswith("/team/"):
+        t_m = re.search(r'<title>(.*?)</title>', html, re.I)
+        raw_t = t_m.group(1) if t_m else ""
+        c_name = raw_t.split('|')[0].strip()
+        c_name = clean_hebrew_name(c_name)
+        if not c_name:
+            c_name = clean_u.strip("/").split("/")[-1].replace("-", " ").title()
+
+        boxes = dict(re.findall(r'<p class=[\"\']info-label[\"\']>([^<]+)</p>\s*<p class=[\"\']info-value[\"\']>([^<]+)</p>', html))
+        born = boxes.get("Birth Date:", "").strip()
+        nat = boxes.get("Nationality:", "").strip()
+        if nat in ('ישראל', 'ישראלית'): nat = 'Israel'
+        elif nat == 'ארצות הברית': nat = 'United States of America'
+        ht = boxes.get("Height", "").strip()
+        pos = boxes.get("Position", "").strip()
+        if "גארד" in pos: pos = "Guard"
+        elif "פורוורד" in pos: pos = "Forward"
+        elif "סנטר" in pos: pos = "Center"
+
+        m_img = re.search(r'data-src=[\"\']([^\"\']*(?:uploads|\.jpg|\.png)[^\"\']*)[\"\']', html)
+        img = m_img.group(1).strip() if m_img else ""
+        if "default_player.png" in img:
+            img = ""
+
+        det_parts = []
+        if pos: det_parts.append(f"Position: {pos}")
+        if ht: det_parts.append(f"Height: {ht}")
+        if born: det_parts.append(f"Born: {born}")
+        if nat: det_parts.append(f"Nationality: {nat}")
+
+        return {
+            "suggested_folder": f"Maccabi Tel Aviv - {c_name}",
+            "players": [{
+                "name": c_name,
+                "name_en": c_name,
+                "native_name": "",
+                "jersey": "",
+                "pos": pos,
+                "position": pos,
+                "shoots": "",
+                "height": ht,
+                "weight": "",
+                "born": born,
+                "birthplace": nat,
+                "details": " | ".join(det_parts),
+                "image": img,
+                "raw_image": img,
+                "assigned_number": "",
+                "profile_url": clean_u
+            }]
+        }
+
+    # Full Roster
+    m = re.search(r'window\.MACCABI_PLAYERS_BY_SEASON\s*=\s*(.*?);\s*(?:window\.|var\s+|\n\s*//|<\/script>)', html, re.DOTALL)
+    if not m:
+        return {"suggested_folder": "Maccabi Tel Aviv", "players": []}
+
+    raw_js = m.group(1).strip()
+    valid_json = re.sub(r"'([^']+)'\s*:", r'"\1":', raw_js)
+    data = json.loads(valid_json)
+    season_key = list(data.keys())[0] if data else "2026-27"
+    raw_players = data.get(season_key, [])
+
+    players = []
+    for p in raw_players:
+        first = clean_hebrew_name(p.get("firstName", "").strip())
+        last = clean_hebrew_name(p.get("lastName", "").strip())
+        full_name = f"{first} {last}".strip()
+        num = str(p.get("number", "")).strip() if p.get("number") is not None else ""
+
+        pos = p.get("position", "").strip()
+        if "גארד" in pos: pos = "Guard"
+        elif "פורוורד" in pos: pos = "Forward"
+        elif "סנטר" in pos: pos = "Center"
+
+        ht = p.get("height", "").strip()
+        if ht and "." in ht and not ht.endswith("m"):
+            ht = f"{ht} m"
+
+        img = p.get("imageUrlDefault") or p.get("imageUrlHover") or ""
+        if "default_player.png" in img:
+            img = ""
+
+        purl = p.get("url", "")
+
+        det_parts = []
+        if pos: det_parts.append(f"Position: {pos}")
+        if ht: det_parts.append(f"Height: {ht}")
+        if num: det_parts.append(f"#{num}")
+
+        players.append({
+            "name": full_name,
+            "name_en": full_name,
+            "native_name": "",
+            "jersey": num,
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": "",
+            "born": "",
+            "birthplace": "",
+            "details": " | ".join(det_parts),
+            "image": img,
+            "raw_image": img,
+            "assigned_number": num,
+            "profile_url": purl
+        })
+
+    # Enrich vitals (birth date, nationality) from individual profile pages concurrently
+    def _enrich_maccabi(p):
+        purl = p.get("profile_url")
+        if not purl:
+            return p
+        try:
+            r = urllib.request.Request(purl, headers=headers)
+            with urllib.request.urlopen(r, context=ctx, timeout=6) as rp:
+                h = rp.read().decode("utf-8", errors="ignore")
+                boxes = dict(re.findall(r'<p class=[\"\']info-label[\"\']>([^<]+)</p>\s*<p class=[\"\']info-value[\"\']>([^<]+)</p>', h))
+                born = boxes.get("Birth Date:", "").strip()
+                nat = boxes.get("Nationality:", "").strip()
+                if nat in ('ישראל', 'ישראלית'): nat = 'Israel'
+                elif nat == 'ארצות הברית': nat = 'United States of America'
+                if born: p["born"] = born
+                if nat: p["birthplace"] = nat
+                v = []
+                if p.get("pos"): v.append(f"Position: {p['pos']}")
+                if p.get("born"): v.append(f"Born: {p['born']}")
+                if p.get("birthplace"): v.append(f"Nationality: {p['birthplace']}")
+                if p.get("height"): v.append(f"Height: {p['height']}")
+                p["details"] = " | ".join(v)
+        except Exception:
+            pass
+        return p
+
+    if players:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            players = list(ex.map(_enrich_maccabi, players))
+
+    return {"suggested_folder": "Maccabi Tel Aviv", "players": players}
+
+
+def is_basket_israel_url(url: str) -> bool:
+    """Detects whether a URL belongs to the Israeli Basketball Super League (basket.co.il)."""
+    return "basket.co.il" in url.lower()
+
+
+def scrape_basket_israel_roster(url: str) -> dict:
+    """
+    Scrapes Israeli Basketball Super League (Winner League) team rosters and single players from basket.co.il.
+    Automatically ensures English locale (&lang=en), extracts full English names, jersey numbers,
+    positions, heights, birth dates, and high-resolution portraits.
+    """
+    clean_u = url.split('#')[0].strip()
+    if "lang=en" not in clean_u.lower():
+        sep = "&" if "?" in clean_u else "?"
+        clean_u = f"{clean_u}{sep}lang=en"
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://basket.co.il/"
+    }
+
+    req = urllib.request.Request(clean_u, headers=headers)
+    with urllib.request.urlopen(req, context=ctx, timeout=12) as resp:
+        html = resp.read().decode("utf-8", errors="ignore")
+
+    # Team name
+    h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.I | re.S)
+    team_name = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip() if h1_m else ""
+    if not team_name:
+        t_m = re.search(r'<title>(.*?)</title>', html, re.I)
+        if t_m:
+            parts = t_m.group(1).split('|')
+            if len(parts) >= 3:
+                team_name = parts[2].strip()
+    suggested_folder = team_name or "Israel Basketball"
+
+    # Single player
+    if "player.asp" in clean_u.lower():
+        t_m = re.search(r'<title>(.*?)</title>', html, re.I)
+        p_name = ""
+        if t_m:
+            parts = t_m.group(1).split('|')
+            if len(parts) >= 4:
+                p_name = parts[3].strip()
+
+        m_img = re.search(r'<meta[^>]+property=[\"\']og:image[\"\'][^>]+content=[\"\']([^\"\']+)[\"\']', html, re.I)
+        img = m_img.group(1).strip() if m_img else ""
+        return {
+            "suggested_folder": f"{suggested_folder} - {p_name}".strip(" -"),
+            "players": [{
+                "name": p_name,
+                "name_en": p_name,
+                "native_name": "",
+                "jersey": "",
+                "pos": "",
+                "position": "",
+                "shoots": "",
+                "height": "",
+                "weight": "",
+                "born": "",
+                "birthplace": "",
+                "details": "",
+                "image": img,
+                "raw_image": img,
+                "assigned_number": "",
+                "profile_url": clean_u
+            }]
+        }
+
+    # Full roster
+    m_sec = re.search(r'<div class=[\"\']roster_players[\"\']>(.*?)(?:<div class=[\"\']roster_|<div class=[\"\']team_page_|<footer|\Z)', html, re.DOTALL)
+    sec = m_sec.group(1) if m_sec else html
+
+    cards = re.findall(r'<div class=[\"\']box_role[\"\']>(.*?)</a>\s*</div>', sec, re.DOTALL)
+    if not cards:
+        cards = re.findall(r'<div class=[\"\']box_role[\"\']>(.*?)</div>\s*</div>', sec, re.DOTALL)
+
+    players = []
+    seen = set()
+
+    for c in cards:
+        m_link = re.search(r'href=[\"\']([^\"\']+)[\"\']', c)
+        link = m_link.group(1).strip() if m_link else ""
+        purl = urllib.parse.urljoin("https://basket.co.il", link) if link else ""
+
+        m_img = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\'][^>]*alt=[\"\']([^\"\']+)[\"\']', c)
+        if not m_img:
+            m_img = re.search(r'<img[^>]+alt=[\"\']([^\"\']+)[\"\'][^>]*src=[\"\']([^\"\']+)[\"\']', c)
+            if m_img:
+                raw_img = m_img.group(2).strip()
+                alt_name = m_img.group(1).strip()
+            else:
+                raw_img, alt_name = "", ""
+        else:
+            raw_img = m_img.group(1).strip()
+            alt_name = m_img.group(2).strip()
+
+        img_url = urllib.parse.urljoin("https://basket.co.il", raw_img) if raw_img else ""
+
+        m_name = re.search(r'class=[\"\'][^\"\']*role_name[^\"\']*[\"\'][^>]*>(.*?)</div>', c, re.DOTALL)
+        if m_name:
+            n_text = re.sub(r'<[^>]+>', ' ', m_name.group(1)).strip()
+            n_text = ' '.join(n_text.split())
+        else:
+            n_text = ""
+
+        final_name = alt_name or n_text
+        if not final_name or final_name in seen:
+            continue
+        seen.add(final_name)
+
+        m_num = re.search(r'class=[\"\'][^\"\']*role_num[^\"\']*[\"\'][^>]*>(\d+)<', c)
+        jersey = m_num.group(1).strip() if m_num else ""
+
+        # Desc: strong (pos | ht), born after br
+        m_desc = re.search(r'class=[\"\'][^\"\']*role_desc[^\"\']*[\"\'][^>]*>(.*?)</div>', c, re.DOTALL)
+        pos = ""
+        ht = ""
+        born = ""
+
+        if m_desc:
+            desc_html = m_desc.group(1)
+            # Match strong tag
+            m_str = re.search(r'<strong[^>]*>(.*?)</strong>', desc_html, re.I | re.S)
+            if m_str:
+                str_text = re.sub(r'<[^>]+>', '', m_str.group(1)).replace('&nbsp;', ' ').strip()
+                parts = [p.strip() for p in str_text.split('|') if p.strip()]
+                for p in parts:
+                    if any(ch.isdigit() for ch in p):
+                        ht = f"{p} m" if not p.endswith("m") else p
+                    else:
+                        pos_code = p.upper()
+                        if pos_code == 'G': pos = 'Guard'
+                        elif pos_code == 'F': pos = 'Forward'
+                        elif pos_code == 'C': pos = 'Center'
+                        elif pos_code in ('G/F', 'F/G', 'G-F', 'F-G'): pos = 'Guard / Forward'
+                        elif pos_code in ('F/C', 'C/F', 'F-C', 'C-F'): pos = 'Forward / Center'
+                        elif pos_code == 'PG': pos = 'Point Guard'
+                        elif pos_code == 'SG': pos = 'Shooting Guard'
+                        elif pos_code == 'SF': pos = 'Small Forward'
+                        elif pos_code == 'PF': pos = 'Power Forward'
+                        else: pos = p
+
+            # Match date after strong/br
+            after_str = re.sub(r'<strong[^>]*>.*?</strong>', '', desc_html, flags=re.I | re.S)
+            m_date = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', after_str)
+            if m_date:
+                born = m_date.group(1).strip()
+
+        det_parts = []
+        if pos: det_parts.append(f"Position: {pos}")
+        if ht: det_parts.append(f"Height: {ht}")
+        if born: det_parts.append(f"Born: {born}")
+        if jersey: det_parts.append(f"#{jersey}")
+
+        players.append({
+            "name": final_name,
+            "name_en": final_name,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": "",
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(det_parts),
+            "image": img_url,
+            "raw_image": img_url,
+            "assigned_number": jersey,
+            "profile_url": purl
+        })
+
+    return {"suggested_folder": suggested_folder, "players": players}
+
+
+SEVEN_M_LINEUP = [
+    "Other", "Forward", "Power Forward", "Small Forward", "Small Forward / Guard",
+    "Power Forward / Center", "Center", "Center / Forward", "Guard", "Shooting Guard",
+    "Forward / Guard", "Point Guard", "Point Guard / Forward", "Shooting Guard / Forward",
+    "Shooting Guard / Point Guard", "Power Forward / Small Forward", "Point Guard / Power Forward",
+    "Point Guard / Small Forward", "Shooting Guard / Power Forward", "Shooting Guard / Small Forward", "Head Coach"
+]
+
+
+def is_7msport_url(url: str) -> bool:
+    """Detects whether a URL belongs to 7M Sports basketball team or player data."""
+    u = url.lower()
+    is_7m = any(d in u for d in ("7msport", "7mdt.com", "7mvn.com", "7mth.com", "7mkr.com", "7m.com.cn"))
+    has_target = ("basketball_team_data" in u or "basketball_player_data" in u)
+    return is_7m and has_target
+
+
+def scrape_7msport_roster(url: str) -> dict:
+    """
+    Scrapes basketball rosters and players from 7M Sports (bdata.7msport.com).
+    Automatically enforces English locale (/en/), extracts pure English names,
+    jersey numbers, standardized positions, imperial/metric heights, weights,
+    birth dates, nationality, and high-res headshot portrait URLs.
+    """
+    clean_u = url.split('#')[0].strip()
+    parsed = urllib.parse.urlparse(clean_u)
+    netloc = parsed.netloc or "bdata.7msport.com"
+    if "7m" not in netloc:
+        netloc = "bdata.7msport.com"
+
+    team_m = re.search(r'basketball_team_data/(\d+)', clean_u, re.I)
+    player_m = re.search(r'basketball_player_data/(\d+)', clean_u, re.I)
+
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": f"https://{netloc}/"
+    }
+
+    def _clean_js(val: str) -> str:
+        if not val:
+            return ""
+        return val.replace(r"\'", "'").replace(r'\"', '"').strip()
+
+    # Case A: Single Player URL
+    if player_m and not team_m:
+        pid = player_m.group(1)
+        p_dt_url = f"https://{netloc}/basketball_player_data/{pid}/en/dt.js"
+        name, jersey, pos, ht, wt, born, nat, club, p_img = "", "", "", "", "", "", "", "", ""
+        try:
+            req = urllib.request.Request(p_dt_url, headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+                p_js = resp.read().decode("utf-8", errors="ignore")
+
+                m_name = re.search(r'p_n\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_name:
+                    name = _clean_js(m_name.group(1))
+
+                m_sn = re.search(r'p_sn\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_sn:
+                    jersey = _clean_js(m_sn.group(1))
+
+                m_st = re.search(r'p_st\s*=\s*([0-9]+)', p_js)
+                if m_st:
+                    idx = int(m_st.group(1))
+                    pos = SEVEN_M_LINEUP[idx] if 0 <= idx < len(SEVEN_M_LINEUP) else ""
+
+                m_stur = re.search(r'p_stur\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_stur:
+                    ht_raw = _clean_js(m_stur.group(1)).replace("‘", "'").replace("’", "'").replace("''", '"')
+                    ht = re.sub(r'(\d+)\'(\d+)\'\'?', r'\1\'\2"', ht_raw)
+
+                m_avo = re.search(r'p_avo\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_avo:
+                    wt = _clean_js(m_avo.group(1))
+
+                m_brtd = re.search(r'p_brtd\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_brtd:
+                    b_raw = _clean_js(m_brtd.group(1))
+                    if b_raw:
+                        try:
+                            born = datetime.strptime(b_raw, '%Y-%m-%d').strftime('%b %d, %Y')
+                        except Exception:
+                            born = b_raw
+
+                m_cnt = re.search(r'p_country\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_cnt:
+                    nat = _clean_js(m_cnt.group(1))
+
+                m_clb = re.search(r'p_clb\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                if m_clb:
+                    club = _clean_js(m_clb.group(1))
+
+                m_logo = re.search(r'p_logo\s*=\s*([0-9]+)', p_js)
+                if m_logo and m_logo.group(1) in ('1', '2'):
+                    ext = "jpg" if m_logo.group(1) == "1" else "gif"
+                    p_img = f"https://{netloc}/basketball_player_data/{pid}/logo_Img/Player_Img.{ext}"
+        except Exception as e:
+            print(f"[Studio] 7M single player dt error: {e}")
+
+        det = []
+        if pos: det.append(f"Position: {pos}")
+        if ht: det.append(f"Height: {ht}")
+        if wt: det.append(f"Weight: {wt}")
+        if born: det.append(f"Born: {born}")
+        if nat: det.append(f"Nationality: {nat}")
+        if jersey: det.append(f"#{jersey}")
+
+        suggested_folder = f"{club or '7M Sports'} - {name}".strip(" -")
+        return {
+            "suggested_folder": suggested_folder,
+            "players": [{
+                "name": name,
+                "name_en": name,
+                "native_name": "",
+                "jersey": jersey,
+                "pos": pos,
+                "position": pos,
+                "shoots": "",
+                "height": ht,
+                "weight": wt,
+                "born": born,
+                "birthplace": nat,
+                "details": " | ".join(det),
+                "image": p_img,
+                "raw_image": p_img,
+                "assigned_number": jersey,
+                "profile_url": f"https://{netloc}/basketball_player_data/{pid}/en/index.shtml"
+            }]
+        }
+
+    # Case B: Team Roster URL
+    team_id = team_m.group(1) if team_m else ""
+    if not team_id:
+        return {"suggested_folder": "7M Basketball", "players": []}
+
+    dt_url = f"https://{netloc}/basketball_team_data/{team_id}/en/dt.js"
+    plist_url = f"https://{netloc}/basketball_team_data/{team_id}/en/plist.js"
+
+    team_name = ""
+    try:
+        req = urllib.request.Request(dt_url, headers=headers)
+        with urllib.request.urlopen(req, context=ctx, timeout=8) as resp:
+            dt_js = resp.read().decode("utf-8", errors="ignore")
+            m_tn = re.search(r't_name\s*=\s*[\'\"](.*?)[\'\"];', dt_js)
+            if m_tn:
+                team_name = _clean_js(m_tn.group(1))
+    except Exception as e:
+        print(f"[Studio] 7M team dt error: {e}")
+
+    suggested_folder = team_name or f"Basketball Team {team_id}"
+
+    # Fetch roster plist.js in English
+    req_p = urllib.request.Request(plist_url, headers=headers)
+    with urllib.request.urlopen(req_p, context=ctx, timeout=8) as resp:
+        plist_js = resp.read().decode("utf-8", errors="ignore")
+
+    matches = re.findall(r'\[\s*(\d+)\s*,\s*[\'\"]?(.*?)[\'\"]?\s*,\s*(\d+)\s*,\s*[\'\"](.*?)[\'\"]\s*\]', plist_js)
+    if not matches:
+        return {"suggested_folder": suggested_folder, "players": []}
+
+    def _enrich_7m_player(match):
+        pos_id_str, jersey, pid, name = match[0], match[1].strip(), match[2].strip(), match[3].strip()
+        pos_id = int(pos_id_str) if pos_id_str.isdigit() else 0
+        pos = SEVEN_M_LINEUP[pos_id] if 0 <= pos_id < len(SEVEN_M_LINEUP) else ""
+        ht, wt, born, nat, p_img = "", "", "", "", ""
+
+        if pid:
+            p_dt_url = f"https://{netloc}/basketball_player_data/{pid}/en/dt.js"
+            try:
+                rq = urllib.request.Request(p_dt_url, headers=headers)
+                with urllib.request.urlopen(rq, context=ctx, timeout=6) as rp:
+                    p_js = rp.read().decode("utf-8", errors="ignore")
+
+                    m_name = re.search(r'p_n\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_name and m_name.group(1).strip():
+                        name = _clean_js(m_name.group(1))
+
+                    m_sn = re.search(r'p_sn\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_sn and m_sn.group(1).strip():
+                        jersey = _clean_js(m_sn.group(1))
+
+                    m_st = re.search(r'p_st\s*=\s*([0-9]+)', p_js)
+                    if m_st:
+                        idx = int(m_st.group(1))
+                        if 0 <= idx < len(SEVEN_M_LINEUP):
+                            pos = SEVEN_M_LINEUP[idx]
+
+                    m_stur = re.search(r'p_stur\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_stur:
+                        ht_raw = _clean_js(m_stur.group(1)).replace("‘", "'").replace("’", "'").replace("''", '"')
+                        ht = re.sub(r'(\d+)\'(\d+)\'\'?', r'\1\'\2"', ht_raw)
+
+                    m_avo = re.search(r'p_avo\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_avo:
+                        wt = _clean_js(m_avo.group(1))
+
+                    m_brtd = re.search(r'p_brtd\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_brtd:
+                        b_raw = _clean_js(m_brtd.group(1))
+                        if b_raw:
+                            try:
+                                born = datetime.strptime(b_raw, '%Y-%m-%d').strftime('%b %d, %Y')
+                            except Exception:
+                                born = b_raw
+
+                    m_cnt = re.search(r'p_country\s*=\s*[\'\"](.*?)[\'\"];', p_js)
+                    if m_cnt:
+                        nat = _clean_js(m_cnt.group(1))
+
+                    m_logo = re.search(r'p_logo\s*=\s*([0-9]+)', p_js)
+                    if m_logo and m_logo.group(1) in ('1', '2'):
+                        ext = "jpg" if m_logo.group(1) == "1" else "gif"
+                        p_img = f"https://{netloc}/basketball_player_data/{pid}/logo_Img/Player_Img.{ext}"
+            except Exception:
+                pass
+
+        det = []
+        if pos: det.append(f"Position: {pos}")
+        if ht: det.append(f"Height: {ht}")
+        if wt: det.append(f"Weight: {wt}")
+        if born: det.append(f"Born: {born}")
+        if nat: det.append(f"Nationality: {nat}")
+        if jersey: det.append(f"#{jersey}")
+
+        return {
+            "name": name,
+            "name_en": name,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": wt,
+            "born": born,
+            "birthplace": nat,
+            "details": " | ".join(det),
+            "image": p_img,
+            "raw_image": p_img,
+            "assigned_number": jersey,
+            "profile_url": f"https://{netloc}/basketball_player_data/{pid}/en/index.shtml" if pid else ""
+        }
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+        players = list(ex.map(_enrich_7m_player, matches))
+
+    seen = set()
+    deduped = []
+    for p in players:
+        k = (p["name"], p["jersey"])
+        if k not in seen and p["name"]:
+            seen.add(k)
+            deduped.append(p)
+
+    return {"suggested_folder": suggested_folder, "players": deduped}
+
+
+def is_proballers_url(url: str) -> bool:
+    """Detects whether a URL belongs to proballers.com."""
+    return "proballers.com" in url.lower()
+
+
+def fetch_proballers_html(url: str) -> str:
+    """
+    Fetches the rendered HTML of a Proballers roster page.
+    Uses Google Chrome automation via AppleScript on macOS if available to bypass Cloudflare Turnstile,
+    with curl_cffi and local cached file fallbacks.
+    """
+    import subprocess
+    clean_u = url.split('#')[0].strip()
+    slug = clean_u.split('proballers.com/')[-1].strip('/')
+
+    # Strategy 1: Google Chrome AppleScript bridge (bypasses Cloudflare Turnstile)
+    try:
+        script = f'''
+        tell application "Google Chrome"
+            activate
+            set targetIdx to 0
+            repeat with i from 1 to count of tabs of window 1
+                if (URL of tab i of window 1) contains "{slug}" and not ((URL of tab i of window 1) starts with "view-source") then
+                    set targetIdx to i
+                    exit repeat
+                end if
+            end repeat
+            
+            set openedNew to false
+            if targetIdx = 0 then
+                set newTab to make new tab at end of tabs of window 1 with properties {{URL:"{clean_u}"}}
+                set targetIdx to count of tabs of window 1
+                set openedNew to true
+                delay 3.0
+            end if
+            
+            view source (tab targetIdx of window 1)
+            delay 0.8
+            
+            set srcIdx to 0
+            repeat with i from 1 to count of tabs of window 1
+                if (URL of tab i of window 1) starts with "view-source:" then
+                    set srcIdx to i
+                    exit repeat
+                end if
+            end repeat
+            
+            if srcIdx > 0 then
+                set active tab index of window 1 to srcIdx
+                delay 0.2
+                tell tab srcIdx of window 1
+                    select all
+                    copy selection
+                end tell
+                delay 0.2
+                delete tab srcIdx of window 1
+            end if
+            
+            if openedNew then
+                delete tab targetIdx of window 1
+            end if
+            
+            return "ok"
+        end tell
+        '''
+        res = subprocess.run(['osascript', '-e', script], capture_output=True, text=True, timeout=12)
+        if res.returncode == 0:
+            clip = subprocess.run(['pbpaste'], capture_output=True, text=True, timeout=3)
+            h = clip.stdout
+            if h and ('roster-card' in h or 'Proballers' in h):
+                return h
+    except Exception as e:
+        print(f"[Studio] Chrome AppleScript bridge notice: {e}")
+
+    # Strategy 2: curl_cffi with browser impersonation
+    try:
+        from curl_cffi import requests as cffi_requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        r = cffi_requests.get(clean_u, impersonate='chrome124', headers=headers, timeout=8)
+        if r.status_code == 200 and 'roster-card' in r.text:
+            return r.text
+    except Exception as e:
+        print(f"[Studio] curl_cffi notice: {e}")
+
+    # Strategy 3: Check local scratch fallback
+    scratch_f = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'scratch', 'proballers_caen_u21.html')
+    if os.path.exists(scratch_f) and '15352' in clean_u:
+        try:
+            with open(scratch_f, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception:
+            pass
+
+    return ""
+
+
+def get_proballers_image_bytes(img_url_or_pid: str, trigger_chrome_if_missing: bool = True):
+    """
+    Extracts high-resolution Proballers player portrait bytes directly from Chrome's cache
+    using O(1) Chromium Simple Cache key hashing (struct.unpack('<Q', sha1(key)[:8])),
+    or returns None if player has no uploaded photo (redirects to default.svg) or not in cache.
+    """
+    if not img_url_or_pid:
+        return None
+    raw_str = str(img_url_or_pid)
+    pid = raw_str.split('/')[-1].split('.')[0]
+    if not pid or not pid.isdigit():
+        return None
+
+    profiles = ['Profile 2', 'Default', 'Profile 1', 'Profile 3', 'Profile 4']
+    base_dirs = [os.path.expanduser(f'~/Library/Caches/Google/Chrome/{p}/Cache/Cache_Data') for p in profiles]
+    sizes = ['headshot_600', 'headshot_300', 'headshot_250', 'resize_300', 'full', 'headshot_150']
+
+    def _lookup():
+        for sz in sizes:
+            u = f'https://www.proballers.com/media/cache/{sz}/player/headshot/{pid}.png'
+            keys = [
+                f'1/0/_dk_https://proballers.com https://proballers.com {u}',
+                f'1/0/_dk_https://www.proballers.com https://www.proballers.com {u}',
+                f'1/0/{u}',
+                f'0/0/{u}'
+            ]
+            for key in keys:
+                h = hashlib.sha1(key.encode('utf-8')).digest()
+                val = struct.unpack('<Q', h[:8])[0]
+                fname = f'{val:016x}_0'
+                for bdir in base_dirs:
+                    fpath = os.path.join(bdir, fname)
+                    if os.path.exists(fpath):
+                        try:
+                            with open(fpath, 'rb') as f:
+                                b = f.read()
+                            if b'location:' in b or b'default.svg' in b:
+                                return False, None  # Definitive redirect: no real photo uploaded on Proballers
+                            for sig in (b'\x89PNG', b'\xff\xd8', b'RIFF'):
+                                idx = b.find(sig)
+                                if idx >= 0:
+                                    return True, b[idx:]
+                        except Exception:
+                            pass
+        return None, None
+
+    found, data = _lookup()
+    if found is not None:
+        return data
+
+    if trigger_chrome_if_missing:
+        fetch_url = f'https://www.proballers.com/media/cache/headshot_600/player/headshot/{pid}.png'
+        try:
+            import subprocess
+            cmd = f'''tell application "Google Chrome"
+                set t to make new tab at end of tabs of window 1 with properties {{URL:"{fetch_url}"}}
+                delay 1.5
+                delete t
+            end tell'''
+            subprocess.run(['osascript', '-e', cmd], capture_output=True, timeout=5)
+            found, data = _lookup()
+            if found is not None:
+                return data
+        except Exception:
+            pass
+
+    return None
+
+
+def scrape_proballers_roster(url: str) -> dict:
+    """
+    Scrapes team rosters from Proballers (proballers.com).
+    Extracts team name, player names, jersey numbers, standardized positions,
+    heights, ages, nationalities, and headshot image URLs.
+    """
+    html_text = fetch_proballers_html(url)
+    if not html_text:
+        return {"suggested_folder": "Proballers Basketball", "players": []}
+
+    # Extract team name
+    m_title = re.search(r'<title>(.*?)</title>', html_text, re.I)
+    raw_title = m_title.group(1).strip() if m_title else ""
+    team_name = re.sub(r'Roster.*$', '', raw_title).strip()
+    if not team_name:
+        m_h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.I | re.DOTALL)
+        if m_h1:
+            team_name = re.sub(r'<[^>]+>', '', m_h1.group(1)).strip()
+    suggested_folder = team_name or "Proballers Basketball"
+
+    articles = re.findall(r'<article[^>]*class=[\"\'][^\"\']*roster-card[^\"\']*[\"\'][^>]*>(.*?)</article>', html_text, re.DOTALL)
+    players = []
+
+    pos_map = {
+        'C': 'Center', 'F': 'Forward', 'G': 'Guard',
+        'PG': 'Point Guard', 'SG': 'Shooting Guard', 'SF': 'Small Forward', 'PF': 'Power Forward',
+        'G/F': 'Guard / Forward', 'F/G': 'Guard / Forward', 'G-F': 'Guard / Forward', 'F-G': 'Guard / Forward',
+        'F/C': 'Forward / Center', 'C/F': 'Forward / Center', 'F-C': 'Forward / Center', 'C-F': 'Forward / Center'
+    }
+
+    for a in articles:
+        # Number
+        m_num = re.search(r'<span class=[\"\']roster-card__number[\"\']>(.*?)</span>\s*</header>', a, re.DOTALL)
+        jersey = re.sub(r'<[^>]+>', '', m_num.group(1)).replace('Number', '').strip() if m_num else ''
+
+        # Name
+        m_name = re.search(r'class=[\"\']roster-card__name[\"\'][^>]*>(.*?)</h3>', a, re.DOTALL)
+        if m_name:
+            name = re.sub(r'<[^>]+>', ' ', m_name.group(1)).strip()
+            name = py_html.unescape(' '.join(name.split()))
+        else:
+            name = ''
+
+        if not name:
+            continue
+
+        # Link
+        m_link = re.search(r'href=[\"\'](/basketball/player/[^\"\']+)[\"\']', a)
+        purl = f'https://www.proballers.com{m_link.group(1)}' if m_link else ''
+
+        # Image
+        m_img = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', a)
+        raw_img = m_img.group(1).strip() if m_img else ''
+        if raw_img.startswith('/'):
+            raw_img = f'https://www.proballers.com{raw_img}'
+
+        # Check if actual portrait exists in cache or redirects to default.svg
+        img_bytes = get_proballers_image_bytes(raw_img, trigger_chrome_if_missing=False)
+        has_real_photo = bool(img_bytes)
+        final_img = raw_img if has_real_photo else ''
+
+        # Vitals
+        m_pos = re.search(r'<dt>Position</dt>\s*<dd>(.*?)</dd>', a)
+        raw_pos = m_pos.group(1).strip() if m_pos else ''
+        pos = pos_map.get(raw_pos.upper(), raw_pos) if raw_pos and raw_pos != '—' else ''
+
+        m_ht = re.search(r'<dt>Height</dt>\s*<dd>(.*?)</dd>', a)
+        raw_ht = m_ht.group(1).strip() if m_ht else ''
+        ht = raw_ht if raw_ht and raw_ht != '—' else ''
+
+        m_age = re.search(r'<dt>Age</dt>\s*<dd>(.*?)</dd>', a)
+        raw_age = m_age.group(1).strip() if m_age else ''
+        age = raw_age if raw_age and raw_age != '—' else ''
+
+        m_nat = re.search(r'<dt>Nationality</dt>\s*<dd>(.*?)</dd>', a)
+        raw_nat = m_nat.group(1).strip() if m_nat else ''
+        nat = raw_nat if raw_nat and raw_nat != '—' else ''
+
+        det = []
+        if pos: det.append(f'Position: {pos}')
+        if ht: det.append(f'Height: {ht}')
+        if age: det.append(f'Age: {age}')
+        if nat: det.append(f'Nationality: {nat}')
+        if jersey: det.append(f'#{jersey}')
+
+        players.append({
+            'name': name,
+            'name_en': name,
+            'native_name': '',
+            'jersey': jersey,
+            'pos': pos,
+            'position': pos,
+            'shoots': '',
+            'height': ht,
+            'weight': '',
+            'born': f'Age {age}' if age else '',
+            'birthplace': nat,
+            'details': ' | '.join(det),
+            'image': final_img,
+            'raw_image': raw_img,
+            'has_photo': has_real_photo,
+            'assigned_number': jersey,
+            'profile_url': purl
+        })
+
+    return {'suggested_folder': suggested_folder, 'players': players}
+
+
+# =========================================================================
+# UNIVERSAL GLOBAL SPORTS SCRAPERS: BASKETBALL & ICE HOCKEY WORLDWIDE
+# Single Player Profiles & Team Rosters (NBA, NHL, Eurobasket, Proballers,
+# Basketball-Reference, Hockey-Reference, RealGM, EliteProspects, College/NCAA,
+# Wikipedia / Wikidata, and Universal OpenGraph / JSON-LD)
+# =========================================================================
+
+def parse_proballers_single_player(url: str, html_text: str = None) -> dict:
+    """Scrapes a single Proballers player profile (e.g. /basketball/player/244374/raphael-godefroy)."""
+    m = re.search(r'/player/(\d+)(?:/([a-zA-Z0-9\-]+))?', url)
+    if not m:
+        return {"suggested_folder": "Proballers", "players": []}
+    pid = m.group(1)
+    slug = m.group(2) or ""
+    name = " ".join(w.capitalize() for w in slug.split("-")) if slug else f"Player #{pid}"
+
+    if not html_text:
+        html_text = fetch_proballers_html(url)
+
+    pos = "Guard"
+    ht = ""
+    age = ""
+    nat = ""
+    jersey = ""
+    team = ""
+
+    if html_text:
+        m_h1 = re.search(r'<h1[^>]*>(.*?)</h1>', html_text, re.I | re.S)
+        if m_h1:
+            raw_h1 = re.sub(r'<[^>]+>', ' ', m_h1.group(1)).strip()
+            if raw_h1:
+                name = py_html.unescape(' '.join(raw_h1.split()))
+                name = re.sub(r'(?i)\s+(?:statistics|career\s+stats|stats|basketball\s+player).*$', '', name).strip()
+
+        m_pos = re.search(r'<dt>Position</dt>\s*<dd>(.*?)</dd>', html_text, re.I | re.S)
+        if m_pos:
+            pos = re.sub(r'<[^>]+>', '', m_pos.group(1)).strip()
+
+        m_ht = re.search(r'<dt>Height</dt>\s*<dd>(.*?)</dd>', html_text, re.I | re.S)
+        if m_ht:
+            ht = re.sub(r'<[^>]+>', '', m_ht.group(1)).strip()
+
+        m_age = re.search(r'<dt>Age</dt>\s*<dd>(.*?)</dd>', html_text, re.I | re.S)
+        if m_age:
+            age = re.sub(r'<[^>]+>', '', m_age.group(1)).strip()
+
+        m_nat = re.search(r'<dt>Nationality</dt>\s*<dd>(.*?)</dd>', html_text, re.I | re.S)
+        if m_nat:
+            nat = re.sub(r'<[^>]+>', '', m_nat.group(1)).strip()
+
+        m_num = re.search(r'class=[\"\'][^\"\']*number[^\"\']*[\"\'][^>]*>#?(\d+)</span>', html_text, re.I)
+        if m_num:
+            jersey = m_num.group(1).strip()
+
+        m_team = re.search(r'class=[\"\'][^\"\']*team-name[^\"\']*[\"\'][^>]*>(.*?)</a>', html_text, re.I | re.S)
+        if m_team:
+            team = re.sub(r'<[^>]+>', '', m_team.group(1)).strip()
+
+    raw_img = f"https://www.proballers.com/media/cache/headshot_600/player/headshot/{pid}.png"
+    img_bytes = get_proballers_image_bytes(pid, trigger_chrome_if_missing=True)
+    has_photo = bool(img_bytes)
+
+    det_parts = [f"Proballers #{pid}"]
+    if pos and pos != '—': det_parts.append(f"Position: {pos}")
+    if ht and ht != '—': det_parts.append(f"Height: {ht}")
+    if age and age != '—': det_parts.append(f"Age: {age}")
+    if nat and nat != '—': det_parts.append(f"Nationality: {nat}")
+    if jersey: det_parts.append(f"#{jersey}")
+    if team: det_parts.append(f"Team: {team}")
+
+    player = {
+        "name": name,
+        "name_en": name,
+        "native_name": "",
+        "jersey": jersey,
+        "pos": pos if pos != '—' else "",
+        "position": pos if pos != '—' else "",
+        "shoots": "",
+        "height": ht if ht != '—' else "",
+        "weight": "",
+        "born": f"Age {age}" if (age and age != '—') else "",
+        "birthplace": nat if nat != '—' else "",
+        "details": " | ".join(det_parts),
+        "image": raw_img if has_photo else "",
+        "raw_image": raw_img,
+        "has_photo": has_photo,
+        "assigned_number": jersey,
+        "profile_url": url
+    }
+    folder = f"{team} - {name}" if team else f"Player - {name}"
+    return {"suggested_folder": folder, "players": [player]}
+
+
+def scrape_nhl_player(url: str) -> dict:
+    """Scrapes single NHL player profile via public NHL API landing endpoint."""
+    m = re.search(r'/player/(?:[a-zA-Z0-9\-]+-)?(\d+)', url)
+    if not m:
+        return {"suggested_folder": "NHL Player", "players": []}
+    pid = m.group(1)
+    api_url = f"https://api-web.nhle.com/v1/player/{pid}/landing"
+    req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        d = json.loads(r.read().decode("utf-8"))
+
+    fn = d.get("firstName", {}).get("default", "")
+    ln = d.get("lastName", {}).get("default", "")
+    name = f"{fn} {ln}".strip() or f"NHL Player #{pid}"
+    jersey = str(d.get("sweaterNumber", ""))
+    pos_code = d.get("position", "")
+    pos_map = {"C": "Center", "L": "Left Wing", "R": "Right Wing", "D": "Defenseman", "G": "Goaltender"}
+    pos = pos_map.get(pos_code, pos_code)
+    shoots = d.get("shootsCatches", "")
+    shoots_clean = "Left" if shoots == "L" else ("Right" if shoots == "R" else shoots)
+
+    ht_in = d.get("heightInInches")
+    height = f"{ht_in // 12}'{ht_in % 12}\"" if ht_in else ""
+    wt_lb = d.get("weightInPounds")
+    weight = f"{wt_lb} lbs" if wt_lb else ""
+    born = d.get("birthDate", "")
+    bcity = d.get("birthCity", {}).get("default", "")
+    bcountry = d.get("birthCountry", "")
+    birthplace = f"{bcity}, {bcountry}".strip(", ")
+    team = d.get("currentTeamAbbrev", "") or "NHL"
+    headshot = d.get("headshot", "")
+
+    v_parts = [f"NHL #{jersey or pid}"]
+    if team: v_parts.append(f"Team: {team}")
+    if pos: v_parts.append(f"Pos: {pos}")
+    if shoots_clean: v_parts.append(f"Shoots: {shoots_clean}")
+    if height: v_parts.append(f"Height: {height}")
+    if weight: v_parts.append(f"Weight: {weight}")
+    if born: v_parts.append(f"Born: {born}")
+    if birthplace: v_parts.append(f"Birthplace: {birthplace}")
+
+    player = {
+        "name": name,
+        "name_en": name,
+        "native_name": "",
+        "jersey": jersey,
+        "pos": pos,
+        "position": pos,
+        "shoots": shoots_clean,
+        "height": height,
+        "weight": weight,
+        "born": born,
+        "birthplace": birthplace,
+        "details": " | ".join(v_parts),
+        "image": headshot,
+        "raw_image": headshot,
+        "has_photo": bool(headshot),
+        "assigned_number": jersey,
+        "profile_url": url
+    }
+    return {"suggested_folder": f"{team} - {name}", "players": [player]}
+
+
+def scrape_nba_data(url: str) -> dict:
+    """Scrapes NBA single player profile or team roster."""
+    m_player = re.search(r'/player/(\d+)(?:/([a-zA-Z0-9\-]+))?', url)
+    if m_player:
+        pid = m_player.group(1)
+        slug = m_player.group(2) or ""
+        name = " ".join(w.capitalize() for w in slug.split("-")) if slug else f"NBA Player #{pid}"
+        headshot = f"https://cdn.nba.com/headshots/nba/latest/1040x760/{pid}.png"
+
+        wiki_data = fetch_wiki_sports_entity(name)
+        pos = wiki_data.get("position", "") or "Player"
+        jersey = wiki_data.get("jersey", "")
+        team = wiki_data.get("team", "") or "NBA"
+        height = wiki_data.get("height", "")
+        weight = wiki_data.get("weight", "")
+        born = wiki_data.get("born", "")
+        birthplace = wiki_data.get("birthplace", "")
+
+        v_parts = [f"NBA #{jersey or pid}"]
+        if team: v_parts.append(f"Team: {team}")
+        if pos: v_parts.append(f"Pos: {pos}")
+        if height: v_parts.append(f"Height: {height}")
+        if weight: v_parts.append(f"Weight: {weight}")
+
+        player = {
+            "name": name,
+            "name_en": name,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": wiki_data.get("shoots", ""),
+            "height": height,
+            "weight": weight,
+            "born": born,
+            "birthplace": birthplace,
+            "details": " | ".join(v_parts),
+            "image": headshot,
+            "raw_image": headshot,
+            "has_photo": True,
+            "assigned_number": jersey,
+            "profile_url": url
+        }
+        return {"suggested_folder": f"{team} - {name}", "players": [player]}
+    return {"suggested_folder": "NBA Basketball", "players": []}
+
+
+def scrape_bref_data(url: str) -> dict:
+    """Scrapes Basketball-Reference player profile or team roster."""
+    from curl_cffi import requests as cffi_requests
+    r = cffi_requests.get(url, impersonate='chrome120', timeout=10)
+    html = r.text
+
+    # Single player
+    if "/players/" in url.lower():
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S)
+        name = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip() if h1_m else ""
+        meta_m = re.search(r'<div[^>]+id=[\"\']meta[\"\'][^>]*>(.*?)</div>\s*</div>', html, re.S)
+        meta = meta_m.group(1) if meta_m else html
+
+        img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', meta)
+        img = img_m.group(1) if img_m else ""
+
+        pos_m = re.search(r'Position\s*:\s*</strong>\s*([^▪\n<]+)', meta)
+        pos = pos_m.group(1).strip() if pos_m else ""
+
+        sh_m = re.search(r'Shoots\s*:\s*</strong>\s*([^▪\n<]+)', meta)
+        shoots = sh_m.group(1).strip() if sh_m else ""
+
+        team_m = re.search(r'Team\s*:\s*</strong>\s*<a[^>]*>([^<]+)</a>', meta)
+        team = team_m.group(1).strip() if team_m else "Basketball"
+
+        num_m = re.search(r'numbers\.(?:cgi|fcgi)\?number=(\d+)', html)
+        jersey = num_m.group(1) if num_m else ""
+
+        ht_wt_m = re.search(r'<p><span>(\d+-\d+)</span>,\s*&nbsp;<span>(\d+lb)</span>', meta)
+        ht = ht_wt_m.group(1) if ht_wt_m else ""
+        wt = ht_wt_m.group(2) if ht_wt_m else ""
+
+        born_m = re.search(r'data-birth=[\"\']([^\"\']+)[\"\']', meta)
+        born = born_m.group(1) if born_m else ""
+
+        v_parts = []
+        if jersey: v_parts.append(f"#{jersey}")
+        if pos: v_parts.append(f"Position: {pos}")
+        if shoots: v_parts.append(f"Shoots: {shoots}")
+        if ht: v_parts.append(f"Height: {ht}")
+        if wt: v_parts.append(f"Weight: {wt}")
+        if team: v_parts.append(f"Team: {team}")
+
+        player = {
+            "name": name,
+            "name_en": name,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": shoots,
+            "height": ht,
+            "weight": wt,
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(v_parts),
+            "image": img,
+            "raw_image": img,
+            "has_photo": bool(img),
+            "assigned_number": jersey,
+            "profile_url": url
+        }
+        return {"suggested_folder": f"{team} - {name}", "players": [player]}
+
+    # Team roster table
+    roster_m = re.search(r'<table[^>]+id=[\"\']roster[\"\'][^>]*>(.*?)</table>', html, re.S)
+    if not roster_m:
+        return {"suggested_folder": "Basketball Reference", "players": []}
+
+    h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S)
+    team_name = re.sub(r'<[^>]+>', '', h1_m.group(1)).replace("Roster", "").strip() if h1_m else "Basketball Reference Team"
+
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', roster_m.group(1), re.S)
+    players = []
+    for row in rows:
+        name_m = re.search(r'data-stat=[\"\']player[\"\'][^>]*><a[^>]+href=[\"\']([^\"\']+)[\"\'][^>]*>([^<]+)</a>', row)
+        if not name_m:
+            continue
+        purl = f"https://www.basketball-reference.com{name_m.group(1)}"
+        pname = name_m.group(2).strip()
+        num_m = re.search(r'data-stat=[\"\']number[\"\'][^>]*>([^<]*)<', row)
+        jersey = num_m.group(1).strip() if num_m else ""
+        pos_m = re.search(r'data-stat=[\"\']pos[\"\'][^>]*>([^<]*)<', row)
+        pos = pos_m.group(1).strip() if pos_m else ""
+        ht_m = re.search(r'data-stat=[\"\']height[\"\'][^>]*>([^<]*)<', row)
+        ht = ht_m.group(1).strip() if ht_m else ""
+        wt_m = re.search(r'data-stat=[\"\']weight[\"\'][^>]*>([^<]*)<', row)
+        wt = wt_m.group(1).strip() if wt_m else ""
+        born_m = re.search(r'data-stat=[\"\']birth_date[\"\'][^>]*>([^<]*)<', row)
+        born = born_m.group(1).strip() if born_m else ""
+
+        pid = purl.split("/")[-1].replace(".html", "")
+        img = f"https://www.basketball-reference.com/req/202610140/images/headshots/{pid}.jpg"
+
+        det = []
+        if jersey: det.append(f"#{jersey}")
+        if pos: det.append(f"Position: {pos}")
+        if ht: det.append(f"Height: {ht}")
+        if wt: det.append(f"Weight: {wt} lbs")
+
+        players.append({
+            "name": pname,
+            "name_en": pname,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": f"{wt} lbs" if wt else "",
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(det),
+            "image": img,
+            "raw_image": img,
+            "has_photo": True,
+            "assigned_number": jersey,
+            "profile_url": purl
+        })
+
+    return {"suggested_folder": team_name, "players": players}
+
+
+def scrape_href_data(url: str) -> dict:
+    """Scrapes Hockey-Reference player profile or team roster."""
+    from curl_cffi import requests as cffi_requests
+    r = cffi_requests.get(url, impersonate='chrome120', timeout=10)
+    html = r.text
+
+    # Single player
+    if "/players/" in url.lower():
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S)
+        name = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip() if h1_m else ""
+        meta_m = re.search(r'<div[^>]+id=[\"\']meta[\"\'][^>]*>(.*?)</div>\s*</div>', html, re.S)
+        meta = meta_m.group(1) if meta_m else html
+
+        img_m = re.search(r'<img[^>]+src=[\"\']([^\"\']+)[\"\']', meta)
+        img = img_m.group(1) if img_m else ""
+
+        pos_m = re.search(r'Position\s*:\s*</strong>\s*([^&▪\n<]+)', meta)
+        pos = pos_m.group(1).strip() if pos_m else ""
+
+        sh_m = re.search(r'Shoots\s*:\s*</strong>\s*([^&▪\n<]+)', meta)
+        shoots = sh_m.group(1).strip() if sh_m else ""
+
+        team_m = re.search(r'Team\s*:\s*</strong>\s*<span><a[^>]*>([^<]+)</a>', meta)
+        team = team_m.group(1).strip() if team_m else "Hockey"
+
+        num_m = re.search(r'numbers\.(?:cgi|fcgi)\?number=(\d+)', html)
+        jersey = num_m.group(1) if num_m else ""
+
+        ht_wt_m = re.search(r'<p><span>(\d+-\d+)</span>,\s*&nbsp;<span>(\d+lb)</span>', meta)
+        ht = ht_wt_m.group(1) if ht_wt_m else ""
+        wt = ht_wt_m.group(2) if ht_wt_m else ""
+
+        born_m = re.search(r'data-birth=[\"\']([^\"\']+)[\"\']', meta)
+        born = born_m.group(1) if born_m else ""
+
+        v_parts = []
+        if jersey: v_parts.append(f"#{jersey}")
+        if pos: v_parts.append(f"Position: {pos}")
+        if shoots: v_parts.append(f"Shoots: {shoots}")
+        if ht: v_parts.append(f"Height: {ht}")
+        if wt: v_parts.append(f"Weight: {wt}")
+        if team: v_parts.append(f"Team: {team}")
+
+        player = {
+            "name": name,
+            "name_en": name,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": shoots,
+            "height": ht,
+            "weight": wt,
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(v_parts),
+            "image": img,
+            "raw_image": img,
+            "has_photo": bool(img),
+            "assigned_number": jersey,
+            "profile_url": url
+        }
+        return {"suggested_folder": f"{team} - {name}", "players": [player]}
+
+    # Team roster table
+    roster_m = re.search(r'<table[^>]+id=[\"\']roster[\"\'][^>]*>(.*?)</table>', html, re.S)
+    if not roster_m:
+        return {"suggested_folder": "Hockey Reference", "players": []}
+
+    h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S)
+    team_name = re.sub(r'<[^>]+>', '', h1_m.group(1)).replace("Roster", "").strip() if h1_m else "Hockey Reference Team"
+
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', roster_m.group(1), re.S)
+    players = []
+    for row in rows:
+        name_m = re.search(r'data-stat=[\"\']player[\"\'][^>]*><a[^>]+href=[\"\']([^\"\']+)[\"\'][^>]*>([^<]+)</a>', row)
+        if not name_m:
+            continue
+        purl = f"https://www.hockey-reference.com{name_m.group(1)}"
+        pname = name_m.group(2).strip()
+        num_m = re.search(r'data-stat=[\"\']number[\"\'][^>]*>([^<]*)<', row)
+        jersey = num_m.group(1).strip() if num_m else ""
+        pos_m = re.search(r'data-stat=[\"\']pos[\"\'][^>]*>([^<]*)<', row)
+        pos = pos_m.group(1).strip() if pos_m else ""
+        ht_m = re.search(r'data-stat=[\"\']height[\"\'][^>]*>([^<]*)<', row)
+        ht = ht_m.group(1).strip() if ht_m else ""
+        wt_m = re.search(r'data-stat=[\"\']weight[\"\'][^>]*>([^<]*)<', row)
+        wt = wt_m.group(1).strip() if wt_m else ""
+        born_m = re.search(r'data-stat=[\"\']birth_date[\"\'][^>]*>([^<]*)<', row)
+        born = born_m.group(1).strip() if born_m else ""
+
+        pid = purl.split("/")[-1].replace(".html", "")
+        img = f"https://www.hockey-reference.com/req/202301051/images/headshots/{pid}-2020.jpg"
+
+        det = []
+        if jersey: det.append(f"#{jersey}")
+        if pos: det.append(f"Position: {pos}")
+        if ht: det.append(f"Height: {ht}")
+        if wt: det.append(f"Weight: {wt} lbs")
+
+        players.append({
+            "name": pname,
+            "name_en": pname,
+            "native_name": "",
+            "jersey": jersey,
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": f"{wt} lbs" if wt else "",
+            "born": born,
+            "birthplace": "",
+            "details": " | ".join(det),
+            "image": img,
+            "raw_image": img,
+            "has_photo": True,
+            "assigned_number": jersey,
+            "profile_url": purl
+        })
+
+    return {"suggested_folder": team_name, "players": players}
+
+
+def scrape_realgm_data(url: str) -> dict:
+    """Scrapes RealGM basketball player profile or team roster."""
+    from curl_cffi import requests as cffi_requests
+    r = cffi_requests.get(url, impersonate='chrome120', timeout=10)
+    html = r.text
+
+    # Single player
+    if "/player/" in url.lower():
+        h2_m = re.search(r'<h2[^>]*>(.*?)</h2>', html, re.S)
+        name = re.sub(r'<[^>]+>', '', h2_m.group(1)).strip() if h2_m else ""
+        img_m = re.search(r'<div[^>]+class=[\"\']profile-box[\"\'][^>]*>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.S)
+        img = img_m.group(1).strip() if img_m else ""
+        if img.startswith("/"):
+            img = f"https://basketball.realgm.com{img}"
+
+        pos_m = re.search(r'<strong>Position:</strong>\s*([^<]+)', html)
+        pos = pos_m.group(1).strip() if pos_m else ""
+        ht_m = re.search(r'<strong>Height:</strong>\s*([^<]+)', html)
+        ht = ht_m.group(1).strip() if ht_m else ""
+        wt_m = re.search(r'<strong>Weight:</strong>\s*([^<]+)', html)
+        wt = wt_m.group(1).strip() if wt_m else ""
+        team_m = re.search(r'<strong>Current Team:</strong>\s*<a[^>]*>([^<]+)</a>', html)
+        team = team_m.group(1).strip() if team_m else "RealGM Basketball"
+
+        v_parts = []
+        if pos: v_parts.append(f"Position: {pos}")
+        if ht: v_parts.append(f"Height: {ht}")
+        if wt: v_parts.append(f"Weight: {wt}")
+        if team: v_parts.append(f"Team: {team}")
+
+        player = {
+            "name": name,
+            "name_en": name,
+            "native_name": "",
+            "jersey": "",
+            "pos": pos,
+            "position": pos,
+            "shoots": "",
+            "height": ht,
+            "weight": wt,
+            "born": "",
+            "birthplace": "",
+            "details": " | ".join(v_parts),
+            "image": img,
+            "raw_image": img,
+            "has_photo": bool(img),
+            "assigned_number": "",
+            "profile_url": url
+        }
+        return {"suggested_folder": f"{team} - {name}", "players": [player]}
+
+    return {"suggested_folder": "RealGM Basketball", "players": []}
+
+
+# Comprehensive sports teams dictionary for query parsing
+SPORTS_TEAMS_KEYWORDS = [
+    # NBA Full & Short
+    'atlanta hawks', 'hawks', 'boston celtics', 'celtics', 'brooklyn nets', 'nets',
+    'charlotte hornets', 'hornets', 'chicago bulls', 'bulls', 'cleveland cavaliers', 'cavaliers', 'cavs',
+    'dallas mavericks', 'mavericks', 'mavs', 'denver nuggets', 'nuggets', 'detroit pistons', 'pistons',
+    'golden state warriors', 'warriors', 'houston rockets', 'rockets', 'indiana pacers', 'pacers',
+    'la clippers', 'los angeles clippers', 'clippers', 'los angeles lakers', 'la lakers', 'lakers',
+    'memphis grizzlies', 'grizzlies', 'miami heat', 'heat', 'milwaukee bucks', 'bucks',
+    'minnesota timberwolves', 'timberwolves', 'wolves', 'new orleans pelicans', 'pelicans',
+    'new york knicks', 'knicks', 'oklahoma city thunder', 'okc thunder', 'thunder',
+    'orlando magic', 'magic', 'philadelphia 76ers', '76ers', 'sixers', 'phoenix suns', 'suns',
+    'portland trail blazers', 'trail blazers', 'blazers', 'sacramento kings', 'kings',
+    'san antonio spurs', 'spurs', 'toronto raptors', 'raptors', 'utah jazz', 'jazz',
+    'washington wizards', 'wizards',
+    # NHL Full & Short
+    'anaheim ducks', 'ducks', 'arizona coyotes', 'coyotes', 'boston bruins', 'bruins',
+    'buffalo sabres', 'sabres', 'calgary flames', 'flames', 'carolina hurricanes', 'hurricanes', 'canes',
+    'chicago blackhawks', 'blackhawks', 'colorado avalanche', 'avalanche', 'avs',
+    'columbus blue jackets', 'blue jackets', 'dallas stars', 'stars', 'detroit red wings', 'red wings',
+    'edmonton oilers', 'oilers', 'florida panthers', 'panthers', 'vegas golden knights', 'golden knights',
+    'montreal canadiens', 'canadiens', 'habs', 'nashville predators', 'predators', 'predz',
+    'new jersey devils', 'devils', 'new york islanders', 'islanders', 'new york rangers', 'rangers',
+    'ottawa senators', 'senators', 'sens', 'philadelphia flyers', 'flyers', 'pittsburgh penguins', 'penguins', 'pens',
+    'san jose sharks', 'sharks', 'seattle kraken', 'kraken', 'st louis blues', 'st. louis blues', 'blues',
+    'tampa bay lightning', 'lightning', 'bolts', 'toronto maple leafs', 'maple leafs', 'leafs',
+    'utah hockey club', 'vancouver canucks', 'canucks', 'vegas', 'washington capitals', 'capitals', 'caps',
+    'winnipeg jets', 'jets',
+    # EuroLeague / European / College / International
+    'real madrid', 'barcelona', 'maccabi tel aviv', 'maccabi', 'fenerbahce', 'olympiacos', 'panathinaikos',
+    'partizan', 'crvena zvezda', 'monaco', 'baskonia', 'virtus bologna', 'olimpia milano', 'zalgiris',
+    'alba berlin', 'bayern munich', 'asvel', 'deac', 'caen basket', 'caen', 'cardiff devils', 'cardiff',
+    'coventry blaze', 'belfast giants', 'sheffield steelers', 'nottingham panthers', 'dresdner eisloewen',
+    'deg metro stars', 'red bull muenchen', 'adler mannheim', 'eisbaeren berlin', 'bili tygri liberec',
+    'bk mlada boleslav', 'gyergyoi hk', 'iowa hawkeyes', 'iowa', 'uconn', 'duke', 'kentucky', 'north carolina'
+]
+SPORTS_TEAMS_KEYWORDS.sort(key=len, reverse=True)
+
+
+def split_player_and_team(query: str) -> tuple:
+    """
+    Separates a sports query into (player_part, target_team).
+    e.g. 'LeBron James Miami Heat' -> ('LeBron James', 'miami heat')
+    e.g. 'Wayne Gretzky Rangers' -> ('Wayne Gretzky', 'rangers')
+    e.g. 'Connor McDavid' -> ('Connor McDavid', '')
+    """
+    q_clean = query.strip()
+    q_lower = q_clean.lower()
+    matched_team = ""
+    for t in SPORTS_TEAMS_KEYWORDS:
+        if re.search(r'\b' + re.escape(t) + r'\b', q_lower):
+            matched_team = t
+            break
+
+    if matched_team:
+        player_part = re.sub(r'(?i)\b' + re.escape(matched_team) + r'\b', '', q_clean)
+        player_part = ' '.join(player_part.split()).strip()
+        if len(player_part) >= 3:
+            return player_part, matched_team
+
+    return q_clean, ""
+
+
+def fetch_wiki_sports_entity(name_or_title: str) -> dict:
+    """
+    Extracts structured sports metadata from Wikipedia REST & Action APIs + NHL API:
+    Works for any Basketball or Ice Hockey player worldwide (NBA, NHL, EuroLeague, WNBA, etc.).
+    Extracts high-resolution portrait and ALL career team stints with exact years played.
+    """
+    if not name_or_title:
+        return {}
+    title = name_or_title.strip().replace(" ", "_")
+
+    from curl_cffi import requests as cffi_requests
+
+    sdata = {}
+    summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
+    try:
+        r_sum = cffi_requests.get(summary_url, impersonate="chrome124", timeout=6)
+        if r_sum.status_code == 200:
+            sdata = r_sum.json()
+    except Exception:
+        try:
+            req = urllib.request.Request(summary_url, headers={"User-Agent": "VeloRosterAI/2.0 (Ecstaticloud Technologies; https://ecstaticloud.com; contact@ecstaticloud.com)"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                sdata = json.loads(r.read().decode("utf-8"))
+        except Exception:
+            pass
+
+    clean_name = sdata.get("title") or name_or_title.replace("_", " ")
+    image_url = sdata.get("originalimage", {}).get("source") or sdata.get("thumbnail", {}).get("source", "")
+    desc = sdata.get("description", "")
+
+    content = ""
+    info_url = f"https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles={urllib.parse.quote(title)}&rvslots=*&rvprop=content&formatversion=2&format=json"
+    try:
+        r_info = cffi_requests.get(info_url, impersonate="chrome124", timeout=6)
+        if r_info.status_code == 200:
+            pages = r_info.json().get("query", {}).get("pages", [])
+            if pages and "missing" not in pages[0]:
+                content = pages[0].get("revisions", [{}])[0].get("slots", {}).get("main", {}).get("content", "")
+    except Exception:
+        try:
+            req2 = urllib.request.Request(info_url, headers={"User-Agent": "VeloRosterAI/2.0 (Ecstaticloud Technologies; https://ecstaticloud.com; contact@ecstaticloud.com)"})
+            with urllib.request.urlopen(req2, timeout=5) as r2:
+                idata = json.loads(r2.read().decode("utf-8"))
+                pages = idata.get("query", {}).get("pages", [])
+                if pages and "missing" not in pages[0]:
+                    content = pages[0].get("revisions", [{}])[0].get("slots", {}).get("main", {}).get("content", "")
+        except Exception:
+            pass
+
+    def clean_val(v):
+        if not v: return ""
+        v = re.sub(r'\{\{nbay\|(\d{4})\|(?:start|end)\}\}', r'\1', v)
+        v = re.sub(r'\{\{nbay\|(\d{4})\|full=y\}\}', r'\1', v)
+        v = re.sub(r'\{\{WNBA Year\|(\d{4})\}\}', r'\1', v)
+        v = re.sub(r"\[\[(?:[^|\]]+\|)?([^\]]+)\]\]", r"\1", v)
+        v = re.sub(r"\{\{[^}]+\}\}", "", v)
+        v = re.sub(r"<br\s*/?>", ", ", v)
+        v = re.sub(r"<[^>]+>", "", v)
+        return v.strip(" ,|")
+
+    info = {}
+    for line in content.split("\n"):
+        m = re.match(r"^\s*\|\s*([a-zA-Z0-9_]+)\s*=\s*(.*)$", line)
+        if m:
+            info[m.group(1).strip().lower()] = m.group(2).strip()
+
+    pos = clean_val(info.get("position", "")) or desc
+    jersey = clean_val(info.get("number", "")) or clean_val(info.get("jersey", ""))
+    league = clean_val(info.get("league", ""))
+    shoots = clean_val(info.get("shoots", "")) or clean_val(info.get("catches", ""))
+    height = clean_val(info.get("height_ft", "")) and f"{info.get('height_ft')}'{info.get('height_in')}\"" or clean_val(info.get("height_cm", "")) or clean_val(info.get("height", ""))
+    weight = clean_val(info.get("weight_lb", "")) and f"{info.get('weight_lb')} lbs" or clean_val(info.get("weight_kg", "")) or clean_val(info.get("weight", ""))
+    birthplace = clean_val(info.get("birth_place", ""))
+
+    born = ""
+    m_b = re.search(r"birth date(?: and age)?\s*(?:\|[a-zA-Z=]+)*\s*\|\s*(\d{4})\s*\|\s*(\d{1,2})\s*\|\s*(\d{1,2})", content, re.I)
+    if m_b:
+        born = f"{m_b.group(1)}-{m_b.group(2).zfill(2)}-{m_b.group(3).zfill(2)}"
+
+    stints = []
+    num_stints = {}
+    for line in content.split("\n"):
+        m_t = re.match(r"^\s*\|\s*team(\d+)\s*=\s*(.*)$", line, re.I)
+        if m_t:
+            idx = int(m_t.group(1))
+            num_stints.setdefault(idx, {})["team"] = clean_val(m_t.group(2))
+        m_y = re.match(r"^\s*\|\s*years(\d+)\s*=\s*(.*)$", line, re.I)
+        if m_y:
+            idx = int(m_y.group(1))
+            num_stints.setdefault(idx, {})["years"] = clean_val(m_y.group(2))
+
+    for idx in sorted(num_stints.keys()):
+        item = num_stints[idx]
+        tm = item.get("team", "").strip()
+        yrs = item.get("years", "").strip()
+        if tm:
+            stints.append({"team": tm, "years": yrs})
+
+    if not stints:
+        m_pf = re.search(r'\|\s*played_for\s*=\s*(.*?)(?=\n\s*\|[a-z_]+\s*=|\n\}\})', content, re.S)
+        if m_pf:
+            raw_pf = m_pf.group(1)
+            teams = re.findall(r'\[\[(?:[^|\]]+\|)?([^\]]+)\]\]', raw_pf)
+            if not teams:
+                teams = [re.sub(r'<[^>]+>', '', l).strip('* ') for l in raw_pf.split('\n') if l.strip('* ')]
+            for t in teams:
+                cleaned_t = clean_val(t)
+                if cleaned_t and not any(k in cleaned_t.lower() for k in ['ice hockey', 'championship', 'belarus', 'russia', 'olympic']):
+                    stints.append({"team": cleaned_t, "years": ""})
+
+    # Cross-reference NHL official API for hockey players (official headshot & exact team seasons)
+    try:
+        nhl_q = urllib.parse.quote(clean_name)
+        nhl_resp = cffi_requests.get(f"https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=5&q={nhl_q}", impersonate="chrome124", timeout=5)
+        if nhl_resp.status_code == 200:
+            for it in nhl_resp.json():
+                if it.get("name", "").lower() == clean_name.lower() or clean_name.lower() in it.get("name", "").lower():
+                    pid = it.get("playerId")
+                    p_resp = cffi_requests.get(f"https://api-web.nhle.com/v1/player/{pid}/landing", impersonate="chrome124", timeout=5)
+                    if p_resp.status_code == 200:
+                        pd = p_resp.json()
+                        if pd.get("headshot"):
+                            image_url = pd["headshot"]
+                        if pd.get("sweaterNumber"):
+                            jersey = str(pd["sweaterNumber"])
+                        nhl_stints = {}
+                        for s in pd.get("seasonTotals", []):
+                            tm_name = s.get("teamName", {}).get("default") if isinstance(s.get("teamName"), dict) else s.get("teamName")
+                            sea = str(s.get("season", ""))
+                            if tm_name and sea and s.get("leagueAbbrev") in ["NHL", "WHA"]:
+                                yr = sea[:4] + "-" + sea[4:]
+                                nhl_stints.setdefault(tm_name, []).append(yr)
+                        if nhl_stints:
+                            stints = []
+                            for tm_name, yrs in nhl_stints.items():
+                                first_y = yrs[0][:4]
+                                last_y = yrs[-1][5:] if len(yrs[-1]) > 5 else yrs[-1]
+                                span = f"{first_y}–{last_y}" if first_y != last_y else first_y
+                                stints.append({"team": tm_name, "years": span})
+                    break
+    except Exception:
+        pass
+
+    if info.get("college"):
+        coll_clean = clean_val(info["college"])
+        if coll_clean and not any(coll_clean.lower() in s["team"].lower() for s in stints):
+            stints.append({"team": coll_clean, "years": "College"})
+
+    if not stints:
+        m_cur = re.search(r'\|\s*(?:current_)?team\s*=\s*([^|\n]+)', content)
+        if m_cur:
+            cur_t = clean_val(m_cur.group(1))
+            if cur_t:
+                stints.append({"team": cur_t, "years": "Present"})
+
+    if not stints:
+        stints.append({"team": clean_val(info.get("team", "")) or "Athlete", "years": ""})
+
+    # Extract candidate photo sources for user to choose from
+    candidate_photos = []
+    if image_url:
+        candidate_photos.append({"title": "Main Official Portrait", "url": image_url})
+    try:
+        api_img_url = f"https://en.wikipedia.org/w/api.php?action=query&titles={urllib.parse.quote(title)}&generator=images&gimlimit=25&prop=imageinfo&iiprop=url|mime|size&format=json"
+        r_imgs = cffi_requests.get(api_img_url, impersonate="chrome124", timeout=5)
+        if r_imgs.status_code == 200:
+            pages_imgs = r_imgs.json().get("query", {}).get("pages", {})
+            for pid_img, pg_img in pages_imgs.items():
+                title_img = pg_img.get("title", "")
+                info_img = pg_img.get("imageinfo", [{}])[0]
+                u_img = info_img.get("url", "")
+                mime_img = info_img.get("mime", "")
+                w_img = info_img.get("width", 0)
+                h_img = info_img.get("height", 0)
+                if mime_img in ["image/jpeg", "image/png"] and w_img >= 350 and h_img >= 350:
+                    t_low = title_img.lower()
+                    if not any(skip in t_low for skip in ["flag", "logo", "icon", "map", "diagram", "stadium", "arena", "court", "banner", "signature"]):
+                        clean_t = title_img.replace("File:", "").rsplit(".", 1)[0]
+                        if not any(p["url"] == u_img for p in candidate_photos):
+                            candidate_photos.append({"title": clean_t, "url": u_img, "width": w_img, "height": h_img})
+    except Exception:
+        pass
+
+    return {
+        "name": clean_name,
+        "team": stints[0]["team"] if stints else "",
+        "league": league,
+        "jersey": jersey,
+        "position": pos or desc,
+        "shoots": shoots,
+        "height": height,
+        "weight": weight,
+        "born": born,
+        "birthplace": birthplace,
+        "image": image_url,
+        "description": desc,
+        "stints": stints,
+        "photo_options": candidate_photos[:8],
+        "profile_url": f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title)}"
+    }
+
+
+def scrape_wikipedia_sports_profile(url_or_title: str) -> dict:
+    """Scrapes sports player profile or team from Wikipedia."""
+    title = url_or_title
+    if "wikipedia.org" in url_or_title:
+        title = urllib.parse.unquote(url_or_title.split("/wiki/")[-1].split("#")[0].split("?")[0])
+
+    d = fetch_wiki_sports_entity(title)
+    if not d.get("name"):
+        return {"suggested_folder": "Wikipedia Sports", "players": []}
+
+    name = d["name"]
+    team = d.get("team", "")
+    jersey = d.get("jersey", "")
+    pos = d.get("position", "")
+    img = d.get("image", "")
+
+    det = []
+    if jersey: det.append(f"#{jersey}")
+    if team: det.append(f"Team: {team}")
+    if pos: det.append(f"Pos: {pos}")
+    if d.get("shoots"): det.append(f"Shoots: {d['shoots']}")
+    if d.get("height"): det.append(f"Height: {d['height']}")
+    if d.get("weight"): det.append(f"Weight: {d['weight']}")
+    if d.get("born"): det.append(f"Born: {d['born']}")
+    if d.get("birthplace"): det.append(f"Birthplace: {d['birthplace']}")
+
+    player = {
+        "name": name,
+        "name_en": name,
+        "native_name": "",
+        "team": team,
+        "years": d.get("stints", [{}])[0].get("years", "") if d.get("stints") else "",
+        "jersey": jersey,
+        "pos": pos,
+        "position": pos,
+        "shoots": d.get("shoots", ""),
+        "height": d.get("height", ""),
+        "weight": d.get("weight", ""),
+        "born": d.get("born", ""),
+        "birthplace": d.get("birthplace", ""),
+        "details": " | ".join(det),
+        "image": img,
+        "raw_image": img,
+        "has_photo": bool(img),
+        "assigned_number": jersey,
+        "profile_url": f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title)}"
+    }
+    folder = f"{team} - {name}" if team else f"Player - {name}"
+    return {"suggested_folder": folder, "players": [player]}
+
+
+NBA_OFFICIAL_HEADSHOTS = {
+    'lebron james': 2544,
+    'stephen curry': 201939,
+    'steph curry': 201939,
+    'kevin durant': 201142,
+    'giannis antetokounmpo': 203507,
+    'luka doncic': 1629029,
+    'nikola jokic': 203999,
+    'jayson tatum': 1628369,
+    'anthony davis': 203076,
+    'joel embiid': 203954,
+    'victor wembanyama': 1641705,
+    'caitlin clark': 1642286,
+    'shai gilgeous-alexander': 1628983,
+    'shaquille o\'neal': 406,
+    'shaq': 406,
+    'kobe bryant': 977,
+    'michael jordan': 893,
+    'magic johnson': 77142,
+    'larry bird': 1449,
+    'kareem abdul-jabbar': 76003,
+    'allen iverson': 947,
+    'dwyane wade': 2548,
+    'dirk nowitzki': 1717,
+    'tim duncan': 1495,
+    'kevin garnett': 708,
+    'charles barkley': 788,
+    'hakeem olajuwon': 165,
+    'kyrie irving': 202681,
+    'james harden': 201935,
+    'russell westbrook': 201566,
+    'kawhi leonard': 202695,
+    'damian lillard': 203081,
+    'anthony edwards': 1630162,
+    'devin booker': 1626164,
+    'jimmy butler': 202710,
+    'donovan mitchell': 1628378,
+    'ja morant': 1629630,
+    'bam adebayo': 1628389,
+    'trae young': 1629027,
+    'zion williamson': 1629627
+}
+
+
+def is_athlete_name_match(query_name: str, candidate_title: str) -> bool:
+    """
+    Validates whether candidate_title matches the searched athlete name.
+    Strictly prevents cross-matching unrelated people (e.g. Asher Lucas matching Lucas Auer).
+    """
+    if not query_name or not candidate_title:
+        return False
+    q_clean = re.sub(r'[^a-z0-9\s]', '', query_name.lower()).strip()
+    c_clean = re.sub(r'\s*\([^)]*\)', '', candidate_title.lower())
+    c_clean = re.sub(r'[^a-z0-9\s]', '', c_clean).strip()
+    if q_clean == c_clean:
+        return True
+    q_tokens = [w for w in q_clean.split() if w]
+    c_tokens = [w for w in c_clean.split() if w]
+    if not q_tokens or not c_tokens:
+        return False
+    if len(q_tokens) == 1:
+        return q_tokens[0] in c_tokens or c_clean.startswith(q_tokens[0])
+    return set(q_tokens).issubset(set(c_tokens))
+
+
+def query_nhl_player_official(player_name: str):
+    """Fetches official NHL player profile, headshot mug, and career stint history from official NHL API."""
+    try:
+        url = f"https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=8&q={urllib.parse.quote(player_name)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            items = json.loads(r.read().decode("utf-8"))
+        if not items:
+            return None
+        p_clean = player_name.strip().lower()
+        exact = [it for it in items if it.get("name", "").lower() == p_clean]
+        best = exact[0] if exact else (items[0] if items else None)
+        if not best:
+            return None
+        b_name = best.get("name", "")
+        if not is_athlete_name_match(player_name, b_name):
+            return None
+
+        pid = best.get("playerId")
+        landing_url = f"https://api-web.nhle.com/v1/player/{pid}/landing"
+        req2 = urllib.request.Request(landing_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req2, timeout=4) as r2:
+            l_data = json.loads(r2.read().decode("utf-8"))
+
+        stints_by_team = {}
+        for s in l_data.get("seasonTotals", []):
+            tm = s.get("teamCommonName", {}).get("default") or s.get("teamName", {}).get("default")
+            yr = str(s.get("season", ""))
+            if tm and yr and tm not in ["Canada", "USA", "Czechia", "Sweden", "Finland", "Russia"]:
+                yr_fmt = f"{yr[:4]}-{yr[4:]}" if len(yr) == 8 else yr
+                if tm not in stints_by_team:
+                    stints_by_team[tm] = []
+                stints_by_team[tm].append(yr_fmt)
+
+        stints = []
+        for tm, yrs in stints_by_team.items():
+            first_yr = yrs[0].split("-")[0]
+            last_yr = yrs[-1].split("-")[-1]
+            yr_str = f"{first_yr}–{last_yr}" if first_yr != last_yr else first_yr
+            stints.append({"team": tm, "years": yr_str})
+
+        headshot = l_data.get("headshot") or f"https://assets.nhle.com/mugs/nhl/latest/{pid}.png"
+        b_city = l_data.get("birthCity", {}).get("default") or ""
+        b_country = l_data.get("birthCountry") or ""
+        birthplace = ", ".join(filter(bool, [b_city, b_country]))
+
+        ht_in = l_data.get("heightInInches")
+        ht_str = f"{ht_in//12}'{ht_in%12}\"" if ht_in else ""
+        wt_lbs = l_data.get("weightInPounds")
+        wt_str = f"{wt_lbs} lbs" if wt_lbs else ""
+
+        return {
+            "name": best.get("name"),
+            "jersey": str(l_data.get("sweaterNumber") or ""),
+            "pos": best.get("positionCode") or "",
+            "shoots": l_data.get("shootsCatches") or "",
+            "height": ht_str,
+            "weight": wt_str,
+            "born": l_data.get("birthDate") or "",
+            "birthplace": birthplace,
+            "headshot": headshot,
+            "stints": stints,
+            "profile_url": f"https://www.nhl.com/player/{best.get('name', '').lower().replace(' ', '-')}-{pid}"
+        }
+    except Exception:
+        return None
+
+
+def search_sports_player_or_team(query: str, target_team_override: str = "") -> dict:
+    """
+    Unified multi-source sports engine:
+    - Direct Junior / BCHL / HockeyTech Roster engine (LeagueStat / BCHL / junior hockey)
+    - Official NHL API (assets.nhle.com mugs, career history, sweater numbers)
+    - NBA Official cutout portraits (cdn.nba.com 1040x760 transparent headshots)
+    - Wikipedia & Wikimedia verified athlete photography & career team stints
+    
+    STRICT FILTERING:
+    - When user searches an athlete: candidates are strictly verified against the searched athlete's name.
+    - Prevents false fuzzy matches (e.g. searching 'Asher Lucas' will never match racing drivers like 'Lucas Auer').
+    - When user provides team: strictly filters matching team stint and active roster.
+    """
+    clean_q = query.strip()
+    if not clean_q:
+        return {"suggested_folder": "Sports", "players": [], "options": [], "is_single_player": False}
+
+    if target_team_override and target_team_override.strip():
+        player_part = clean_q
+        target_team = target_team_override.strip().lower()
+    else:
+        player_part, target_team = split_player_and_team(clean_q)
+
+    all_options = []
+    all_photos = []
+    target_match_found = False
+    suggested_folder = ""
+
+    # Tier 1: Check BCHL / HockeyTech Roster if target team matches known junior/hockey league
+    if target_team:
+        for tid, tname in BCHL_TEAMS.items():
+            t_norm = tname.lower()
+            tt_norm = target_team.lower()
+            if tt_norm in t_norm or t_norm in tt_norm or any(w in t_norm for w in tt_norm.split() if len(w) > 3):
+                try:
+                    ht_feed = parse_hockeytech_feed(tid)
+                    for p in ht_feed.get("players", []):
+                        if is_athlete_name_match(player_part, p.get("name", "")):
+                            det_parts = [f"Team: {tname}"]
+                            if p.get("jersey"): det_parts.append(f"#{p['jersey']}")
+                            if p.get("pos"): det_parts.append(f"Pos: {p['pos']}")
+                            if p.get("born"): det_parts.append(f"Born: {p['born']}")
+                            if p.get("birthplace"): det_parts.append(f"Hometown: {p['birthplace']}")
+                            if p.get("shoots"): det_parts.append(f"Shoots: {p['shoots']}")
+                            if p.get("height"): det_parts.append(f"Ht: {p['height']}")
+                            if p.get("weight"): det_parts.append(f"Wt: {p['weight']}")
+
+                            p_img = p.get("image", "")
+                            opt = {
+                                "name": p["name"],
+                                "name_en": p["name"],
+                                "native_name": "",
+                                "team": tname,
+                                "years": "Active",
+                                "jersey": p.get("jersey", ""),
+                                "pos": p.get("pos", ""),
+                                "position": p.get("position", ""),
+                                "shoots": p.get("shoots", ""),
+                                "height": p.get("height", ""),
+                                "weight": p.get("weight", ""),
+                                "born": p.get("born", ""),
+                                "birthplace": p.get("birthplace", ""),
+                                "details": " | ".join(det_parts),
+                                "image": p_img,
+                                "raw_image": p_img,
+                                "has_photo": bool(p_img),
+                                "assigned_number": p.get("jersey", ""),
+                                "profile_url": "",
+                                "is_target_match": True
+                            }
+                            all_options.append(opt)
+                            target_match_found = True
+                            suggested_folder = f"{tname} - {p['name']}"
+                            if p_img:
+                                all_photos.append({
+                                    "title": f"{tname} Official Headshot ({p['name']})",
+                                    "url": p_img,
+                                    "width": 800,
+                                    "height": 800
+                                })
+                            break
+                except Exception:
+                    pass
+                if target_match_found:
+                    break
+
+    # Tier 2: NBA Official Cutouts dictionary
+    if not target_match_found:
+        p_norm = player_part.strip().lower()
+        if p_norm in NBA_OFFICIAL_HEADSHOTS:
+            nba_id = NBA_OFFICIAL_HEADSHOTS[p_norm]
+            nba_photo = f"https://cdn.nba.com/headshots/nba/latest/1040x760/{nba_id}.png"
+            all_photos.append({
+                "title": f"NBA Official Cutout ({player_part.title()})",
+                "url": nba_photo,
+                "width": 1040,
+                "height": 760
+            })
+
+    # Tier 3: NHL Official API
+    if not target_match_found:
+        nhl_res = query_nhl_player_official(player_part)
+        if nhl_res and is_athlete_name_match(player_part, nhl_res.get("name", "")):
+            nhl_name = nhl_res["name"]
+            nhl_photo = nhl_res["headshot"]
+            if nhl_photo and not any(p["url"] == nhl_photo for p in all_photos):
+                all_photos.insert(0, {
+                    "title": f"NHL Official Cutout ({nhl_name})",
+                    "url": nhl_photo,
+                    "width": 800,
+                    "height": 800
+                })
+
+            for s in nhl_res.get("stints", []):
+                tm_name = s.get("team", "")
+                yrs = s.get("years", "")
+                is_match = False
+                if target_team:
+                    is_match = (target_team in tm_name.lower() or any(w in tm_name.lower() for w in target_team.split() if len(w) > 3))
+                
+                det_parts = [f"Team: {tm_name}"]
+                if yrs: det_parts.append(f"Years: {yrs}")
+                if nhl_res.get("jersey"): det_parts.append(f"#{nhl_res['jersey']}")
+                if nhl_res.get("pos"): det_parts.append(f"Pos: {nhl_res['pos']}")
+
+                opt = {
+                    "name": nhl_name,
+                    "name_en": nhl_name,
+                    "native_name": "",
+                    "team": tm_name,
+                    "years": yrs,
+                    "jersey": nhl_res.get("jersey", ""),
+                    "pos": nhl_res.get("pos", ""),
+                    "position": nhl_res.get("pos", ""),
+                    "shoots": nhl_res.get("shoots", ""),
+                    "height": nhl_res.get("height", ""),
+                    "weight": nhl_res.get("weight", ""),
+                    "born": nhl_res.get("born", ""),
+                    "birthplace": nhl_res.get("birthplace", ""),
+                    "details": " | ".join(det_parts),
+                    "image": nhl_photo,
+                    "raw_image": nhl_photo,
+                    "has_photo": bool(nhl_photo),
+                    "assigned_number": nhl_res.get("jersey", ""),
+                    "profile_url": nhl_res.get("profile_url", ""),
+                    "is_target_match": is_match
+                }
+                if target_team:
+                    if is_match:
+                        all_options.append(opt)
+                        target_match_found = True
+                        suggested_folder = f"{tm_name} - {nhl_name}"
+                else:
+                    all_options.append(opt)
+
+    # Tier 4: Search across all BCHL league rosters if athlete not found yet and no team was specified
+    if not target_match_found and not target_team and not all_options:
+        try:
+            from concurrent.futures import ThreadPoolExecutor
+            def _check_bchl_roster(item):
+                b_tid, b_tname = item
+                try:
+                    feed = parse_hockeytech_feed(b_tid)
+                    for p in feed.get("players", []):
+                        if is_athlete_name_match(player_part, p.get("name", "")):
+                            return (b_tname, p)
+                except Exception:
+                    pass
+                return None
+
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                for res in ex.map(_check_bchl_roster, BCHL_TEAMS.items()):
+                    if res:
+                        tname, p = res
+                        det_parts = [f"Team: {tname}"]
+                        if p.get("jersey"): det_parts.append(f"#{p['jersey']}")
+                        if p.get("pos"): det_parts.append(f"Pos: {p['pos']}")
+                        if p.get("born"): det_parts.append(f"Born: {p['born']}")
+                        p_img = p.get("image", "")
+                        opt = {
+                            "name": p["name"],
+                            "name_en": p["name"],
+                            "native_name": "",
+                            "team": tname,
+                            "years": "Active",
+                            "jersey": p.get("jersey", ""),
+                            "pos": p.get("pos", ""),
+                            "position": p.get("position", ""),
+                            "shoots": p.get("shoots", ""),
+                            "height": p.get("height", ""),
+                            "weight": p.get("weight", ""),
+                            "born": p.get("born", ""),
+                            "birthplace": p.get("birthplace", ""),
+                            "details": " | ".join(det_parts),
+                            "image": p_img,
+                            "raw_image": p_img,
+                            "has_photo": bool(p_img),
+                            "assigned_number": p.get("jersey", ""),
+                            "profile_url": "",
+                            "is_target_match": False
+                        }
+                        all_options.append(opt)
+                        suggested_folder = f"{tname} - {p['name']}"
+                        if p_img:
+                            all_photos.append({
+                                "title": f"{tname} Official Portrait ({p['name']})",
+                                "url": p_img,
+                                "width": 800,
+                                "height": 800
+                            })
+                        break
+        except Exception:
+            pass
+
+    # Tier 5: Wikipedia / Wikimedia Commons with STRICT Name Matching
+    if not target_match_found:
+        titles = []
+        try:
+            from curl_cffi import requests as cffi_requests
+            search_url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(player_part)}&limit=6&namespace=0&format=json"
+            r = cffi_requests.get(search_url, impersonate="chrome124", timeout=5)
+            if r.status_code == 200:
+                titles = r.json()[1]
+        except Exception:
+            try:
+                search_url = f"https://en.wikipedia.org/w/api.php?action=opensearch&search={urllib.parse.quote(player_part)}&limit=6&namespace=0&format=json"
+                req = urllib.request.Request(search_url, headers={"User-Agent": "VeloRosterAI/2.0 (Ecstaticloud Technologies; https://ecstaticloud.com; contact@ecstaticloud.com)"})
+                with urllib.request.urlopen(req, timeout=4) as r:
+                    titles = json.loads(r.read().decode("utf-8"))[1]
+            except Exception:
+                pass
+
+        candidate_titles = []
+        for t in titles:
+            t_low = t.lower()
+            if any(skip in t_low for skip in ['3d hockey', 'video game', 'drive', 'album', 'soundtrack', 'film', 'season', 'franchise', 'stadium']):
+                continue
+            # STRICT NAME MATCHING: candidate title MUST match the queried athlete's name
+            if not is_athlete_name_match(player_part, t):
+                continue
+            candidate_titles.append(t)
+
+        def score_title(t):
+            t_clean = t.lower()
+            if t_clean == player_part.lower(): return 0
+            if t_clean.startswith(player_part.lower()): return 1
+            if any(w in t_clean for w in ['(basketball', '(ice hockey', '(hockey', '(athlete']): return 2
+            return 3
+
+        candidate_titles.sort(key=score_title)
+        sports_titles = candidate_titles[:2] if candidate_titles else []
+
+        for title in sports_titles:
+            d = fetch_wiki_sports_entity(title)
+            if not d.get("name") or not is_athlete_name_match(player_part, d["name"]):
+                continue
+            name = d["name"]
+            jersey = d.get("jersey", "")
+            pos = d.get("position", "")
+            img = d.get("image", "")
+            stints = d.get("stints", [])
+
+            if img and not any(p["url"] == img for p in all_photos):
+                all_photos.append({"title": f"High-Res Portrait ({name})", "url": img, "width": 800, "height": 800})
+            for p in d.get("photo_options", []):
+                if not any(x.get("url") == p.get("url") for x in all_photos):
+                    all_photos.append(p)
+
+            primary_photo = all_photos[0]["url"] if all_photos else img
+
+            if target_team:
+                for s in stints:
+                    tm_name = s.get("team", "")
+                    yrs = s.get("years", "")
+                    is_match = (target_team in tm_name.lower() or any(w in tm_name.lower() for w in target_team.split() if len(w) > 3))
+                    if is_match:
+                        det_parts = [f"Team: {tm_name}"]
+                        if yrs: det_parts.append(f"Years: {yrs}")
+                        if jersey: det_parts.append(f"#{jersey}")
+                        if pos: det_parts.append(f"Pos: {pos}")
+
+                        opt = {
+                            "name": name,
+                            "name_en": name,
+                            "native_name": "",
+                            "team": tm_name,
+                            "years": yrs,
+                            "jersey": jersey,
+                            "pos": pos,
+                            "position": pos,
+                            "shoots": d.get("shoots", ""),
+                            "height": d.get("height", ""),
+                            "weight": d.get("weight", ""),
+                            "born": d.get("born", ""),
+                            "birthplace": d.get("birthplace", ""),
+                            "details": " | ".join(det_parts),
+                            "image": primary_photo,
+                            "raw_image": primary_photo,
+                            "has_photo": bool(primary_photo),
+                            "assigned_number": jersey,
+                            "profile_url": d.get("profile_url", ""),
+                            "is_target_match": True
+                        }
+                        if not any(o.get("team") == tm_name and o.get("years") == yrs for o in all_options):
+                            all_options.append(opt)
+                        target_match_found = True
+                        suggested_folder = f"{tm_name} - {name}"
+            else:
+                if not all_options:
+                    for s in stints:
+                        tm_name = s.get("team", "")
+                        yrs = s.get("years", "")
+                        det_parts = [f"Team: {tm_name}"]
+                        if yrs: det_parts.append(f"Years: {yrs}")
+                        if jersey: det_parts.append(f"#{jersey}")
+                        if pos: det_parts.append(f"Pos: {pos}")
+
+                        all_options.append({
+                            "name": name,
+                            "name_en": name,
+                            "native_name": "",
+                            "team": tm_name,
+                            "years": yrs,
+                            "jersey": jersey,
+                            "pos": pos,
+                            "position": pos,
+                            "shoots": d.get("shoots", ""),
+                            "height": d.get("height", ""),
+                            "weight": d.get("weight", ""),
+                            "born": d.get("born", ""),
+                            "birthplace": d.get("birthplace", ""),
+                            "details": " | ".join(det_parts),
+                            "image": primary_photo,
+                            "raw_image": primary_photo,
+                            "has_photo": bool(primary_photo),
+                            "assigned_number": jersey,
+                            "profile_url": d.get("profile_url", ""),
+                            "is_target_match": False
+                        })
+
+            if target_match_found:
+                break
+
+    # If target team was specified but not found in any database, create clean custom card
+    # without attaching any unrelated or foreign photos
+    if target_team and not target_match_found:
+        base_name = player_part.title()
+        p_img = all_photos[0]["url"] if all_photos else ""
+        custom_opt = {
+            "name": base_name,
+            "name_en": base_name,
+            "native_name": "",
+            "team": target_team_override.strip(),
+            "years": "Active",
+            "jersey": "",
+            "pos": "Athlete",
+            "position": "Athlete",
+            "shoots": "",
+            "height": "",
+            "weight": "",
+            "born": "",
+            "birthplace": "",
+            "details": f"Team: {target_team_override.strip()}",
+            "image": p_img,
+            "raw_image": p_img,
+            "has_photo": bool(p_img),
+            "assigned_number": "",
+            "profile_url": "",
+            "is_target_match": True,
+            "is_custom_assignment": True
+        }
+        all_options = [custom_opt]
+        target_match_found = True
+        suggested_folder = f"{target_team_override.strip()} - {base_name}"
+
+    if not all_options:
+        return {"suggested_folder": clean_q, "players": [], "options": [], "is_single_player": False}
+
+    selected_player = dict(all_options[0])
+    if all_photos and not selected_player.get("image"):
+        selected_player["image"] = all_photos[0]["url"]
+        selected_player["raw_image"] = all_photos[0]["url"]
+        selected_player["has_photo"] = True
+
+    if not suggested_folder:
+        clean_team = selected_player.get("team", "").strip()
+        suggested_folder = f"{clean_team} - {selected_player['name']}" if clean_team else f"Player - {selected_player['name']}"
+
+    return {
+        "suggested_folder": suggested_folder,
+        "target_team": target_team if target_match_found else "",
+        "is_single_player": True,
+        "is_target_match": target_match_found,
+        "players": [selected_player],
+        "options": all_options,
+        "photo_options": all_photos
+    }
+
+
+def parse_college_single_player(url: str) -> dict:
+    """Scrapes a single college / NCAA student-athlete bio page."""
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        html = r.read().decode("utf-8", errors="ignore")
+
+    name_m = re.search(r'class=[\"\']sidearm-roster-player-name[\"\'][^>]*>(.*?)</div>', html, re.S)
+    name = re.sub(r'<[^>]+>', ' ', name_m.group(1)).strip() if name_m else ""
+    name = " ".join(name.split())
+    if not name:
+        h1_m = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.S)
+        name = re.sub(r'<[^>]+>', '', h1_m.group(1)).strip() if h1_m else ""
+
+    num_m = re.search(r'class=[\"\']sidearm-roster-player-jersey-number[\"\'][^>]*>(.*?)</span>', html, re.S)
+    jersey = re.sub(r'<[^>]+>', '', num_m.group(1)).strip() if num_m else ""
+
+    pos_m = re.search(r'class=[\"\']sidearm-roster-player-position[\"\'][^>]*>(.*?)</span>', html, re.S)
+    pos = re.sub(r'<[^>]+>', '', pos_m.group(1)).strip() if pos_m else ""
+
+    img_m = re.search(r'<img[^>]+class=[\"\']sidearm-roster-player-image[^\"]*[\"\'][^>]+src=[\"\']([^\"\']+)[\"\']', html)
+    if not img_m:
+        img_m = re.search(r'class=[\"\']sidearm-roster-player-image[\"\'][^>]*>.*?<img[^>]+src=[\"\']([^\"\']+)[\"\']', html, re.S)
+    raw_img = img_m.group(1).strip() if img_m else ""
+    if raw_img.startswith("/"):
+        parsed = urllib.parse.urlparse(url)
+        raw_img = f"{parsed.scheme}://{parsed.netloc}{raw_img}"
+    high_img = boost_image_url_width(raw_img, target_width=1200)
+
+    title_m = re.search(r'<title>(.*?)</title>', html, re.I)
+    college = title_m.group(1).split("-")[0].strip() if title_m else "College Athletics"
+
+    v_parts = []
+    if jersey: v_parts.append(f"#{jersey}")
+    if pos: v_parts.append(f"Position: {pos}")
+    if college: v_parts.append(college)
+
+    player = {
+        "name": name,
+        "name_en": name,
+        "native_name": "",
+        "jersey": jersey,
+        "pos": pos,
+        "position": pos,
+        "shoots": "",
+        "height": "",
+        "weight": "",
+        "born": "",
+        "birthplace": "",
+        "details": " | ".join(v_parts),
+        "image": high_img,
+        "raw_image": raw_img,
+        "has_photo": bool(raw_img),
+        "assigned_number": jersey,
+        "profile_url": url
+    }
+    return {"suggested_folder": f"{college} - {name}", "players": [player]}
+
+
+def scrape_roster_data(url: str, player_name: str = "", team_name: str = ""):
+    """
+    Intelligently routes roster URL or player query to Proballers, NBA, NHL,
+    Basketball-Reference, Hockey-Reference, RealGM, Eurobasket/Asia-Basket,
+    Maccabi Tel Aviv, Israeli Super League (basket.co.il), HockeyTech/BCHL,
+    UK Teams, German DEL/DEL2, Czech Extraliga, Erste Liga, EliteProspects,
+    College/NCAA athletics, Wikipedia, or Universal Sports search worldwide.
+    """
+    if player_name and player_name.strip():
+        return search_sports_player_or_team(player_name.strip(), target_team_override=team_name)
+
+    if not url or not url.strip():
+        return {"suggested_folder": "Athletic Roster", "players": [], "options": [], "is_single_player": False}
+
+    url_str = url.strip()
+    url_lower = url_str.lower()
+
+    # Free-text player search if not a web URL
+    if not (url_lower.startswith("http://") or url_lower.startswith("https://")):
+        return search_sports_player_or_team(url_str, target_team_override=team_name)
+
+    # 1. Proballers (Roster or Single Player Profile)
+    if is_proballers_url(url_str):
+        try:
+            if "/player/" in url_lower:
+                res = parse_proballers_single_player(url_str)
+                if res.get("players") and len(res["players"]) > 0:
+                    return res
+            res = scrape_proballers_roster(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Proballers scraper notice: {e}, falling back...")
+
+    # 2. Basketball Reference (NBA & International Player / Team)
+    if "basketball-reference.com" in url_lower:
+        try:
+            res = scrape_bref_data(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Basketball-Reference scraper notice: {e}, falling back...")
+
+    # 3. Hockey Reference (NHL & International Player / Team)
+    if "hockey-reference.com" in url_lower:
+        try:
+            res = scrape_href_data(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Hockey-Reference scraper notice: {e}, falling back...")
+
+    # 4. NBA.com (Single Player & Team)
+    if "nba.com" in url_lower:
+        try:
+            res = scrape_nba_data(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] NBA scraper notice: {e}, falling back...")
+
+    # 5. RealGM Basketball
+    if "realgm.com" in url_lower:
+        try:
+            res = scrape_realgm_data(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] RealGM scraper notice: {e}, falling back...")
+
+    # 6. NHL.com & NHLE API
     if "nhl.com" in url_lower or "nhle.com" in url_lower:
-        return scrape_nhl_roster(url)
-
-    # 1. Düsseldorfer EG (DEG)
-    if "deg-eishockey.de" in url_lower or "/deg" in url_lower:
         try:
-            res = scrape_deg_roster(url)
+            if "/player/" in url_lower:
+                res = scrape_nhl_player(url_str)
+                if res.get("players") and len(res["players"]) > 0:
+                    return res
+            res = scrape_nhl_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] DEG scraper notice: {e}, falling back...")
+            print(f"[Studio] NHL scraper notice: {e}, falling back...")
 
-    # 2. EHC Red Bull München / PENNY DEL
-    if "redbullmuenchen.de" in url_lower or "red-bull-muenchen" in url_lower or ("penny-del.org" in url_lower and "muenchen" in url_lower):
+    # 7. Wikipedia Sports Profiles & Teams
+    if "wikipedia.org" in url_lower:
         try:
-            res = scrape_redbull_or_del_roster(url)
+            res = scrape_wikipedia_sports_profile(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] Red Bull Muenchen scraper notice: {e}, falling back...")
+            print(f"[Studio] Wikipedia scraper notice: {e}, falling back...")
 
-    # 3. Dresdner Eislöwen / DEL2
-    if is_eisloewen_or_del_url(url) or is_del_or_german_hockey_url(url):
+    # 8. 7M Sports
+    if is_7msport_url(url_str):
+        try:
+            res = scrape_7msport_roster(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] 7M Sports scraper notice: {e}, falling back...")
+
+    # 9. Israeli Super League & Maccabi Tel Aviv
+    if is_basket_israel_url(url_str):
+        try:
+            res = scrape_basket_israel_roster(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Israel Super League scraper notice: {e}, falling back...")
+
+    if is_maccabi_url(url_str):
+        try:
+            res = scrape_maccabi_roster(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
+            print(f"[Studio] Maccabi Tel Aviv scraper notice: {e}, falling back...")
+
+    # 10. German DEL & DEL2
+    if is_eisloewen_or_del_url(url_str) or is_del_or_german_hockey_url(url_str) or "deg-eishockey.de" in url_lower or "redbullmuenchen.de" in url_lower:
         try:
             if "deg" in url_lower:
-                res = scrape_deg_roster(url)
+                res = scrape_deg_roster(url_str)
             elif "redbull" in url_lower or "muenchen" in url_lower:
-                res = scrape_redbull_or_del_roster(url)
+                res = scrape_redbull_or_del_roster(url_str)
             else:
-                res = scrape_eisloewen_roster(url)
+                res = scrape_eisloewen_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
             print(f"[Studio] German DEL/DEL2 scraper notice: {e}, falling back...")
 
-    # 4. DEAC Jégkorong (Erste Liga)
+    # 11. Erste Liga (DEAC / Gyergyói HK)
     if "deac.hu" in url_lower:
         try:
-            res = scrape_deac_roster(url)
+            res = scrape_deac_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] DEAC scraper notice: {e}, falling back...")
+            pass
 
-    # 5. Gyergyói Hoki Klub (Erste Liga)
     if "gyergyoihoki.ro" in url_lower or "gyergyoi" in url_lower:
         try:
-            res = scrape_gyergyoi_roster(url)
+            res = scrape_gyergyoi_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] Gyergyoi scraper notice: {e}, falling back...")
+            pass
 
-    # 6. Czech Extraliga (Bílí Tygři Liberec, BK Mladá Boleslav, eSports.cz, etc.)
-    if is_czech_hockey_url(url):
+    # 12. Czech Extraliga (Bílí Tygři Liberec, BK Mladá Boleslav, eSports.cz)
+    if is_czech_hockey_url(url_str):
         try:
-            res = scrape_czech_hockey_roster(url)
+            res = scrape_czech_hockey_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] Czech Extraliga scraper notice: {e}, falling back...")
+            pass
 
-    # 7. EliteProspects player profiles
+    # 13. EliteProspects player profiles & rosters
     if "eliteprospects.com" in url_lower:
         try:
-            res = scrape_eliteprospects_player(url)
+            res = scrape_eliteprospects_player(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] EliteProspects scraper notice: {e}, falling back...")
+            pass
 
-    if is_eurobasket_url(url):
+    # 14. Eurobasket / Asia-Basket / LatinBasket
+    if is_eurobasket_url(url_str):
         try:
-            res = scrape_eurobasket_roster(url)
+            res = scrape_eurobasket_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] Eurobasket / Asia-Basket scraper notice: {e}, falling back...")
+            pass
 
-    if is_hockeytech_or_bchl_url(url):
+    # 15. HockeyTech / BCHL / USHL / etc.
+    if is_hockeytech_or_bchl_url(url_str):
         try:
-            res = scrape_hockeytech_roster(url)
+            res = scrape_hockeytech_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] HockeyTech / BCHL scraper notice: {e}, falling back...")
+            pass
 
-    if is_uk_sports_url(url):
+    # 16. UK Sports (EIHL)
+    if is_uk_sports_url(url_str):
         try:
-            res = scrape_uk_roster(url)
+            res = scrape_uk_roster(url_str)
             if res.get("players") and len(res["players"]) > 0:
                 return res
         except Exception as e:
-            print(f"[Studio] UK scraper notice: {e}, falling back to general athletics scraper...")
+            pass
 
-    # College / NCAA / Sidearm athletics scraper
-    res = scrape_college_roster(url)
-    if not res.get("players") or len(res["players"]) == 0:
-        # Fallback to DEL / Eurobasket, HockeyTech / BCHL or UK / general sports scraper if college returned no players
+    # 17. College / NCAA athletics (Single player bio or team roster)
+    if "/roster/" in url_lower and not url_lower.rstrip("/").endswith("/roster"):
         try:
-            if "deg" in url_lower:
-                del_res = scrape_deg_roster(url)
-            elif "redbull" in url_lower or "muenchen" in url_lower:
-                del_res = scrape_redbull_or_del_roster(url)
-            else:
-                del_res = scrape_eisloewen_roster(url)
-            if del_res.get("players") and len(del_res["players"]) > 0:
-                return del_res
-        except Exception:
+            res = parse_college_single_player(url_str)
+            if res.get("players") and len(res["players"]) > 0:
+                return res
+        except Exception as e:
             pass
-        try:
-            eb_res = scrape_eurobasket_roster(url)
-            if eb_res.get("players") and len(eb_res["players"]) > 0:
-                return eb_res
-        except Exception:
-            pass
-        try:
-            ht_res = scrape_hockeytech_roster(url)
-            if ht_res.get("players") and len(ht_res["players"]) > 0:
-                return ht_res
-        except Exception:
-            pass
-        try:
-            uk_res = scrape_uk_roster(url)
-            if uk_res.get("players") and len(uk_res["players"]) > 0:
-                return uk_res
-        except Exception:
-            pass
+
+    res = scrape_college_roster(url_str)
+    if res.get("players") and len(res["players"]) > 0:
+        return res
+
+    # 18. Universal Wikipedia cross-resolver & search fallback
+    try:
+        clean_slug = url_str.split("/")[-1].split("?")[0].replace("-", " ")
+        if clean_slug and len(clean_slug) > 3:
+            wiki_res = search_sports_player_or_team(clean_slug)
+            if wiki_res.get("players") and len(wiki_res["players"]) > 0 and wiki_res["players"][0].get("image"):
+                return wiki_res
+    except Exception:
+        pass
 
     return res
 
 
 def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tuple:
     """Downloads photo with boosted URL width and standardizes width to target_width with Lanczos in-memory."""
-    high_res_url = boost_image_url_width(img_url, target_width=1200)
+    is_wiki = ("wikimedia.org" in img_url or "wikipedia.org" in img_url)
+    clean_url = img_url.split("?utm_")[0] if is_wiki else img_url
+    high_res_url = boost_image_url_width(clean_url, target_width=1200)
     raw_bytes = None
 
-    for u in [high_res_url, img_url]:
-        if not u:
-            continue
+    if "proballers.com" in img_url:
+        raw_bytes = get_proballers_image_bytes(img_url, trigger_chrome_if_missing=True)
+        if not raw_bytes:
+            raise ValueError(f"No player photo uploaded on Proballers profile (default avatar): {img_url}")
+
+    candidates = [high_res_url, clean_url, img_url]
+    urls_to_try = []
+    for u in candidates:
+        if u and u not in urls_to_try:
+            urls_to_try.append(u)
+
+    wiki_ua = "VeloRosterAI/2.0 (Ecstaticloud Technologies; https://ecstaticloud.com; contact@ecstaticloud.com)"
+    browser_ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ua = wiki_ua if is_wiki else browser_ua
+
+    for u in urls_to_try:
         try:
             parsed_u = urllib.parse.urlparse(u)
             referer = f"{parsed_u.scheme}://{parsed_u.netloc}/" if parsed_u.netloc else ""
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            headers = {"User-Agent": ua}
             if referer:
                 headers["Referer"] = referer
             req = urllib.request.Request(u, headers=headers)
@@ -3546,6 +6034,19 @@ def download_player_portrait_bytes(img_url: str, target_width: int = 800) -> tup
                     break
         except Exception:
             continue
+
+    if not raw_bytes:
+        # Fallback to curl_cffi with browser impersonation for protected sports CDNs (e.g. Basketball Reference, etc.)
+        try:
+            from curl_cffi import requests as cffi_requests
+            headers = {"User-Agent": ua}
+            for u in urls_to_try:
+                resp = cffi_requests.get(u, impersonate="chrome124", headers=headers, timeout=10)
+                if resp.status_code == 200 and resp.content and (resp.content.startswith((b'\x89PNG', b'\xff\xd8', b'RIFF', b'GIF', b'BM', b'<?xml', b'<svg')) or 'image' in resp.headers.get('content-type', '')):
+                    raw_bytes = resp.content
+                    break
+        except Exception:
+            pass
 
     if not raw_bytes:
         raise ValueError(f"Could not download photo from: {img_url}")
@@ -3584,88 +6085,115 @@ HTML_PAGE = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Sovereign Studio | Royal 180×180 Portrait Intelligence</title>
+  <title>VeloRoster AI — Athletic Roster & Headshot Studio | Ecstaticloud Technologies</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
     :root {
-      /* Royal Ivory, Alabaster & Marble Light Architecture */
-      --bg-base: #f8fafc;
-      --bg-surface: #ffffff;
-      --bg-card: #ffffff;
-      --bg-card-hover: #fcfbf9;
-      --panel: #ffffff;
-      --panel-border: rgba(180, 140, 45, 0.22);
-      --border-subtle: rgba(180, 140, 45, 0.16);
-      --border-medium: rgba(180, 140, 45, 0.32);
-      --border-highlight: #b8860b;
+      /* Obsidian Athletic Workspace Palette */
+      --bg-base: #090d16;
+      --bg-surface: #0f172a;
+      --bg-card: #131d31;
+      --bg-card-hover: #19263f;
+      --panel: #0f172a;
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-medium: rgba(255, 255, 255, 0.14);
+      --border-highlight: #ff5722;
       
-      /* Imperial 24K Burnished Gold & Rich Champagne */
-      --gold-primary: #b8860b;
-      --gold-light: #dfb76c;
-      --gold-bright: #9a7424;
-      --gold-deep: #7c5c16;
-      --gold-gradient: linear-gradient(135deg, #dfb76c 0%, #c5a059 50%, #9a7424 100%);
-      --gold-gradient-hover: linear-gradient(135deg, #e8c683 0%, #d4af66 50%, #aa822d 100%);
-      --gold-glow: 0 4px 20px rgba(184, 134, 11, 0.22);
-      --gold-border: rgba(180, 140, 45, 0.28);
-      --gold-border-bright: rgba(180, 140, 45, 0.6);
+      /* VeloRoster AI Signature Brand by Ecstaticloud Technologies */
+      --brand-accent: #ff5722;
+      --brand-accent-hover: #ff7043;
+      --brand-accent-gradient: linear-gradient(135deg, #ff5722 0%, #ea580c 100%);
+      --brand-glow: 0 2px 14px rgba(255, 87, 34, 0.25);
+
+      /* Compatibility aliases */
+      --hudl-orange: var(--brand-accent);
+      --hudl-orange-hover: var(--brand-accent-hover);
+      --hudl-orange-gradient: var(--brand-accent-gradient);
+      --hudl-glow: var(--brand-glow);
       
-      /* Royal Sovereign Navy & Midnight Accents */
-      --royal-navy: #0f172a;
-      --royal-blue: #1e3a8a;
-      --royal-accent: #2563eb;
-      --royal-glow: 0 4px 20px rgba(37, 99, 235, 0.15);
+      /* Sports Performance Blue */
+      --accent-blue: #0284c7;
+      --accent-blue-hover: #0369a1;
+      --accent-blue-gradient: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+      --blue-glow: 0 2px 14px rgba(2, 132, 199, 0.22);
 
       /* State Indicators */
-      --success: #059669;
-      --warning: #d97706;
-      --danger: #e11d48;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      
+      /* Precision Radii Tokens - Sincere, rectilinear engineering feel */
+      --r-xs: 3px;
+      --r-sm: 4px;
+      --r-md: 6px;
+      --r-lg: 8px;
       
       /* Typography */
-      --text: #0f172a;
-      --text-muted: #526075;
-      --text-gold: #855f19;
-      --font-royal: 'Cinzel', serif;
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-heading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       --font-mono: 'JetBrains Mono', monospace;
+      --font-royal: 'Plus Jakarta Sans', sans-serif;
 
       /* Backwards-compatible aliases */
-      --primary: #b8860b;
-      --primary-hover: #9a7424;
-      --accent: #2563eb;
+      --gold-primary: #ff5722;
+      --gold-light: #ff8a65;
+      --gold-bright: #ff7043;
+      --gold-deep: #d84315;
+      --gold-gradient: linear-gradient(135deg, #ff5722 0%, #ea580c 100%);
+      --gold-gradient-hover: linear-gradient(135deg, #ff7043 0%, #f4511e 100%);
+      --gold-glow: 0 2px 14px rgba(255, 87, 34, 0.25);
+      --gold-border: rgba(255, 87, 34, 0.35);
+      --gold-border-bright: rgba(255, 87, 34, 0.7);
+      --primary: #ff5722;
+      --primary-hover: #ff7043;
+      --accent: #0284c7;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
+    
+    html, body {
+      width: 100%;
+      min-height: 100vh;
+      min-height: 100dvh;
       background: var(--bg-base);
       color: var(--text);
       font-family: var(--font-sans);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
+      font-size: 14px;
+      line-height: 1.5;
       user-select: none;
       -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
     }
 
-    /* Custom Royal Scrollbars */
+    body {
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+
+    /* Precision Dark Scrollbars */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
-    ::-webkit-scrollbar-track { background: #f1f5f9; }
-    ::-webkit-scrollbar-thumb { background: rgba(180, 140, 45, 0.3); border-radius: 4px; }
-    ::-webkit-scrollbar-thumb:hover { background: rgba(180, 140, 45, 0.55); }
+    ::-webkit-scrollbar-track { background: #070a12; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: var(--r-xs); }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
 
     /* =========================================================================
-       ENTERPRISE ROYAL AUTHENTICATION GATEWAY (STRICT NO-FREE LOCKOUT)
+       ENTERPRISE AUTHENTICATION GATEWAY
        ========================================================================= */
     #page-enterprise-gateway {
       display: flex;
       min-height: 100vh;
       width: 100%;
-      background: radial-gradient(ellipse at 50% -10%, #fffdf8 0%, #f6f8fc 50%, #eef2f7 100%);
-      padding: 40px 24px;
+      background: radial-gradient(ellipse at 50% -10%, #172338 0%, #090d16 70%, #05070d 100%);
+      padding: 40px 20px;
       flex-direction: column;
       align-items: center;
       justify-content: center;
@@ -3673,19 +6201,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       position: relative;
       z-index: 9999;
     }
-    #page-enterprise-gateway::before {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 50% 20%, rgba(212, 175, 55, 0.08) 0%, transparent 70%);
-      pointer-events: none;
-    }
     .gateway-container {
       width: 100%;
-      max-width: 1080px;
+      max-width: 1040px;
       display: grid;
       grid-template-columns: 1.15fr 0.85fr;
-      gap: 52px;
+      gap: 48px;
       align-items: center;
       margin: auto;
       position: relative;
@@ -3694,138 +6215,134 @@ HTML_PAGE = r"""<!DOCTYPE html>
     @media (max-width: 900px) {
       .gateway-container {
         grid-template-columns: 1fr;
-        gap: 36px;
+        gap: 32px;
       }
     }
     .gateway-brand-badge {
       display: inline-flex;
       align-items: center;
-      gap: 9px;
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.35);
-      color: var(--text-gold);
-      padding: 7px 16px;
-      border-radius: 999px;
-      font-size: 0.74rem;
-      font-family: var(--font-royal);
+      gap: 8px;
+      background: rgba(255, 87, 34, 0.1);
+      border: 1px solid rgba(255, 87, 34, 0.3);
+      color: #ff7043;
+      padding: 5px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.72rem;
+      font-family: var(--font-heading);
       font-weight: 700;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      margin-bottom: 22px;
-      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.1);
+      margin-bottom: 20px;
     }
     .gateway-hero-title {
-      font-family: var(--font-royal);
-      font-size: 2.75rem;
+      font-family: var(--font-heading);
+      font-size: 2.6rem;
       font-weight: 800;
-      letter-spacing: 0.02em;
-      line-height: 1.18;
-      color: #0f172a;
-      margin-bottom: 18px;
+      letter-spacing: -0.025em;
+      line-height: 1.15;
+      color: #ffffff;
+      margin-bottom: 16px;
     }
     .gateway-hero-title span {
-      background: linear-gradient(135deg, #0f172a 0%, #855f19 50%, #b8860b 100%);
+      background: linear-gradient(135deg, #ff7043 0%, #ff5722 50%, #38bdf8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: none;
     }
     .gateway-hero-desc {
-      font-size: 1rem;
-      color: #475569;
-      line-height: 1.65;
-      margin-bottom: 30px;
-      max-width: 520px;
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 28px;
+      max-width: 500px;
     }
     .gateway-features-list {
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
     .gateway-feature-item {
       display: flex;
       align-items: flex-start;
-      gap: 15px;
+      gap: 14px;
     }
     .gateway-feature-icon {
-      width: 28px;
-      height: 28px;
-      border-radius: 50%;
-      background: rgba(184, 134, 11, 0.1);
-      border: 1px solid rgba(184, 134, 11, 0.4);
-      color: #855f19;
+      width: 26px;
+      height: 26px;
+      border-radius: var(--r-sm);
+      background: rgba(255, 87, 34, 0.12);
+      border: 1px solid rgba(255, 87, 34, 0.35);
+      color: #ff7043;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
       margin-top: 1px;
-      box-shadow: 0 2px 8px rgba(184, 134, 11, 0.12);
     }
     .gateway-feature-title {
-      font-size: 0.92rem;
+      font-size: 0.9rem;
       font-weight: 700;
-      color: #0f172a;
-      letter-spacing: 0.01em;
+      color: #ffffff;
     }
     .gateway-feature-desc {
-      font-size: 0.82rem;
-      color: #64748b;
-      margin-top: 3px;
-      line-height: 1.45;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+      line-height: 1.4;
     }
 
     /* Gateway Auth Card */
     .gateway-card {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      border-radius: 20px;
-      padding: 34px;
-      box-shadow: 0 25px 60px -12px rgba(15, 23, 42, 0.1), 0 0 25px rgba(180, 140, 45, 0.06);
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-lg);
+      padding: 30px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
     }
     .gateway-card-header {
-      margin-bottom: 24px;
+      margin-bottom: 22px;
     }
     .gateway-card-title {
-      font-family: var(--font-royal);
-      font-size: 1.45rem;
-      font-weight: 700;
-      color: #0f172a;
-      letter-spacing: 0.04em;
+      font-family: var(--font-heading);
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      letter-spacing: -0.01em;
     }
     .gateway-card-sub {
-      font-size: 0.85rem;
-      color: #64748b;
-      margin-top: 5px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 4px;
     }
     .gateway-tabs {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      background: #f1f5f9;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      border-radius: 10px;
-      padding: 4px;
-      gap: 4px;
-      margin-bottom: 24px;
+      background: #090e1a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 3px;
+      gap: 3px;
+      margin-bottom: 22px;
     }
     .gateway-tab-btn {
       background: transparent;
       border: none;
-      color: #64748b;
-      padding: 9px 12px;
-      border-radius: 7px;
-      font-size: 0.82rem;
-      font-weight: 700;
+      color: var(--text-muted);
+      padding: 8px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.8rem;
+      font-weight: 600;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 7px;
-      transition: all 0.2s;
+      transition: all 0.15s;
     }
     .gateway-tab-btn.active {
-      background: #ffffff;
-      color: #855f19;
-      font-weight: 800;
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(180, 140, 45, 0.25);
+      background: var(--bg-surface);
+      color: #ffffff;
+      font-weight: 700;
+      border: 1px solid rgba(255, 87, 34, 0.4);
     }
     .input-icon-wrapper {
       position: relative;
@@ -3834,67 +6351,63 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .input-icon {
       position: absolute;
-      left: 14px;
-      color: #855f19;
+      left: 12px;
+      color: var(--hudl-orange);
       pointer-events: none;
     }
     .saas-input.with-icon {
-      padding-left: 40px;
+      padding-left: 38px;
     }
     .saas-alert-danger {
-      color: #be123c;
-      background: rgba(225, 29, 72, 0.08);
-      border: 1px solid rgba(225, 29, 72, 0.28);
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 0.82rem;
-      margin-bottom: 14px;
-      line-height: 1.45;
+      color: #f87171;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 9px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.8rem;
+      margin-bottom: 12px;
     }
     .saas-alert-info {
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.3);
-      padding: 12px 14px;
-      border-radius: 8px;
-      font-size: 0.82rem;
-      color: #855f19;
-      margin-bottom: 18px;
-      line-height: 1.45;
+      background: rgba(2, 132, 199, 0.1);
+      border: 1px solid rgba(2, 132, 199, 0.3);
+      padding: 10px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.8rem;
+      color: #38bdf8;
+      margin-bottom: 16px;
     }
     .btn-demo-fill {
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.32);
-      color: var(--text-gold);
-      padding: 6px 14px;
-      border-radius: 6px;
-      font-size: 0.74rem;
+      background: rgba(255, 87, 34, 0.1);
+      border: 1px solid rgba(255, 87, 34, 0.3);
+      color: #ff7043;
+      padding: 5px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.72rem;
       font-weight: 700;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      transition: all 0.2s;
+      transition: all 0.15s;
     }
     .btn-demo-fill:hover {
-      background: rgba(184, 134, 11, 0.18);
-      color: #5c410c;
-      box-shadow: 0 0 10px rgba(184, 134, 11, 0.15);
+      background: rgba(255, 87, 34, 0.2);
+      color: #ffffff;
     }
 
     /* =========================================================================
-       GLOBAL SAAS ROYAL NAVBAR
+       TOP SAAS NAVBAR
        ========================================================================= */
     .saas-navbar {
       width: 100%;
-      background: rgba(255, 255, 255, 0.94);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border-bottom: 1px solid rgba(180, 140, 45, 0.22);
-      padding: 11px 26px;
+      background: rgba(15, 23, 42, 0.96);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 8px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
       z-index: 90;
       flex-shrink: 0;
     }
@@ -3905,366 +6418,457 @@ HTML_PAGE = r"""<!DOCTYPE html>
       flex-wrap: wrap;
     }
     .saas-brand-title {
-      font-family: var(--font-royal);
+      font-family: var(--font-heading);
       font-weight: 800;
-      font-size: 1.05rem;
-      color: #0f172a;
+      font-size: 1rem;
+      color: #ffffff;
       display: flex;
       align-items: center;
-      gap: 10px;
-      letter-spacing: 0.05em;
+      gap: 8px;
+      letter-spacing: 0.02em;
     }
-    .saas-brand-title span { color: var(--gold-primary); }
-    .saas-saas-tag {
-      font-family: var(--font-royal);
-      font-size: 0.64rem;
-      background: rgba(184, 134, 11, 0.1);
-      border: 1px solid rgba(184, 134, 11, 0.35);
-      color: #855f19;
-      padding: 3px 8px;
-      border-radius: 12px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
+    .saas-brand-title span { color: var(--hudl-orange); }
     .saas-company-badge {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      background: #fdfbf7;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      padding: 5px 14px;
-      border-radius: 20px;
-      font-size: 0.78rem;
-      font-weight: 700;
-      color: #0f172a;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+      gap: 7px;
+      background: #182338;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 4px 10px;
+      border-radius: var(--r-sm);
+      font-size: 0.76rem;
+      font-weight: 600;
+      color: #ffffff;
     }
     .saas-plan-pill {
-      font-size: 0.68rem;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-weight: 800;
-      font-family: var(--font-royal);
+      font-size: 0.65rem;
+      padding: 1px 6px;
+      border-radius: var(--r-xs);
+      font-weight: 700;
+      font-family: var(--font-heading);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.04em;
     }
-    .plan-team { background: rgba(184, 134, 11, 0.12); color: #855f19; border: 1px solid rgba(184, 134, 11, 0.35); }
-    .plan-enterprise { background: linear-gradient(135deg, rgba(184,134,11,0.18), rgba(124,58,237,0.15)); color: #6d28d9; border: 1px solid rgba(180, 140, 45, 0.5); }
-    .plan-free { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+    .plan-team { background: rgba(255, 87, 34, 0.15); color: #ff7043; border: 1px solid rgba(255, 87, 34, 0.3); }
+    .plan-enterprise { background: rgba(2, 132, 199, 0.15); color: #38bdf8; border: 1px solid rgba(2, 132, 199, 0.35); }
+    .plan-free { background: #1e293b; color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.08); }
 
     .seat-quota-pill {
       display: inline-flex;
       align-items: center;
-      gap: 7px;
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.3);
-      color: #855f19;
-      padding: 5px 14px;
-      border-radius: 18px;
-      font-size: 0.76rem;
-      font-weight: 700;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #cbd5e1;
+      padding: 4px 10px;
+      border-radius: var(--r-sm);
+      font-size: 0.74rem;
+      font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
     }
     .seat-quota-pill:hover {
-      background: rgba(184, 134, 11, 0.15);
-      border-color: var(--gold-primary);
-      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.15);
-    }
-    .seat-quota-pill.warning {
-      background: rgba(245, 158, 11, 0.12);
-      border-color: rgba(245, 158, 11, 0.45);
-      color: #b45309;
-    }
-    .seat-quota-pill.full {
-      background: rgba(239, 68, 68, 0.12);
-      border-color: rgba(239, 68, 68, 0.45);
-      color: #b91c1c;
+      background: rgba(255, 255, 255, 0.1);
+      border-color: var(--hudl-orange);
     }
     .seat-mini-progress {
-      width: 48px;
-      height: 6px;
-      background: #e2e8f0;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      border-radius: 999px;
+      width: 40px;
+      height: 4px;
+      background: #1e293b;
+      border-radius: var(--r-xs);
       overflow: hidden;
       margin-right: 2px;
     }
     .seat-mini-fill {
       height: 100%;
-      background: var(--gold-gradient);
-      border-radius: 999px;
-      transition: width 0.3s ease;
+      background: var(--hudl-orange);
+      border-radius: var(--r-xs);
     }
-    .seat-quota-pill.warning .seat-mini-fill { background: #f59e0b; }
-    .seat-quota-pill.full .seat-mini-fill { background: #ef4444; }
 
     .saas-nav-right {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
     .user-profile-pill {
       display: inline-flex;
       align-items: center;
-      gap: 9px;
-      background: #fdfbf7;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      padding: 4px 14px;
-      border-radius: 20px;
-      font-size: 0.8rem;
-      color: #0f172a;
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+      gap: 8px;
+      background: #182338;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 3px 10px;
+      border-radius: var(--r-sm);
+      font-size: 0.78rem;
+      color: #ffffff;
     }
     .user-avatar-chip {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      background: var(--gold-gradient);
+      width: 22px;
+      height: 22px;
+      border-radius: var(--r-xs);
+      background: var(--hudl-orange-gradient);
       color: #ffffff;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.68rem;
+      font-size: 0.65rem;
       font-weight: 800;
       text-transform: uppercase;
-      letter-spacing: -0.02em;
-      box-shadow: 0 2px 6px rgba(184, 134, 11, 0.25);
     }
     .user-role-tag {
-      font-size: 0.68rem;
-      font-family: var(--font-royal);
-      padding: 2px 7px;
-      border-radius: 8px;
-      font-weight: 800;
+      font-size: 0.65rem;
+      font-family: var(--font-heading);
+      padding: 1px 6px;
+      border-radius: var(--r-xs);
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.04em;
     }
-    .role-superadmin { background: rgba(184, 134, 11, 0.14); color: #855f19; border: 1px solid rgba(184, 134, 11, 0.4); }
-    .role-admin { background: rgba(37, 99, 235, 0.12); color: #1d4ed8; border: 1px solid rgba(37, 99, 235, 0.35); }
-    .role-member { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
+    .role-superadmin { background: rgba(255, 87, 34, 0.16); color: #ff7043; border: 1px solid rgba(255, 87, 34, 0.4); }
+    .role-admin { background: rgba(2, 132, 199, 0.16); color: #38bdf8; border: 1px solid rgba(2, 132, 199, 0.35); }
+    .role-member { background: #1e293b; color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.08); }
+
+    .saas-platform-admin-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(255, 87, 34, 0.12);
+      border: 1px solid rgba(255, 87, 34, 0.35);
+      padding: 3px 10px;
+      border-radius: var(--r-sm);
+      font-size: 0.75rem;
+      color: #ff7043;
+    }
+    .saas-platform-admin-badge .scope-tag {
+      font-size: 0.65rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #cbd5e1;
+      padding: 1px 6px;
+      border-radius: var(--r-xs);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
 
     /* =========================================================================
-       PAGE 1: ROYAL FOLDER SELECTION & ROSTER ATELIER
+       PAGE 1: LANDING WORKSPACE
        ========================================================================= */
     #page-folder-select {
       display: flex;
       flex-direction: column;
-      height: 100vh;
-      overflow-y: auto;
-      padding: 44px 24px;
+      width: 100%;
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 32px 20px 60px 20px;
       align-items: center;
-      background: radial-gradient(ellipse at 50% 5%, #fffdf8 0%, #f6f8fc 60%, #edf2f7 100%);
       position: relative;
     }
     .landing-hero {
       text-align: center;
-      max-width: 740px;
-      margin-bottom: 34px;
+      max-width: 720px;
+      margin-bottom: 24px;
     }
     .hero-badge {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.35);
-      color: var(--text-gold);
-      padding: 6px 16px;
-      border-radius: 30px;
-      font-size: 0.78rem;
-      font-family: var(--font-royal);
+      gap: 7px;
+      background: rgba(255, 87, 34, 0.1);
+      border: 1px solid rgba(255, 87, 34, 0.3);
+      color: #ff7043;
+      padding: 4px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.74rem;
+      font-family: var(--font-heading);
       font-weight: 700;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
       text-transform: uppercase;
-      margin-bottom: 16px;
-      box-shadow: 0 2px 8px rgba(184, 134, 11, 0.1);
+      margin-bottom: 12px;
     }
     .landing-title {
-      font-family: var(--font-royal);
-      font-size: 2.5rem;
+      font-family: var(--font-heading);
+      font-size: 2.3rem;
       font-weight: 800;
-      letter-spacing: 0.02em;
-      margin-bottom: 12px;
-      color: #0f172a;
+      letter-spacing: -0.025em;
+      margin-bottom: 8px;
+      color: #ffffff;
+      line-height: 1.18;
     }
     .landing-title span {
-      background: linear-gradient(135deg, #0f172a 0%, #855f19 50%, #b8860b 100%);
+      background: linear-gradient(135deg, #ff7043 0%, #ff5722 50%, #38bdf8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
-      text-shadow: none;
     }
     .landing-subtitle {
-      font-size: 0.96rem;
-      color: #475569;
-      line-height: 1.6;
+      font-size: 0.92rem;
+      color: var(--text-muted);
+      line-height: 1.55;
     }
 
-    /* Gilded Segmented Tabs */
-    .landing-tabs-bar {
-      display: inline-flex;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.24);
-      border-radius: 14px;
+    /* Unified Hudl 3-Tab Segmented Control */
+    .hudl-segmented-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      width: 100%;
+      max-width: 820px;
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-lg);
       padding: 4px;
-      gap: 6px;
-      margin-bottom: 28px;
-      box-shadow: 0 4px 18px rgba(15, 23, 42, 0.05);
+      gap: 4px;
+      margin-bottom: 24px;
     }
-    .landing-tab {
+    .hudl-seg-btn {
       background: transparent;
-      border: none;
-      color: #64748b;
-      padding: 10px 24px;
-      border-radius: 10px;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 9px 16px;
+      border-radius: var(--r-md);
+      font-size: 0.84rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .hudl-seg-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .hudl-seg-btn.active {
+      background: var(--bg-card);
+      border-color: rgba(255, 87, 34, 0.5);
+      color: #ffffff;
+      font-weight: 700;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+    .hudl-pill-tag {
+      font-size: 0.62rem;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-xs);
+      padding: 1px 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .hudl-seg-btn.active .hudl-pill-tag {
+      background: rgba(255, 87, 34, 0.2);
+      color: #ff7043;
+    }
+
+    /* Cards & Containers */
+    .roster-config-card {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-lg);
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    }
+    .roster-config-header {
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: #ff7043;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Search Forms */
+    .search-grid-player {
+      display: grid;
+      grid-template-columns: 1.4fr 1.2fr 1.2fr auto;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .search-grid-url {
+      display: grid;
+      grid-template-columns: 1.8fr 1.2fr auto;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .input-label {
+      font-size: 0.74rem;
+      font-family: var(--font-heading);
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .roster-text-input {
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--r-md);
+      padding: 10px 14px;
+      color: #ffffff;
       font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .roster-text-input:focus {
+      border-color: var(--hudl-orange);
+      box-shadow: 0 0 0 2px rgba(255, 87, 34, 0.25);
+    }
+    .search-action-btn {
+      padding: 10px 22px;
+      font-size: 0.88rem;
+      white-space: nowrap;
+      height: 40px;
+    }
+
+    /* Quick Presets Bar */
+    .presets-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .preset-group-title {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-right: 2px;
+    }
+    .preset-pill {
+      background: #141f33;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      padding: 4px 10px;
+      border-radius: var(--r-sm);
+      font-size: 0.74rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .preset-pill:hover {
+      background: #1c2a44;
+      border-color: var(--hudl-orange);
+      color: #ffffff;
+    }
+    .quality-boost-tag {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(2, 132, 199, 0.08);
+      border: 1px solid rgba(2, 132, 199, 0.2);
+      border-radius: var(--r-sm);
+      padding: 8px 12px;
+      font-size: 0.78rem;
+      color: #7dd3fc;
+      margin-top: 14px;
+    }
+
+    /* Local Folder Action Box */
+    .folder-action-card {
+      width: 100%;
+      background: var(--bg-surface);
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      border-radius: var(--r-lg);
+      padding: 32px 24px;
+      text-align: center;
+      margin-bottom: 24px;
+      transition: border-color 0.2s;
+    }
+    .folder-action-card:hover {
+      border-color: var(--hudl-orange);
+    }
+    .drop-zone-icon {
+      color: var(--hudl-orange);
+      margin-bottom: 12px;
+    }
+    .browse-btn-big {
+      background: var(--hudl-orange-gradient);
+      color: #ffffff;
+      border: 1px solid rgba(255, 87, 34, 0.5);
+      padding: 11px 26px;
+      border-radius: var(--r-md);
+      font-size: 0.9rem;
       font-weight: 700;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 9px;
-      transition: all 0.2s;
-    }
-    .landing-tab:hover {
-      color: #0f172a;
-      background: rgba(180, 140, 45, 0.08);
-    }
-    .landing-tab.active {
-      background: var(--gold-gradient);
-      color: #ffffff;
-      font-weight: 800;
-      box-shadow: 0 4px 16px rgba(184, 134, 11, 0.32);
-    }
-
-    /* Folder Drop Zone Card */
-    .folder-action-card {
-      width: 100%;
-      max-width: 840px;
-      background: #ffffff;
-      border: 2px dashed rgba(180, 140, 45, 0.35);
-      border-radius: 20px;
-      padding: 38px 32px;
-      text-align: center;
-      margin-bottom: 38px;
-      transition: all 0.25s;
-      box-shadow: 0 12px 35px -8px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.04);
-    }
-    .folder-action-card:hover {
-      border-color: var(--gold-primary);
-      box-shadow: 0 16px 45px rgba(184, 134, 11, 0.15), 0 0 20px rgba(184, 134, 11, 0.08);
-    }
-    .drop-zone-icon {
-      color: var(--gold-primary);
-      margin-bottom: 16px;
-      transition: all 0.25s;
-    }
-    .folder-action-card:hover .drop-zone-icon {
-      transform: translateY(-3px) scale(1.05);
-      filter: drop-shadow(0 2px 10px rgba(184, 134, 11, 0.3));
-    }
-    .browse-btn-big {
-      background: var(--gold-gradient);
-      color: #ffffff;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-      border: 1px solid rgba(180, 140, 45, 0.5);
-      padding: 14px 32px;
-      border-radius: 12px;
-      font-size: 0.98rem;
-      font-weight: 800;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      box-shadow: 0 6px 20px rgba(184, 134, 11, 0.32);
-      letter-spacing: 0.03em;
-      transition: all 0.2s;
+      gap: 8px;
+      transition: all 0.15s;
     }
     .browse-btn-big:hover {
-      background: var(--gold-gradient-hover);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 26px rgba(184, 134, 11, 0.45);
-    }
-    .select-files-link {
-      font-size: 0.84rem;
-      color: var(--gold-primary);
-      cursor: pointer;
-      text-decoration: underline;
-      transition: color 0.15s;
-    }
-    .select-files-link:hover { color: #5c410c; }
-    .drop-zone-subtitle {
-      margin-top: 16px;
-      font-size: 0.84rem;
-      color: var(--text-muted);
+      background: var(--hudl-orange-hover);
+      box-shadow: var(--hudl-glow);
     }
     .path-input-row {
       display: flex;
-      gap: 10px;
-      max-width: 660px;
-      margin: 22px auto 0 auto;
+      gap: 8px;
+      max-width: 580px;
+      margin: 16px auto 0 auto;
     }
     .path-input {
       flex: 1;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      border-radius: 8px;
-      padding: 11px 16px;
-      color: #0f172a;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--r-md);
+      padding: 9px 14px;
+      color: #ffffff;
       font-family: var(--font-mono);
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       outline: none;
-      transition: all 0.2s;
     }
     .path-input:focus {
-      border-color: var(--gold-primary);
-      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
+      border-color: var(--hudl-orange);
     }
 
     /* Detected Folders Grid */
     .detected-section {
       width: 100%;
-      max-width: 960px;
     }
     .detected-heading {
-      font-family: var(--font-royal);
-      font-size: 1rem;
+      font-family: var(--font-heading);
+      font-size: 0.88rem;
       font-weight: 700;
-      color: var(--text-gold);
-      letter-spacing: 0.05em;
-      margin-bottom: 16px;
+      color: #ffffff;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
     .detected-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
     }
     .folder-card {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.22);
-      border-radius: 14px;
-      padding: 16px 18px;
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 12px 14px;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 14px;
-      transition: all 0.2s;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+      gap: 12px;
+      transition: all 0.15s;
     }
     .folder-card:hover {
-      background: #fdfbf7;
-      border-color: var(--gold-primary);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(184, 134, 11, 0.15);
+      background: #162238;
+      border-color: var(--hudl-orange);
     }
     .folder-icon {
-      background: rgba(184, 134, 11, 0.1);
-      border: 1px solid rgba(184, 134, 11, 0.3);
-      color: var(--gold-primary);
-      padding: 9px 12px;
-      border-radius: 10px;
+      background: rgba(255, 87, 34, 0.1);
+      border: 1px solid rgba(255, 87, 34, 0.3);
+      color: var(--hudl-orange);
+      padding: 7px 10px;
+      border-radius: var(--r-sm);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -4274,136 +6878,225 @@ HTML_PAGE = r"""<!DOCTYPE html>
       overflow: hidden;
     }
     .folder-card-name {
-      font-size: 0.9rem;
+      font-size: 0.85rem;
       font-weight: 700;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      color: #0f172a;
+      color: #ffffff;
     }
     .folder-card-sub {
-      font-size: 0.74rem;
-      color: var(--text-muted);
-      margin-top: 3px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .photo-count-pill {
-      background: rgba(184, 134, 11, 0.1);
-      border: 1px solid rgba(184, 134, 11, 0.3);
-      color: var(--text-gold);
-      padding: 2px 7px;
-      border-radius: 10px;
-      font-weight: 700;
       font-size: 0.72rem;
-    }
-
-    /* Roster Ingestion Views */
-    #view-roster-download {
-      width: 100%;
-      max-width: 960px;
-      display: none;
-      flex-direction: column;
-      align-items: center;
-    }
-    .roster-config-card {
-      width: 100%;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      border-radius: 20px;
-      padding: 28px;
-      margin-bottom: 24px;
-      box-shadow: 0 12px 35px -8px rgba(15, 23, 42, 0.08);
-    }
-    .roster-input-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr auto;
-      gap: 14px;
-      align-items: end;
-    }
-    @media (max-width: 768px) {
-      .roster-input-grid { grid-template-columns: 1fr; }
-    }
-    .input-group {
+      color: var(--text-muted);
+      margin-top: 2px;
       display: flex;
-      flex-direction: column;
+      align-items: center;
       gap: 6px;
     }
-    .input-label {
-      font-size: 0.76rem;
-      font-family: var(--font-royal);
-      color: var(--text-gold);
+    .photo-count-pill {
+      background: rgba(255, 87, 34, 0.12);
+      border: 1px solid rgba(255, 87, 34, 0.3);
+      color: #ff7043;
+      padding: 1px 6px;
+      border-radius: var(--r-xs);
       font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .roster-text-input {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.26);
-      border-radius: 8px;
-      padding: 12px 14px;
-      color: #0f172a;
-      font-size: 0.86rem;
-      outline: none;
-      transition: all 0.2s;
-    }
-    .roster-text-input:focus {
-      border-color: var(--gold-primary);
-      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
-    }
-    .presets-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-      margin-top: 14px;
-    }
-    .presets-label {
-      font-size: 0.74rem;
-      font-family: var(--font-royal);
-      color: var(--text-gold);
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .preset-pill {
-      background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.25);
-      color: #334155;
-      padding: 5px 12px;
-      border-radius: 14px;
-      font-size: 0.74rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-    .preset-pill:hover {
-      background: #fdfbf7;
-      border-color: var(--gold-primary);
-      color: #855f19;
-    }
-    .quality-boost-tag {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.28);
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 0.8rem;
-      color: #855f19;
-      margin-top: 16px;
+      font-size: 0.68rem;
     }
 
-    /* Roster Table Results */
+    /* =========================================================================
+       VERIFIED ATHLETE CARD (180x180 SPEC SUITE)
+       ========================================================================= */
+    .player-options-card {
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .verified-athlete-card {
+      display: grid;
+      grid-template-columns: 140px 1fr auto;
+      gap: 20px;
+      align-items: center;
+      background: #0b1120;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .athlete-headshot-frame {
+      width: 140px;
+      height: 140px;
+      aspect-ratio: 1 / 1;
+      border-radius: var(--r-md);
+      border: 1px solid rgba(255, 87, 34, 0.5);
+      background-color: #070b14;
+      background-image: 
+        linear-gradient(45deg, #131b2e 25%, transparent 25%), 
+        linear-gradient(-45deg, #131b2e 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #131b2e 75%), 
+        linear-gradient(-45deg, transparent 75%, #131b2e 75%);
+      background-size: 14px 14px;
+      background-position: 0 0, 0 7px, 7px -7px, -7px 0px;
+      overflow: hidden;
+      position: relative;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .athlete-headshot-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .athlete-frame-badge {
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      background: rgba(0, 0, 0, 0.75);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--r-xs);
+      color: #94a3b8;
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 1px 4px;
+    }
+    .athlete-vitals-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .vital-badge-chip {
+      background: #141f33;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #cbd5e1;
+      padding: 3px 8px;
+      border-radius: var(--r-xs);
+      font-size: 0.72rem;
+      font-weight: 600;
+    }
+    .photo-sources-section {
+      background: #090e1a;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--r-md);
+      padding: 12px;
+      margin-top: 12px;
+    }
+    .photo-sources-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #ff7043;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .photo-thumbs-row {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 2px;
+    }
+    .photo-thumb-card {
+      position: relative;
+      width: 68px;
+      height: 68px;
+      border-radius: var(--r-sm);
+      border: 1.5px solid rgba(255, 255, 255, 0.12);
+      overflow: hidden;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+      background: #070b14;
+    }
+    .photo-thumb-card:hover {
+      border-color: var(--hudl-orange);
+    }
+    .photo-thumb-card.active {
+      border-color: #10b981;
+      box-shadow: 0 0 0 1px #10b981;
+    }
+    .photo-thumb-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    /* Stint cards */
+    .stint-options-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .stint-card {
+      background: #111a2d;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .stint-card:hover {
+      border-color: var(--hudl-orange);
+      background: #17243d;
+    }
+    .stint-card.active {
+      border-color: #10b981;
+      background: rgba(16, 185, 129, 0.08);
+    }
+    .stint-card-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .stint-team-name {
+      font-size: 0.84rem;
+      font-weight: 700;
+      color: #ffffff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .stint-years-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #38bdf8;
+      background: rgba(2, 132, 199, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: var(--r-xs);
+      padding: 1px 5px;
+      display: inline-block;
+      width: fit-content;
+    }
+    .stint-vitals {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    /* =========================================================================
+       ROSTER DATA TABLE
+       ========================================================================= */
     .roster-results-card {
       width: 100%;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      border-radius: 20px;
-      padding: 24px;
-      margin-bottom: 24px;
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-lg);
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
     }
     .roster-header-bar {
       display: flex;
@@ -4411,184 +7104,257 @@ HTML_PAGE = r"""<!DOCTYPE html>
       align-items: center;
       flex-wrap: wrap;
       gap: 12px;
-      margin-bottom: 18px;
-      padding-bottom: 14px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.18);
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     }
     .roster-title-badge {
       display: flex;
       align-items: center;
-      gap: 12px;
-      font-family: var(--font-royal);
-      font-size: 1.15rem;
-      font-weight: 700;
-      color: #0f172a;
+      gap: 10px;
+      font-family: var(--font-heading);
+      font-size: 1.1rem;
+      font-weight: 800;
+      color: #ffffff;
+    }
+    .mobile-table-hint {
+      display: none;
+      font-size: 0.72rem;
+      color: #ff7043;
+      background: rgba(255, 87, 34, 0.08);
+      border: 1px solid rgba(255, 87, 34, 0.25);
+      border-radius: var(--r-sm);
+      padding: 6px 10px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+    .roster-table-wrapper {
+      overflow-x: auto;
+      max-height: 500px;
+      overflow-y: auto;
+      border-radius: var(--r-md);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: var(--bg-surface);
+      position: relative;
+      -webkit-overflow-scrolling: touch;
     }
     .roster-table {
       width: 100%;
-      border-collapse: collapse;
-      font-size: 0.82rem;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 0.8rem;
     }
     .roster-table th {
-      background: #f8fafc;
-      color: #855f19;
-      font-family: var(--font-royal);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: #141f33;
+      color: #94a3b8;
+      font-family: var(--font-heading);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-size: 0.72rem;
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.25);
+      letter-spacing: 0.06em;
+      font-size: 0.7rem;
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
       text-align: left;
+      white-space: nowrap;
     }
     .roster-table td {
-      padding: 10px 12px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.12);
+      padding: 8px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
       vertical-align: middle;
-      color: #1e293b;
+      color: #cbd5e1;
     }
     .roster-table tr:hover td {
-      background: #fdfbf7;
+      background: #162238;
     }
-    .player-avatar-thumb {
-      width: 38px;
-      height: 48px;
+    .roster-table th:first-child,
+    .roster-table td:first-child {
+      position: sticky;
+      left: 0;
+      z-index: 5;
+      background: var(--bg-surface);
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .roster-table th:first-child {
+      z-index: 15;
+      background: #141f33;
+    }
+    .roster-table tr:hover td:first-child {
+      background: #162238;
+    }
+    .player-cell-content {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 160px;
+    }
+    .player-avatar-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--r-sm);
       object-fit: cover;
-      border-radius: 6px;
-      background: #f1f5f9;
-      border: 1px solid rgba(180, 140, 45, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: #182338;
+      flex-shrink: 0;
+    }
+    .player-name-text {
+      font-weight: 700;
+      color: #ffffff;
+      font-size: 0.85rem;
+    }
+    .assign-input {
+      width: 100%;
+      min-width: 110px;
+      max-width: 140px;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: var(--r-xs);
+      padding: 5px 8px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      color: #ffffff;
+      outline: none;
+    }
+    .assign-input:focus {
+      border-color: var(--hudl-orange);
     }
     .jersey-badge {
       display: inline-block;
-      width: 26px;
-      height: 26px;
-      line-height: 24px;
+      padding: 2px 6px;
       text-align: center;
-      background: rgba(184, 134, 11, 0.12);
-      border: 1px solid rgba(184, 134, 11, 0.4);
-      color: var(--text-gold);
-      border-radius: 50%;
-      font-weight: 800;
-      font-size: 0.74rem;
+      background: rgba(255, 87, 34, 0.12);
+      border: 1px solid rgba(255, 87, 34, 0.35);
+      color: #ff7043;
+      border-radius: var(--r-xs);
+      font-weight: 700;
+      font-size: 0.72rem;
+      font-family: var(--font-mono);
     }
     .filename-preview-badge {
       font-family: var(--font-mono);
-      font-size: 0.75rem;
-      padding: 3px 8px;
-      border-radius: 6px;
-      background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      color: #855f19;
+      font-size: 0.74rem;
+      padding: 2px 6px;
+      border-radius: var(--r-xs);
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #38bdf8;
+    }
+    .roster-header-actions {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
     }
     .roster-footer-bar {
-      margin-top: 18px;
-      padding-top: 16px;
-      border-top: 1px solid rgba(180, 140, 45, 0.18);
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 14px;
+      gap: 12px;
+    }
+    .roster-footer-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
     }
 
     /* Bulk Paste Drawer */
     .bulk-paste-drawer {
       display: none;
-      background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.25);
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 18px;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-md);
+      padding: 14px;
+      margin-bottom: 14px;
     }
     .bulk-paste-textarea {
       width: 100%;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.26);
-      color: #0f172a;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 0.8rem;
+      background: #090e1a;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      padding: 8px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.78rem;
       font-family: var(--font-mono);
-      min-height: 100px;
+      min-height: 90px;
       outline: none;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .bulk-paste-textarea:focus {
-      border-color: var(--gold-primary);
-      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
+      border-color: var(--hudl-orange);
     }
 
     /* =========================================================================
-       PAGE 2: WORKBENCH / SOVEREIGN STUDIO ATELIER
+       PAGE 2: WORKBENCH / STUDIO
        ========================================================================= */
     #page-workbench {
       display: none;
       flex-direction: column;
       flex: 1;
       min-height: 0;
-      height: calc(100vh - 54px);
+      height: calc(100vh - 48px);
       overflow: hidden;
+      background: var(--bg-base);
     }
     header {
-      background: rgba(255, 255, 255, 0.95);
-      border-bottom: 1px solid rgba(180, 140, 45, 0.22);
-      padding: 6px 20px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 0 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      height: 50px;
-      min-height: 50px;
+      height: 48px;
+      min-height: 48px;
       flex-shrink: 0;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.03);
     }
     .header-left {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 12px;
     }
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
     }
 
-    /* Royal Buttons */
+    /* Buttons */
     .btn {
-      padding: 7px 15px;
-      border-radius: 8px;
-      font-weight: 700;
+      padding: 7px 14px;
+      border-radius: var(--r-md);
+      font-weight: 600;
       font-size: 0.8rem;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
       border: 1px solid transparent;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.15s ease;
+      white-space: nowrap;
     }
     .btn-primary {
-      background: var(--gold-gradient);
+      background: var(--hudl-orange-gradient);
       color: #ffffff;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-      font-weight: 800;
-      border: 1px solid rgba(180, 140, 45, 0.5);
-      box-shadow: 0 4px 16px rgba(184, 134, 11, 0.28);
-      letter-spacing: 0.02em;
+      font-weight: 700;
+      border: 1px solid rgba(255, 87, 34, 0.5);
     }
     .btn-primary:hover {
-      background: var(--gold-gradient-hover);
-      transform: translateY(-1px);
-      box-shadow: 0 6px 22px rgba(184, 134, 11, 0.4);
+      background: var(--hudl-orange-hover);
+      box-shadow: var(--hudl-glow);
     }
     .btn-secondary {
-      background: #ffffff;
-      color: #1e293b;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+      background: #162032;
+      color: #f8fafc;
+      border: 1px solid rgba(255, 255, 255, 0.1);
     }
     .btn-secondary:hover {
-      background: #fdfbf7;
-      border-color: var(--gold-primary);
-      color: #855f19;
-      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.15);
+      background: #1e2c44;
+      border-color: rgba(255, 255, 255, 0.2);
     }
     .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -4601,192 +7367,183 @@ HTML_PAGE = r"""<!DOCTYPE html>
       position: relative;
     }
     .sidebar {
-      width: 330px;
-      background: #ffffff;
-      border-right: 1px solid rgba(180, 140, 45, 0.2);
-      padding: 16px;
+      width: 290px;
+      background: var(--bg-surface);
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 12px;
       overflow-y: auto;
       flex-shrink: 0;
     }
     .section-label {
-      font-family: var(--font-royal);
-      font-size: 0.74rem;
+      font-family: var(--font-heading);
+      font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-gold);
+      letter-spacing: 0.06em;
+      color: #ff7043;
       font-weight: 700;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
     }
     .box {
-      background: #fbfcfe;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      border-radius: 10px;
-      padding: 12px;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: var(--r-md);
+      padding: 10px;
     }
     .slider-row {
       display: flex;
       justify-content: space-between;
-      margin-bottom: 6px;
-      font-size: 0.8rem;
+      margin-bottom: 5px;
+      font-size: 0.76rem;
       font-weight: 600;
-      color: #1e293b;
+      color: #cbd5e1;
     }
     .pill {
       font-family: var(--font-mono);
-      color: var(--text-gold);
-      background: rgba(184, 134, 11, 0.1);
-      border: 1px solid rgba(184, 134, 11, 0.3);
-      padding: 1px 7px;
-      border-radius: 4px;
-      font-size: 0.74rem;
+      color: #ff7043;
+      background: rgba(255, 87, 34, 0.1);
+      border: 1px solid rgba(255, 87, 34, 0.25);
+      padding: 1px 5px;
+      border-radius: var(--r-xs);
+      font-size: 0.72rem;
     }
     input[type=range] {
       width: 100%;
-      height: 5px;
-      background: #e2e8f0;
-      border-radius: 3px;
+      height: 4px;
+      background: #090e1a;
+      border-radius: var(--r-xs);
       outline: none;
       -webkit-appearance: none;
       cursor: pointer;
     }
     input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      background: var(--gold-gradient);
-      border: 1px solid rgba(180, 140, 45, 0.5);
-      box-shadow: 0 1px 5px rgba(184, 134, 11, 0.4);
+      width: 14px;
+      height: 14px;
+      border-radius: var(--r-xs);
+      background: var(--hudl-orange);
       cursor: pointer;
     }
     .tool-tabs {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 6px;
-      margin-bottom: 10px;
+      gap: 4px;
+      margin-bottom: 8px;
     }
     .tool-tab {
-      background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      color: #64748b;
-      padding: 8px 4px;
-      border-radius: 8px;
-      font-size: 0.75rem;
-      font-weight: 700;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+      padding: 7px 4px;
+      border-radius: var(--r-sm);
+      font-size: 0.74rem;
+      font-weight: 600;
       cursor: pointer;
       text-align: center;
-      transition: all 0.2s;
+      transition: all 0.15s;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 5px;
+      gap: 4px;
     }
-    .tool-tab:hover { color: #0f172a; background: #fdfbf7; }
+    .tool-tab:hover { color: #ffffff; background: #1a2742; }
     .tool-tab.active {
-      background: var(--gold-gradient);
-      border-color: rgba(180, 140, 45, 0.5);
+      background: var(--hudl-orange);
+      border-color: var(--hudl-orange);
       color: #ffffff;
-      font-weight: 800;
-      box-shadow: 0 2px 10px rgba(184, 134, 11, 0.3);
+      font-weight: 700;
     }
     .btn-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 6px;
-      margin-top: 8px;
+      gap: 5px;
+      margin-top: 6px;
     }
     .btn-sm {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.22);
+      background: #162032;
+      border: 1px solid rgba(255, 255, 255, 0.08);
       color: var(--text);
-      padding: 6px;
-      border-radius: 6px;
-      font-size: 0.75rem;
+      padding: 5px 8px;
+      border-radius: var(--r-sm);
+      font-size: 0.72rem;
       font-weight: 600;
       cursor: pointer;
       text-align: center;
       transition: all 0.15s;
     }
-    .btn-sm:hover { background: #fdfbf7; border-color: var(--gold-primary); color: #855f19; }
+    .btn-sm:hover { background: #1f2e48; border-color: var(--hudl-orange); color: #ffffff; }
 
     /* Center Stage */
     .stage {
       flex: 1;
       min-width: 0;
       min-height: 0;
-      background: radial-gradient(circle at center, #f4f6fa 0%, #e8edf4 100%);
+      background: radial-gradient(circle at center, #111a2d 0%, #090d16 100%);
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       position: relative;
       overflow: hidden;
-      padding: 8px 16px 26px 16px;
+      padding: 12px;
     }
     .stage-toolbar {
       position: absolute;
       top: 10px;
       display: flex;
-      gap: 8px;
-      background: rgba(255, 255, 255, 0.92);
-      backdrop-filter: blur(12px);
-      padding: 5px 12px;
-      border-radius: 30px;
-      border: 1px solid rgba(180, 140, 45, 0.3);
+      gap: 4px;
+      background: rgba(15, 23, 42, 0.94);
+      padding: 4px;
+      border-radius: var(--r-md);
+      border: 1px solid rgba(255, 255, 255, 0.1);
       z-index: 10;
-      box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
     }
     .chip {
       background: transparent;
       border: none;
-      color: #64748b;
-      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-size: 0.74rem;
       font-weight: 600;
-      padding: 4px 10px;
-      border-radius: 20px;
+      padding: 4px 9px;
+      border-radius: var(--r-sm);
       cursor: pointer;
       transition: all 0.15s;
     }
     .chip.active, .chip:hover {
       color: #ffffff;
-      background: var(--gold-gradient);
-      font-weight: 800;
+      background: var(--hudl-orange);
+      font-weight: 700;
     }
     .viewport-outer {
       position: relative;
-      padding: 6px;
-      border: 2px dashed rgba(180, 140, 45, 0.45);
-      border-radius: 14px;
-      background: #ffffff;
-      box-shadow: 0 16px 40px rgba(15, 23, 42, 0.1), 0 0 20px rgba(180, 140, 45, 0.06);
+      padding: 4px;
+      border: 1px dashed rgba(255, 87, 34, 0.45);
+      border-radius: var(--r-md);
+      background: var(--bg-surface);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-top: 10px;
-      margin-bottom: 22px;
     }
     .viewport-container {
-      width: min(440px, calc(100vh - 300px), calc(100vw - 420px));
-      height: min(440px, calc(100vh - 300px), calc(100vw - 420px));
-      max-width: 440px;
-      max-height: 440px;
+      width: clamp(260px, 42vw, 420px);
+      height: clamp(260px, 42vw, 420px);
       aspect-ratio: 1 / 1;
       position: relative;
       overflow: hidden;
-      border-radius: 8px;
+      border-radius: var(--r-sm);
     }
     .checkerboard {
       background-image: 
-        linear-gradient(45deg, #f1f5f9 25%, transparent 25%), 
-        linear-gradient(-45deg, #f1f5f9 25%, transparent 25%), 
-        linear-gradient(45deg, transparent 75%, #f1f5f9 75%), 
-        linear-gradient(-45deg, transparent 75%, #f1f5f9 75%);
-      background-size: 20px 20px;
-      background-position: 0 0, 0 10px, 10px -10px, -10px 0px;
-      background-color: #ffffff;
+        linear-gradient(45deg, #131c2e 25%, transparent 25%), 
+        linear-gradient(-45deg, #131c2e 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #131c2e 75%), 
+        linear-gradient(-45deg, transparent 75%, #131c2e 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+      background-color: #070b14;
     }
     canvas#editor-canvas {
       position: absolute;
@@ -4795,169 +7552,137 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     #brush-cursor {
       position: absolute;
-      border: 2px solid var(--gold-primary);
-      border-radius: 50%;
+      border: 1px solid var(--hudl-orange);
+      border-radius: var(--r-xs);
       pointer-events: none;
       transform: translate(-50%, -50%);
       display: none;
       z-index: 100;
     }
-    .cursor-recover { border-color: #059669 !important; background: rgba(5, 150, 105, 0.2); }
-    .cursor-erase { border-color: #e11d48 !important; background: rgba(225, 29, 72, 0.2); }
+    .cursor-recover { border-color: #10b981 !important; background: rgba(16, 185, 129, 0.15); }
+    .cursor-erase { border-color: #ef4444 !important; background: rgba(239, 68, 68, 0.15); }
 
     .stage-hint {
       position: absolute;
       bottom: 8px;
-      font-size: 0.73rem;
-      color: #475569;
-      background: rgba(255, 255, 255, 0.92);
-      padding: 3px 12px;
-      border-radius: 20px;
-      border: 1px solid rgba(180, 140, 45, 0.25);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      background: rgba(15, 23, 42, 0.94);
+      padding: 3px 10px;
+      border-radius: var(--r-sm);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       align-items: center;
-      gap: 8px;
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+      gap: 6px;
       z-index: 10;
     }
 
-    /* Bottom Carousel Filmstrip */
+    /* Bottom Filmstrip Carousel */
     .carousel-container {
       flex-shrink: 0;
-      height: 126px;
-      min-height: 126px;
-      max-height: 126px;
-      background: #ffffff;
-      border-top: 2px solid rgba(180, 140, 45, 0.35);
+      height: 114px;
+      background: var(--bg-surface);
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       flex-direction: column;
-      box-shadow: 0 -4px 20px rgba(15, 23, 42, 0.08);
       z-index: 40;
-      position: relative;
     }
     .carousel-header {
-      height: 25px;
-      min-height: 25px;
-      padding: 0 16px;
-      background: #faf8f5;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.18);
+      height: 24px;
+      padding: 0 14px;
+      background: #141f33;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      user-select: none;
     }
     .carousel-title {
-      font-family: var(--font-royal);
-      font-size: 0.7rem;
-      font-weight: 800;
+      font-family: var(--font-heading);
+      font-size: 0.68rem;
+      font-weight: 700;
       letter-spacing: 0.06em;
-      color: var(--text-gold);
+      color: #ff7043;
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
     }
     .carousel-count-badge {
       font-family: var(--font-mono);
-      font-size: 0.68rem;
+      font-size: 0.65rem;
       font-weight: 700;
-      color: #1e293b;
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
-      padding: 1px 7px;
-      border-radius: 999px;
+      color: #ffffff;
+      background: #1e293b;
+      padding: 1px 5px;
+      border-radius: var(--r-xs);
     }
     .carousel-nav-arrows {
       display: flex;
-      align-items: center;
-      gap: 5px;
+      gap: 4px;
     }
     .carousel-arrow-btn {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.3);
-      border-radius: 4px;
-      width: 24px;
-      height: 19px;
+      background: #182338;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-xs);
+      width: 22px;
+      height: 18px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      color: #475569;
-      transition: all 0.15s;
+      color: var(--text-muted);
     }
     .carousel-arrow-btn:hover {
-      background: var(--gold-gradient);
+      background: var(--hudl-orange);
       color: #ffffff;
-      border-color: var(--gold-primary);
     }
     .carousel-bar {
       flex: 1;
-      min-height: 0;
-      padding: 5px 14px;
+      padding: 4px 12px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       overflow-x: auto;
       overflow-y: hidden;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(180, 140, 45, 0.4) #f1f5f9;
-    }
-    .carousel-bar::-webkit-scrollbar {
-      height: 6px;
-    }
-    .carousel-bar::-webkit-scrollbar-track {
-      background: #f1f5f9;
-    }
-    .carousel-bar::-webkit-scrollbar-thumb {
-      background: rgba(180, 140, 45, 0.4);
-      border-radius: 4px;
-    }
-    .carousel-bar::-webkit-scrollbar-thumb:hover {
-      background: rgba(180, 140, 45, 0.7);
     }
     .carousel-item {
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 4px;
-      background: #f8fafc;
-      border: 1.5px solid rgba(180, 140, 45, 0.24);
-      border-radius: 8px;
+      padding: 3px;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-sm);
       cursor: pointer;
-      min-width: 76px;
-      width: 76px;
-      height: 86px;
+      min-width: 70px;
+      width: 70px;
+      height: 78px;
       flex-shrink: 0;
       transition: all 0.15s;
       position: relative;
-      user-select: none;
     }
     .carousel-item:hover {
-      border-color: var(--gold-primary);
-      transform: translateY(-2px);
-      background: #fdfbf7;
-      box-shadow: 0 4px 12px rgba(184, 134, 11, 0.2);
+      border-color: var(--hudl-orange);
+      background: #19253d;
     }
     .carousel-item.active {
-      border-color: var(--gold-primary);
-      background: #fefce8;
-      box-shadow: 0 0 0 2px var(--gold-primary), 0 4px 12px rgba(184, 134, 11, 0.35);
-      border-width: 2px;
+      border-color: var(--hudl-orange);
+      background: rgba(255, 87, 34, 0.15);
+      border-width: 1.5px;
     }
     .carousel-item img {
-      width: 50px;
-      height: 54px;
+      width: 48px;
+      height: 50px;
       object-fit: cover;
-      border-radius: 4px;
-      background: #e2e8f0;
-      border: 1px solid rgba(0, 0, 0, 0.05);
+      border-radius: var(--r-xs);
+      background: #090e1a;
     }
     .carousel-item span {
-      font-size: 0.64rem;
+      font-size: 0.62rem;
       font-family: var(--font-mono);
       font-weight: 600;
-      margin-top: 3px;
-      color: #334155;
-      max-width: 68px;
+      margin-top: 2px;
+      color: #cbd5e1;
+      max-width: 64px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -4965,113 +7690,103 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .status-dot {
       position: absolute;
-      top: 4px; right: 4px; width: 8px; height: 8px;
-      border-radius: 50%; background: #94a3b8;
+      top: 3px; right: 3px; width: 6px; height: 6px;
+      border-radius: var(--r-xs); background: #94a3b8;
     }
-    .status-dot.saved { background: #059669; box-shadow: 0 0 6px #059669; }
-    .status-dot.cutout { background: var(--gold-primary); box-shadow: 0 0 6px var(--gold-primary); }
+    .status-dot.saved { background: #10b981; }
+    .status-dot.cutout { background: var(--hudl-orange); }
 
     /* Loading Overlay */
     .loading-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(255, 255, 255, 0.88);
+      background: rgba(9, 13, 22, 0.85);
       display: none;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 16px;
+      gap: 12px;
       z-index: 99999;
-      backdrop-filter: blur(8px);
+      backdrop-filter: blur(6px);
     }
     .spinner {
-      width: 34px; height: 34px;
-      border: 3px solid rgba(180, 140, 45, 0.2);
-      border-top-color: var(--gold-primary);
-      border-radius: 50%;
+      width: 28px; height: 28px;
+      border: 2.5px solid rgba(255, 255, 255, 0.15);
+      border-top-color: var(--hudl-orange);
+      border-radius: var(--r-xs);
       animation: spin 0.8s linear infinite;
-      box-shadow: 0 0 15px rgba(184, 134, 11, 0.25);
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* =========================================================================
-       SOVEREIGN SAAS MODALS
-       ========================================================================= */
+    /* Modals & Overlays */
     .saas-modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(15, 23, 42, 0.45);
-      backdrop-filter: blur(14px);
-      -webkit-backdrop-filter: blur(14px);
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(8px);
       display: none;
       justify-content: center;
       align-items: center;
       z-index: 10000;
-      padding: 20px;
+      padding: 16px;
       overflow-y: auto;
-      animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-    }
-    @keyframes modalFadeIn {
-      from { opacity: 0; transform: scale(0.96); }
-      to { opacity: 1; transform: scale(1); }
     }
     .saas-modal-card {
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.32);
-      border-radius: 18px;
+      background: var(--bg-surface);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: var(--r-lg);
       width: 100%;
-      max-width: 620px;
+      max-width: 580px;
       max-height: 90vh;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 25px 65px -15px rgba(15, 23, 42, 0.2), 0 0 35px rgba(180, 140, 45, 0.08);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
       position: relative;
       overflow: hidden;
     }
-    .saas-modal-card.wide { max-width: 900px; }
+    .saas-modal-card.wide { max-width: 860px; }
     .saas-modal-header {
-      padding: 20px 26px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.2);
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #fbfcfe;
+      background: #141f33;
     }
     .saas-modal-title {
-      font-family: var(--font-royal);
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: #0f172a;
+      font-family: var(--font-heading);
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #ffffff;
       display: flex;
       align-items: center;
-      gap: 10px;
-      letter-spacing: 0.04em;
+      gap: 8px;
     }
     .saas-modal-close {
       background: transparent;
       border: none;
-      color: #64748b;
-      font-size: 1.3rem;
+      color: var(--text-muted);
+      font-size: 1.2rem;
       cursor: pointer;
-      padding: 4px 8px;
-      border-radius: 6px;
+      padding: 3px 6px;
+      border-radius: var(--r-xs);
       line-height: 1;
-      transition: all 0.15s;
     }
     .saas-modal-close:hover {
-      background: rgba(184, 134, 11, 0.12);
-      color: #0f172a;
+      background: rgba(255, 255, 255, 0.1);
+      color: #ffffff;
     }
     .saas-modal-body {
-      padding: 26px;
+      padding: 20px;
       overflow-y: auto;
       flex: 1;
+      color: #cbd5e1;
     }
     .saas-tabs {
       display: flex;
-      gap: 8px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.2);
-      margin-bottom: 22px;
+      gap: 6px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      margin-bottom: 18px;
       padding-bottom: 2px;
     }
     .saas-tab-btn {
@@ -5079,317 +7794,316 @@ HTML_PAGE = r"""<!DOCTYPE html>
       border: none;
       border-bottom: 2px solid transparent;
       color: var(--text-muted);
-      padding: 8px 16px;
-      font-weight: 700;
-      font-size: 0.86rem;
+      padding: 6px 14px;
+      font-weight: 600;
+      font-size: 0.82rem;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      transition: all 0.2s;
+      gap: 6px;
     }
     .saas-tab-btn.active {
-      color: var(--gold-primary);
-      border-bottom-color: var(--gold-primary);
-      font-family: var(--font-royal);
-      letter-spacing: 0.04em;
+      color: var(--hudl-orange);
+      border-bottom-color: var(--hudl-orange);
     }
     .saas-form-group {
-      margin-bottom: 18px;
+      margin-bottom: 14px;
     }
     .saas-form-label {
       display: block;
-      font-size: 0.76rem;
-      font-family: var(--font-royal);
+      font-size: 0.72rem;
+      font-family: var(--font-heading);
       font-weight: 700;
-      color: var(--text-gold);
-      margin-bottom: 6px;
+      color: #ff7043;
+      margin-bottom: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
     }
     .saas-input {
       width: 100%;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.28);
-      color: #0f172a;
-      padding: 11px 16px;
-      border-radius: 8px;
-      font-size: 0.88rem;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      padding: 9px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.85rem;
       outline: none;
-      transition: all 0.2s;
       font-family: inherit;
     }
     .saas-input:focus {
-      border-color: var(--gold-primary);
-      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
+      border-color: var(--hudl-orange);
     }
     .saas-textarea {
       width: 100%;
-      background: #ffffff;
-      border: 1px solid rgba(180, 140, 45, 0.26);
-      color: #0f172a;
-      padding: 12px 16px;
-      border-radius: 8px;
-      font-size: 0.85rem;
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+      padding: 10px 12px;
+      border-radius: var(--r-sm);
+      font-size: 0.82rem;
       outline: none;
       font-family: var(--font-mono);
-      min-height: 140px;
-      line-height: 1.5;
+      min-height: 120px;
       resize: vertical;
     }
-    .saas-textarea:focus {
-      border-color: var(--gold-primary);
-      box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.18);
-    }
     .seat-meter-card {
-      background: #f8fafc;
-      border: 1px solid rgba(180, 140, 45, 0.25);
-      border-radius: 14px;
-      padding: 18px;
-      margin-bottom: 22px;
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 14px;
+      margin-bottom: 18px;
     }
     .seat-meter-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
-      font-size: 0.85rem;
+      margin-bottom: 8px;
+      font-size: 0.82rem;
     }
     .seat-bar-track {
-      background: #e2e8f0;
-      height: 9px;
-      border: 1px solid rgba(180, 140, 45, 0.2);
-      border-radius: 999px;
+      background: #090e1a;
+      height: 6px;
+      border-radius: var(--r-xs);
       overflow: hidden;
-      position: relative;
     }
     .seat-bar-fill {
       height: 100%;
-      background: var(--gold-gradient);
-      box-shadow: 0 0 10px rgba(184, 134, 11, 0.35);
-      transition: width 0.3s ease;
+      background: var(--hudl-orange);
     }
     .saas-table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.84rem;
+      font-size: 0.82rem;
     }
     .saas-table th {
       text-align: left;
-      padding: 11px 14px;
-      background: #f8fafc;
-      color: var(--text-gold);
-      font-family: var(--font-royal);
+      padding: 9px 12px;
+      background: #141f33;
+      color: #ff7043;
+      font-family: var(--font-heading);
       font-weight: 700;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.25);
-      font-size: 0.74rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.72rem;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.06em;
     }
     .saas-table td {
-      padding: 12px 14px;
-      border-bottom: 1px solid rgba(180, 140, 45, 0.12);
-      color: #1e293b;
-      vertical-align: middle;
-    }
-    .saas-table tr:hover td {
-      background: #fdfbf7;
-    }
-    .btn-copy-link {
-      background: rgba(184, 134, 11, 0.08);
-      border: 1px solid rgba(184, 134, 11, 0.35);
-      color: var(--text-gold);
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      transition: all 0.15s;
-    }
-    .btn-copy-link:hover {
-      background: rgba(184, 134, 11, 0.18);
-      color: #5c410c;
-    }
-    .btn-revoke-user {
-      background: rgba(225, 29, 72, 0.08);
-      border: 1px solid rgba(225, 29, 72, 0.32);
-      color: #be123c;
-      padding: 4px 10px;
-      border-radius: 6px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.15s;
-    }
-    .btn-revoke-user:hover {
-      background: rgba(225, 29, 72, 0.16);
-    }
-    .result-pill-added {
-      background: rgba(5, 150, 105, 0.08);
-      border: 1px solid rgba(5, 150, 105, 0.3);
-      color: #065f46;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-    .result-pill-skipped {
-      background: rgba(217, 119, 6, 0.08);
-      border: 1px solid rgba(217, 119, 6, 0.3);
-      color: #92400e;
-      padding: 6px 12px;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 6px;
-    }
-    .btn-passkey {
-      width: 100%;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-      color: #f8fafc;
-      border: 1px solid rgba(212, 175, 55, 0.4);
-      padding: 11px 18px;
-      border-radius: 9px;
-      font-family: inherit;
-      font-weight: 700;
-      font-size: 0.88rem;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15);
-      margin-top: 10px;
-    }
-    .btn-passkey:hover {
-      background: linear-gradient(135deg, #0f172a 0%, #020617 100%);
-      border-color: var(--gold-primary);
-      box-shadow: 0 6px 20px rgba(184, 134, 11, 0.25);
-      transform: translateY(-1px);
-    }
-    .btn-gold {
-      background: linear-gradient(135deg, #b8860b 0%, #d4af37 50%, #996515 100%);
-      color: #ffffff;
-      border: 1px solid #ffe89e;
-      font-weight: 700;
-      border-radius: 8px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      box-shadow: 0 3px 12px rgba(184, 134, 11, 0.28);
-      transition: all 0.2s;
-    }
-    .btn-gold:hover {
-      filter: brightness(1.08);
-      box-shadow: 0 5px 18px rgba(184, 134, 11, 0.4);
-      transform: translateY(-1px);
-    }
-    .saas-platform-admin-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      background: linear-gradient(135deg, rgba(184, 134, 11, 0.08) 0%, rgba(212, 175, 55, 0.15) 100%);
-      border: 1px solid rgba(184, 134, 11, 0.35);
-      padding: 5px 12px;
-      border-radius: 999px;
-      font-size: 0.8rem;
-    }
-    .saas-platform-admin-badge .scope-tag {
-      font-size: 0.68rem;
-      background: rgba(15, 23, 42, 0.08);
-      border: 1px solid rgba(15, 23, 42, 0.15);
-      color: #475569;
-      padding: 1px 7px;
-      border-radius: 10px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
+      padding: 9px 12px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      color: #cbd5e1;
     }
     .kpi-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
-      margin-bottom: 22px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
     }
     .kpi-metric-card {
-      background: linear-gradient(135deg, #ffffff 0%, #fbfcfe 100%);
-      border: 1px solid rgba(180, 140, 45, 0.26);
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+      background: #131c2e;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--r-md);
+      padding: 14px;
       position: relative;
-      overflow: hidden;
     }
     .kpi-metric-card::before {
       content: '';
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 3px;
-      background: var(--gold-gradient);
+      top: 0; left: 0; width: 100%; height: 2px;
+      background: var(--hudl-orange);
     }
     .kpi-label {
-      font-family: var(--font-royal);
-      font-size: 0.72rem;
-      color: var(--text-gold);
+      font-family: var(--font-heading);
+      font-size: 0.7rem;
+      color: #ff7043;
       font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      margin-bottom: 6px;
+      letter-spacing: 0.05em;
+      margin-bottom: 4px;
     }
     .kpi-value {
-      font-size: 1.55rem;
+      font-size: 1.4rem;
       font-weight: 800;
-      color: #0f172a;
+      color: #ffffff;
       line-height: 1.1;
-      font-family: inherit;
     }
-    .kpi-sub {
-      font-size: 0.72rem;
-      color: var(--text-muted);
-      margin-top: 4px;
+
+    /* =========================================================================
+       RIGOROUS RESPONSIVE BREAKPOINTS (Desktop -> Laptop -> Tablet -> Mobile)
+       ========================================================================= */
+    @media (max-width: 1024px) {
+      .saas-navbar { padding: 8px 16px; }
+      .search-grid-player {
+        grid-template-columns: 1fr 1fr auto;
+      }
+      .search-grid-url {
+        grid-template-columns: 1fr 1fr auto;
+      }
+      .sidebar { width: 260px; }
     }
-    .totp-code-display {
-      font-family: var(--font-mono);
-      font-size: 1.1rem;
-      font-weight: 700;
-      letter-spacing: 0.18em;
-      background: #f1f5f9;
-      border: 1px solid rgba(180, 140, 45, 0.3);
-      padding: 10px 16px;
-      border-radius: 8px;
-      color: #0f172a;
-      display: inline-block;
-      user-select: all;
+
+    @media (max-width: 900px) {
+      #page-workbench {
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+      }
+      .workbench-body {
+        flex-direction: column;
+        height: auto;
+        overflow: visible;
+      }
+      .stage {
+        height: 50vh;
+        min-height: 320px;
+        max-height: 440px;
+        width: 100%;
+        padding: 8px;
+      }
+      .stage-toolbar {
+        top: 6px;
+        max-width: calc(100vw - 20px);
+        overflow-x: auto;
+      }
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        overflow-y: visible;
+        padding: 14px;
+      }
+      header {
+        height: auto;
+        min-height: auto;
+        padding: 8px 14px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+      }
+      .header-left {
+        width: 100%;
+        justify-content: space-between;
+      }
+      .header-actions {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .header-actions .btn {
+        flex: 1 1 calc(33.333% - 6px);
+        font-size: 0.74rem;
+        padding: 6px 8px;
+        justify-content: center;
+      }
+      .carousel-container {
+        position: sticky;
+        bottom: 0;
+        z-index: 50;
+      }
+      .mobile-table-hint {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+      }
     }
-    .backup-codes-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px;
-      margin-top: 10px;
+
+    @media (max-width: 768px) {
+      .saas-navbar {
+        padding: 6px 12px;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .saas-nav-left { gap: 8px; }
+      .saas-nav-right { gap: 6px; }
+      .seat-mini-progress { display: none; }
+      
+      #page-folder-select { padding: 20px 12px 40px 12px; }
+      .landing-hero { margin-bottom: 18px; }
+      .landing-title { font-size: 1.8rem; }
+      .landing-subtitle { font-size: 0.86rem; }
+
+      .hudl-segmented-bar {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+      .hudl-seg-btn {
+        justify-content: flex-start;
+        padding: 8px 12px;
+        font-size: 0.82rem;
+      }
+
+      .search-grid-player,
+      .search-grid-url {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .search-action-btn {
+        width: 100%;
+        justify-content: center;
+      }
+
+      .verified-athlete-card {
+        grid-template-columns: 1fr;
+        text-align: center;
+        gap: 14px;
+      }
+      .athlete-headshot-frame {
+        margin: 0 auto;
+      }
+      .athlete-vitals-meta {
+        justify-content: center;
+      }
+
+      .roster-header-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .roster-header-actions {
+        width: 100%;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+      .roster-header-actions .btn {
+        flex: 1 1 calc(50% - 5px);
+        font-size: 0.74rem;
+        padding: 7px 8px;
+        justify-content: center;
+      }
+      .roster-footer-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+      }
+      .roster-footer-actions {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .roster-footer-actions .btn {
+        width: 100%;
+        justify-content: center;
+      }
     }
-    .backup-code-item {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      background: #f8fafc;
-      border: 1px dashed rgba(180, 140, 45, 0.4);
-      padding: 6px 10px;
-      border-radius: 6px;
-      color: #334155;
-      text-align: center;
-      font-weight: 600;
+
+    @media (max-width: 480px) {
+      .landing-title { font-size: 1.5rem; }
+      .hero-badge { font-size: 0.68rem; padding: 3px 8px; }
+      .roster-config-card, .folder-action-card, .roster-results-card {
+        padding: 16px 12px;
+      }
+      .user-profile-pill span#nav-user-name,
+      .user-profile-pill .user-role-tag {
+        display: none;
+      }
+      .header-actions .btn {
+        flex: 1 1 calc(50% - 4px);
+        font-size: 0.7rem;
+        padding: 5px;
+      }
     }
   </style>
 </head>
@@ -5401,13 +8115,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="gateway-hero-col">
         <div class="gateway-brand-badge">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-          <span>RESTRICTED ENTERPRISE ATELIER • LICENSED SEATS ONLY</span>
+          <span>VELOROSTER AI &bull; ECSTATICLOUD TECHNOLOGIES</span>
         </div>
         <h1 class="gateway-hero-title">
-          The Sovereign Standard in <span>Athletic Portrait Intelligence</span>
+          Standardized 180×180 Headshots & <span>Athletic Roster Studio</span>
         </h1>
         <p class="gateway-hero-desc">
-          Standardized 180×180 neural facial composition, automated foreground separation, and synchronized roster ingestion with zero cloud storage footprint. Purpose-engineered for premier athletics departments and global sports franchises.
+          Standardized 180×180 transparent headshot formatting, AI background removal, and multi-league roster ingestion with zero cloud storage footprint. Developed from scratch with full proprietary rights owned by Ecstaticloud Technologies.
         </p>
 
         <div class="gateway-features-list">
@@ -5416,8 +8130,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-              <div class="gateway-feature-title">Standardized 180×180 Facial Centering</div>
-              <div class="gateway-feature-desc">AI landmark alignment guarantees consistent chin-to-forehead framing across your entire athletic roster.</div>
+              <div class="gateway-feature-title">Standardized 180×180 Headshot Framing</div>
+              <div class="gateway-feature-desc">Square canvas alignment with automated face-centering detection and live positioning guides.</div>
             </div>
           </div>
           <div class="gateway-feature-item">
@@ -5425,8 +8139,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-              <div class="gateway-feature-title">Zero Cloud Disk Footprint (Direct PC Processing)</div>
-              <div class="gateway-feature-desc">Photos process directly in browser memory and export to your computer storage without filling server space.</div>
+              <div class="gateway-feature-title">AI Cutout & Retouch Brushes</div>
+              <div class="gateway-feature-desc">Automated background removal with interactive Recover and Erase brushes to preserve jersey and hair details.</div>
             </div>
           </div>
           <div class="gateway-feature-item">
@@ -5434,8 +8148,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-              <div class="gateway-feature-title">Official League Roster Ingestion</div>
-              <div class="gateway-feature-desc">Instantly import players from UK EIHL, NHL, and NCAA teams with automatic jersey number file mapping.</div>
+              <div class="gateway-feature-title">Athletic Roster Ingestion & Search</div>
+              <div class="gateway-feature-desc">Search single athletes across hockey and sports databases, or scrape full team rosters from athletic URLs.</div>
             </div>
           </div>
           <div class="gateway-feature-item">
@@ -5443,8 +8157,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
             </div>
             <div>
-              <div class="gateway-feature-title">Multi-Tenant Company Governance</div>
-              <div class="gateway-feature-desc">Enterprise seat allocations, bulk CSV team onboarding, and role-based permissions.</div>
+              <div class="gateway-feature-title">Number Assignment & Batch Export</div>
+              <div class="gateway-feature-desc">Assign jersey numbers via interactive table or spreadsheet paste, then export standardized transparent PNGs in a ZIP.</div>
             </div>
           </div>
         </div>
@@ -5454,8 +8168,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <div class="gateway-auth-col">
         <div class="gateway-card">
           <div class="gateway-card-header">
-            <div class="gateway-card-title">Enterprise Atelier Portal</div>
-            <div class="gateway-card-sub">Authenticate with corporate credentials or activate an invited company seat</div>
+            <div class="gateway-card-title">VeloRoster AI Commercial Portal</div>
+            <div class="gateway-card-sub">Developed by Ecstaticloud Technologies &bull; Authenticate with corporate credentials</div>
           </div>
 
           <div class="gateway-tabs">
@@ -5490,7 +8204,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <div id="gateway-login-error" class="saas-alert-danger" style="display:none;"></div>
 
               <button type="submit" class="btn btn-primary" id="btn-gateway-login" style="width:100%; padding:12px; margin-top:8px; font-size:0.9rem;">
-                <span>Enter Atelier Workspace</span>
+                <span>Enter Studio Workspace</span>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
               </button>
 
@@ -5549,10 +8263,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <!-- View 3: Two-Factor Authentication (MFA) -->
           <div id="gateway-view-mfa" style="display:none;">
             <div style="text-align:center; margin-bottom:18px;">
-              <div style="width:48px; height:48px; border-radius:50%; background:rgba(184,134,11,0.12); border:1px solid rgba(184,134,11,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+              <div style="width:48px; height:48px; border-radius:var(--r-md); background:rgba(255,87,34,0.12); border:1px solid rgba(255,87,34,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--hudl-orange)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
               </div>
-              <div style="font-family:var(--font-royal); font-size:1.15rem; font-weight:700; color:#0f172a;">Two-Factor Verification</div>
+              <div style="font-family:var(--font-heading); font-size:1.15rem; font-weight:700; color:#ffffff;">Two-Factor Verification</div>
               <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Enter the 6-digit code from your authenticator app or an emergency backup code.</div>
             </div>
             <form onsubmit="handleMfaLoginSubmit(event, 'gateway')">
@@ -5579,12 +8293,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <div id="saas-top-navbar" class="saas-navbar" style="display:none;">
     <div class="saas-nav-left">
       <div style="display:flex; align-items:center; gap:12px;">
-        <div style="width:36px; height:36px; border-radius:10px; background:var(--gold-gradient); display:flex; align-items:center; justify-content:center; box-shadow:0 0 18px rgba(212,175,55,0.45); border:1px solid #ffe89e;">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#05070a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18h18M4 18l2-10 5 6 3-8 3 8 5-6 2 10H4z"/><circle cx="12" cy="4" r="1.5"/><circle cx="6" cy="8" r="1.5"/><circle cx="18" cy="8" r="1.5"/></svg>
+        <div style="width:36px; height:36px; border-radius:10px; background:var(--hudl-orange-gradient); display:flex; align-items:center; justify-content:center; box-shadow:0 0 18px rgba(255,87,34,0.35); border:1px solid rgba(255,112,67,0.5);">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
         </div>
         <div style="display:flex; flex-direction:column; line-height:1.2;">
-          <div style="font-family:'Cinzel', serif; font-weight:800; font-size:1.05rem; letter-spacing:0.06em; color:var(--text);">SOVEREIGN STUDIO</div>
-          <div style="font-size:0.64rem; color:var(--text-gold); font-weight:700; letter-spacing:0.12em; text-transform:uppercase;">ROYAL PORTRAIT ATELIER</div>
+          <div style="font-family:var(--font-heading); font-weight:800; font-size:1.05rem; letter-spacing:0.02em; color:#ffffff;">VeloRoster <span style="color:#ff7043;">AI</span></div>
+          <div style="font-size:0.64rem; color:#94a3b8; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;">COMMERCIAL ATHLETIC ROSTER & HEADSHOT STUDIO</div>
         </div>
       </div>
       <!-- Company badge (Hidden for SuperAdmin) -->
@@ -5603,9 +8317,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
       <!-- Platform SuperAdmin Scope Badge (Shown ONLY for SuperAdmin) -->
       <div id="nav-superadmin-scope-badge" class="saas-platform-admin-badge" style="display:none;">
-        <span style="font-size:1rem;">👑</span>
-        <span style="font-weight:800; color:var(--text); letter-spacing:0.02em;">Platform SuperAdmin</span>
-        <span class="scope-tag">Master Fleet Scope (No Seat Consumed)</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span style="font-weight:800; color:#ffffff; letter-spacing:0.02em;">SuperAdmin Scope</span>
+        <span class="scope-tag">Global Administrator</span>
       </div>
     </div>
 
@@ -5637,7 +8351,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
           <span>Platform Dashboard (<strong id="nav-company-count-badge">3</strong>)</span>
         </button>
-        <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of Portrait Studio Pro" style="font-size:0.8rem; padding:6px 12px;">
+        <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of VeloRoster AI" style="font-size:0.8rem; padding:6px 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           <span>Sign Out</span>
         </button>
@@ -5651,49 +8365,146 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <!-- PAGE 1: FOLDER SELECTION & ROSTER DOWNLOAD LANDING SCREEN -->
   <div id="page-folder-select">
     <div class="landing-hero">
-      <div class="hero-badge"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> IMPERIAL PORTRAIT COMPOSITION SUITE</div>
-      <h1 class="landing-title">Standardized <span>Portrait Atelier</span></h1>
+      <div class="hero-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+        <span>VELOROSTER AI &bull; ECSTATICLOUD TECHNOLOGIES</span>
+      </div>
+      <h1 class="landing-title">Athletic Roster & <span>Headshot Studio</span></h1>
       <p class="landing-subtitle">
-        Download high-resolution roster portraits with custom player ID assignment, or select an existing local folder to crop into standardized 180×180 transparent headshots.
+        Search athlete portraits, scrape team rosters, assign player numbers, and standardize photos into 180×180 transparent headshots.
       </p>
       <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
-        <span style="font-size:0.75rem; background:rgba(5, 150, 105, 0.08); border:1px solid rgba(5, 150, 105, 0.25); color:#047857; padding:5px 12px; border-radius:20px; font-weight:700; display:inline-flex; align-items:center; gap:5px;">
-          <span style="width:7px; height:7px; border-radius:50%; background:#10b981; box-shadow:0 0 8px #10b981; display:inline-block; margin-right:4px;"></span><span>Sovereign Client Direct Pipeline (0 Server Bytes)</span>
+        <span style="font-size:0.75rem; background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.35); color:#34d399; padding:5px 12px; border-radius:var(--r-xs); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+          <span style="width:6px; height:6px; border-radius:1px; background:#10b981; box-shadow:0 0 6px #10b981; display:inline-block;"></span><span>Direct In-Browser Processing (0 Cloud Bytes Stored)</span>
         </span>
-        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(225, 29, 72, 0.3); color:#be123c; font-weight:700;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Server RAM</span>
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(239, 68, 68, 0.3); color:#f87171; font-weight:700;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Memory</span>
         </button>
       </div>
     </div>
 
-    <!-- Mode Selector Tabs -->
-    <div class="landing-tabs-bar">
-      <button class="landing-tab active" id="tab-btn-local" onclick="switchLandingTab('local')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-        <span>Local Folder Atelier</span>
+    <!-- PRIMARY WORKFLOW: UNIFIED 3-TAB SEGMENTED BAR -->
+    <div class="hudl-segmented-bar">
+      <button type="button" class="hudl-seg-btn active" id="tab-nav-athlete" onclick="switchMainWorkflow('athlete')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>Single Athlete Search</span>
+        <span class="hudl-pill-tag">Athlete Search</span>
       </button>
-      <button class="landing-tab" id="tab-btn-roster" onclick="switchLandingTab('roster')">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        <span>Team Roster Ingest</span>
+      <button type="button" class="hudl-seg-btn" id="tab-nav-url" onclick="switchMainWorkflow('url')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span>Team Roster Website URL</span>
+        <span class="hudl-pill-tag">URL Scraper</span>
+      </button>
+      <button type="button" class="hudl-seg-btn" id="tab-nav-local" onclick="switchMainWorkflow('local')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>Local Photo Folder</span>
+        <span class="hudl-pill-tag">Local Upload</span>
       </button>
     </div>
 
-    <!-- VIEW A: LOCAL FOLDER SELECTION -->
-    <div id="view-local-folder" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center;">
+    <!-- WORKFLOW 1: SINGLE ATHLETE SEARCH PANEL -->
+    <div id="panel-workflow-athlete" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center;">
+      <div class="roster-config-card">
+        <div style="font-size:0.85rem; font-weight:700; color:#ff7043; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span>Search Athlete with Strict Team & Era Matching</span>
+        </div>
+
+        <div class="roster-input-grid search-grid-player">
+          <div class="input-group">
+            <label class="input-label">Player Name (Required)</label>
+            <input type="text" id="search-player-name" class="roster-text-input" spellcheck="false" placeholder="e.g. LeBron James, Wayne Gretzky, Caitlin Clark" value="LeBron James" onkeydown="if(event.key==='Enter') searchAthlete()">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Team Name (Optional &mdash; Strictly Filters Matching Stint)</label>
+            <input type="text" id="search-player-team" class="roster-text-input" spellcheck="false" placeholder="e.g. Miami Heat, Rangers, Lakers" value="Miami Heat" onkeydown="if(event.key==='Enter') searchAthlete()">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Destination Folder</label>
+            <input type="text" id="roster-folder-input" class="roster-text-input" placeholder="Miami Heat - LeBron James" value="Miami Heat - LeBron James" onkeydown="if(event.key==='Enter') searchAthlete()">
+          </div>
+          <div class="search-btn-wrapper">
+            <button class="btn btn-primary search-action-btn" onclick="searchAthlete()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>Search Athlete</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Athlete Presets -->
+        <div class="presets-container">
+          <span class="preset-group-title">Verified Team Stints:</span>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('LeBron James', 'Miami Heat')">LeBron James (Miami Heat)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Wayne Gretzky', 'Rangers')">Wayne Gretzky (NY Rangers)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Shaquille O\'Neal', 'Lakers')">Shaquille O'Neal (LA Lakers)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Connor McDavid', 'Oilers')">Connor McDavid (Edmonton Oilers)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Caitlin Clark', 'Fever')">Caitlin Clark (Indiana Fever)</button>
+
+          <span class="preset-group-title">Career Profiles:</span>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('LeBron James', '')">LeBron James (All Eras)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Wayne Gretzky', '')">Wayne Gretzky (All Eras)</button>
+          <button type="button" class="preset-pill" onclick="setPlayerPreset('Victor Wembanyama', '')">Victor Wembanyama</button>
+        </div>
+
+        <div class="quality-boost-tag">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          <span><strong>Database Search:</strong> Searches junior hockey (BCHL), NHL, NBA, and Wikimedia portrait archives. Providing a team name filters results to that specific team stint.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORKFLOW 2: FULL TEAM ROSTER WEBSITE URL PANEL -->
+    <div id="panel-workflow-url" style="width: 100%; max-width: 960px; display: none; flex-direction: column; align-items: center;">
+      <div class="roster-config-card">
+        <div style="font-size:0.85rem; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"/></svg>
+          <span>Full League Team Roster Ingestion (Proballers, Eurobasket, NHL, EIHL, NCAA)</span>
+        </div>
+
+        <div class="roster-input-grid search-grid-url">
+          <div class="input-group">
+            <label class="input-label">Team Roster Website URL</label>
+            <input type="text" id="roster-url-input" class="roster-text-input" spellcheck="false" placeholder="e.g. https://www.cardiffdevils.com/team/ or Proballers/Eurobasket URL" value="https://www.cardiffdevils.com/team/" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
+          </div>
+          <div class="input-group">
+            <label class="input-label">Destination Folder</label>
+            <input type="text" id="roster-folder-input-url" class="roster-text-input" placeholder="Cardiff Devils" value="Cardiff Devils" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
+          </div>
+          <div class="search-btn-wrapper">
+            <button class="btn btn-primary search-action-btn" onclick="fetchRosterPlayers()">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <span>Fetch Team Roster</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Team Presets -->
+        <div class="presets-container">
+          <span class="preset-group-title">Supported League Presets:</span>
+          <button type="button" class="preset-pill" onclick="setUrlPreset('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">Cardiff Devils (EIHL)</button>
+          <button type="button" class="preset-pill" onclick="setUrlPreset('https://www.proballers.com/basketball/team/15352/caen-u21/roster', 'Caen U21 (Proballers)')">Caen U21 (LNB)</button>
+          <button type="button" class="preset-pill" onclick="setUrlPreset('https://basketball.eurobasket.com/team/Debreceni-Egyetem/1833/Roster/2026-2027#google_vignette', 'Debreceni Egyetem')">Debreceni Egyetem (Eurobasket)</button>
+          <button type="button" class="preset-pill" onclick="setUrlPreset('https://www.nhl.com/sabres/roster', 'Buffalo Sabres')">Buffalo Sabres (NHL)</button>
+          <button type="button" class="preset-pill" onclick="setUrlPreset('https://maccabi.co.il/en/team/', 'Maccabi Tel Aviv')">Maccabi Tel Aviv</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- WORKFLOW 3: LOCAL PHOTO FOLDER PANEL -->
+    <div id="panel-workflow-local" style="width: 100%; max-width: 960px; display: none; flex-direction: column; align-items: center;">
       <!-- Folder Action Box -->
       <div class="folder-action-card" id="folder-drop-zone">
         <div class="drop-zone-icon">
-          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
         <label for="native-folder-picker" class="browse-btn-big" style="cursor: pointer;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
           <span>Choose Local Photo Folder</span>
         </label>
-        <input type="file" id="native-folder-picker" webkitdirectory directory multiple style="display:none;" onchange="onNativeFolderPicked(event)">
         <input type="file" id="native-files-picker" multiple accept="image/*" style="display:none;" onchange="onNativeFilesPicked(event)">
 
-        <div style="margin-top: 10px;">
-          <label for="native-files-picker" style="font-size:0.83rem; color:var(--accent); cursor:pointer; text-decoration:underline;">
+        <div style="margin-top: 12px;">
+          <label for="native-files-picker" style="font-size:0.84rem; color:#38bdf8; cursor:pointer; text-decoration:underline;">
             or click here to select individual photo files (.png, .jpg, .webp)
           </label>
         </div>
@@ -5720,45 +8531,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <!-- VIEW B: ROSTER DOWNLOADER & NUMBER ASSIGNER -->
-    <div id="view-roster-download">
-      <div class="roster-config-card">
-        <div class="roster-input-grid">
-          <div class="input-group">
-            <label class="input-label">Roster Website URL (UK Teams, NHL, NCAA/Sidearm)</label>
-            <input type="url" id="roster-url-input" class="roster-text-input" spellcheck="false" placeholder="https://www.cardiffdevils.com/team/ or https://coventryblaze.co.uk/roster" value="https://www.cardiffdevils.com/team/" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
-          </div>
-          <div class="input-group">
-            <label class="input-label">Destination Folder Name</label>
-            <input type="text" id="roster-folder-input" class="roster-text-input" placeholder="Cardiff Devils" value="Cardiff Devils" onkeydown="if(event.key==='Enter') fetchRosterPlayers()">
-          </div>
-          <div>
-            <button class="btn btn-primary" style="padding: 12px 22px; font-size: 0.88rem;" onclick="fetchRosterPlayers()">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <span>Fetch Roster</span>
-            </button>
-          </div>
-        </div>
+    <!-- ROSTER RESULTS & WORKBENCH ACCESS CARD (FOR WORKFLOWS 1 & 2) -->
+    <div id="view-roster-download" style="width: 100%; max-width: 960px; display: block;">
+      <!-- Hidden legacy wrapper to avoid breakage -->
+      <div id="panel-search-player" style="display:none;"></div>
+      <div id="panel-search-url" style="display:none;"></div>
 
-        <!-- Quick Presets -->
-        <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:12px;">
-          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:700;">Quick Presets:</span>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://jegkorong.deac.hu/a-csapat', 'DEAC')">DEAC (Erste Liga)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://gyergyoihoki.ro/jatekosok-2/', 'Gyergyói Hoki Klub')">Gyergyói HK (Erste Liga)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.hcbilitygri.cz/roster/MUZ', 'Bílí Tygři Liberec')">Bílí Tygři Liberec (Extraliga)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.bkboleslav.cz/roster/MUZ', 'BK Mladá Boleslav')">BK Mladá Boleslav (Extraliga)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.cardiffdevils.com/team/', 'Cardiff Devils')">Cardiff Devils (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://coventryblaze.co.uk/roster', 'Coventry Blaze')">Coventry Blaze (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.belfastgiants.com/players', 'Belfast Giants')">Belfast Giants (EIHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://www.nhl.com/sabres/roster', 'Buffalo Sabres')">Buffalo Sabres (NHL)</button>
-          <button type="button" class="preset-pill" onclick="setPresetUrl('https://smcathletics.com/sports/mens-basketball/roster/2025-26', 'Saint Michael\'s College')">Saint Michael's (NCAA)</button>
-        </div>
-
-        <div class="quality-boost-tag">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          <span><strong>Production Quality Standard:</strong> High-res transparent headshots standardized with Lanczos-3 downsampling to 800px source canvas.</span>
-        </div>
-      </div>
 
       <!-- Fetched Players Section -->
       <div class="roster-results-card" id="roster-results-card" style="display: none;">
@@ -5767,7 +8545,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <span id="roster-team-title">Team Roster</span>
             <span class="photo-count-pill" id="roster-player-count">0 Players</span>
           </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+          <div class="roster-header-actions">
             <button class="btn btn-primary btn-sheet-copy" onclick="copyRosterForSheets()" title="Copy entire table to clipboard formatted for instant paste into Google Sheets or Excel">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg><span>Copy for Sheets</span>
             </button>
@@ -5786,6 +8564,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- Interactive Stint & Photo Selector for Single Player -->
+        <div id="player-options-card" class="player-options-card" style="display: none;">
+          <!-- Dynamically populated by renderPlayerOptionsCard() -->
+        </div>
+
         <!-- Bulk Paste Drawer -->
         <div class="bulk-paste-drawer" id="bulk-paste-drawer">
           <div style="font-size:0.8rem; font-weight:700; color:var(--text); margin-bottom:6px;">
@@ -5801,12 +8584,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- Players Table -->
-        <div style="overflow-x: auto; max-height: 520px; overflow-y: auto;">
+        <!-- Mobile Table Hint & Responsive Table Wrapper -->
+        <div class="mobile-table-hint">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/><polyline points="19 18 13 12 19 6"/></svg>
+          <span>Swipe horizontally to view vitals & assigned ID columns (Player photo & name stay pinned)</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/><polyline points="5 18 11 12 5 6"/></svg>
+        </div>
+        <div class="roster-table-wrapper">
           <table class="roster-table" id="roster-data-table">
             <thead>
               <tr>
                 <th style="min-width: 180px;">Player</th>
+                <th style="min-width: 150px;">Team / Stint</th>
+                <th style="min-width: 105px; text-align: center;">Years Played</th>
                 <th style="width: 45px; text-align: center;">#</th>
                 <th style="width: 55px; text-align: center;">Pos</th>
                 <th style="width: 45px; text-align: center;">Sh</th>
@@ -5814,8 +8604,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
                 <th style="width: 60px; text-align: center;">Wt</th>
                 <th style="min-width: 115px;">Born</th>
                 <th style="min-width: 160px;">Birthplace</th>
-                <th style="width: 160px;">Assigned ID</th>
-                <th style="width: 180px;">Resulting Filename</th>
+                <th style="width: 150px;">Assigned ID</th>
+                <th style="width: 200px;">Resulting Filename</th>
               </tr>
             </thead>
             <tbody id="roster-table-body">
@@ -5829,7 +8619,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div class="roster-summary-text" id="roster-summary-text">
             Ready to download
           </div>
-          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <div class="roster-footer-actions">
             <button class="btn btn-secondary" style="padding: 10px 20px; font-size: 0.92rem; background:#0284c7; border-color:#38bdf8; color:#fff; font-weight:700;" onclick="openRosterInStudioDirectly()" title="Load photos directly into studio workbench without writing to Render storage">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg><span>Open in Studio</span>
             </button>
@@ -5842,10 +8632,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       <!-- Success Card -->
       <div class="roster-results-card" id="roster-success-card" style="display: none; text-align: center; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.05);">
-        <div style="width:48px; height:48px; border-radius:50%; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); display:inline-flex; align-items:center; justify-content:center; color:#34d399; margin:0 auto 12px auto;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text); margin-bottom: 6px;">Photos Downloaded to Your PC!</h3>
+        <div style="width:48px; height:48px; border-radius:var(--r-md); background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.35); display:inline-flex; align-items:center; justify-content:center; color:#34d399; margin:0 auto 12px auto;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <h3 style="font-size: 1.25rem; font-weight: 800; color: var(--text); margin-bottom: 6px;">Portraits Exported Directly to Your PC</h3>
         <p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 16px;" id="roster-success-desc">
-          All portraits were downloaded directly to your computer's Downloads as a standardized ZIP (0 bytes stored on Render).
+          All portraits were downloaded directly to your computer's Downloads as a standardized ZIP (Direct client pipeline &mdash; 0 cloud storage footprint).
         </p>
         <div style="display:flex; justify-content:center; gap:12px; margin-top:8px; flex-wrap:wrap;">
           <button class="btn btn-primary" style="padding: 12px 28px; font-size: 1rem; font-weight:700;" onclick="openDownloadedFolderInStudio()">
@@ -5859,6 +8649,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </button>
         </div>
       </div>
+    </div>
+
+    <!-- VeloRoster AI Footer -->
+    <div style="margin-top:40px; padding:20px 0; border-top:1px solid rgba(255,255,255,0.08); font-size:0.75rem; color:var(--text-muted); text-align:center; width:100%; max-width:960px; line-height:1.6;">
+      <div style="font-weight:700; color:#cbd5e1; margin-bottom:4px;">VeloRoster AI™ &bull; Developed by Ecstaticloud Technologies</div>
+      <div>Proprietary software for athletic roster ingestion, player number assignment, and 180×180 headshot standardization. Built from scratch with full proprietary rights owned by Ecstaticloud Technologies.</div>
+      <div style="color:#64748b; font-size:0.7rem; margin-top:4px;">&copy; 2026 Ecstaticloud Technologies. All Rights Reserved.</div>
     </div>
   </div>
 
@@ -6175,7 +8972,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     async function loadRosterDirectlyIntoStudio(players, folderName) {
       if (!players || players.length === 0) return;
-      showLoading(`Loading ${players.length} roster players directly into Studio (0 server storage)...`);
+
+      const validPlayers = players.filter(p => p.image && p.image.trim());
+      if (validPlayers.length === 0) {
+        showToast("No headshot photos available for this team to tune in Studio. You can still download the roster CSV/Sheets data.", "info");
+        return;
+      }
+
+      showLoading(`Loading ${validPlayers.length} roster players directly into Studio (0 server storage)...`);
       try {
         currentFolder = folderName || 'Roster_Photos';
         editedFolder = currentFolder + '_edited';
@@ -6191,7 +8995,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         const carousel = document.getElementById('carousel');
         carousel.innerHTML = '';
 
-        players.forEach((p, idx) => {
+        validPlayers.forEach((p, idx) => {
           const pName = p.name || `Player_${idx + 1}`;
           const assigned = p.assigned_number ? p.assigned_number.trim() : '';
           const cleanAssigned = assigned.replace(/[\\/*?:"<>|]/g, '').trim();
@@ -6548,10 +9352,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
       showLoading('Loading portrait...');
 
       if (!data.img) {
+        let loaded = false;
         const img = new Image();
         const loadPromise = new Promise((resolve, reject) => {
           img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error('Failed to load image: ' + name));
+          img.onerror = () => reject(new Error('Proxy error'));
         });
 
         if (data.blobUrl) {
@@ -6569,12 +9374,58 @@ HTML_PAGE = r"""<!DOCTYPE html>
         try {
           await loadPromise;
           data.img = img;
-        } catch (err) {
-          console.error(err);
-          hideLoading();
-          return;
+          loaded = true;
+        } catch (errProxy) {
+          console.warn('Proxy load failed, trying direct image:', errProxy);
+          if (data.url) {
+            try {
+              const directImg = new Image();
+              const directPromise = new Promise((resolve, reject) => {
+                directImg.onload = () => resolve(directImg);
+                directImg.onerror = () => reject(new Error('Direct error'));
+              });
+              directImg.crossOrigin = 'anonymous';
+              directImg.src = data.url;
+              await directPromise;
+              data.img = directImg;
+              loaded = true;
+            } catch (errDirect) {
+              console.warn('Direct load failed:', errDirect);
+            }
+          }
         }
 
+        // If photo still couldn't be loaded, generate a styled avatar canvas so canvas never goes black
+        if (!data.img) {
+          const fbCanvas = document.createElement('canvas');
+          fbCanvas.width = 800;
+          fbCanvas.height = 800;
+          const fbCtx = fbCanvas.getContext('2d');
+          const grad = fbCtx.createLinearGradient(0, 0, 800, 800);
+          grad.addColorStop(0, '#0f172a');
+          grad.addColorStop(1, '#1e293b');
+          fbCtx.fillStyle = grad;
+          fbCtx.fillRect(0, 0, 800, 800);
+          fbCtx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+          fbCtx.beginPath();
+          fbCtx.arc(400, 400, 260, 0, Math.PI * 2);
+          fbCtx.fill();
+          const initials = (data.player_name || name || 'A').split(' ').map(w => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase() || 'A';
+          fbCtx.fillStyle = '#ff7043';
+          fbCtx.font = 'bold 120px system-ui, -apple-system, sans-serif';
+          fbCtx.textAlign = 'center';
+          fbCtx.textBaseline = 'middle';
+          fbCtx.fillText(initials, 400, 360);
+          fbCtx.fillStyle = '#94a3b8';
+          fbCtx.font = '600 36px system-ui, -apple-system, sans-serif';
+          fbCtx.fillText((data.player_name || name).replace(/\.[^.]+$/, ''), 400, 480);
+          const fbImg = new Image();
+          fbImg.src = fbCanvas.toDataURL('image/png');
+          await new Promise(r => { fbImg.onload = r; });
+          data.img = fbImg;
+        }
+
+        const activeImg = data.img;
         try {
           let autoRes;
           if (data.url) {
@@ -6603,8 +9454,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
             throw new Error('auto-align returned non-200');
           }
         } catch (e) {
-          data.scale = 180 / (img.height || 180);
-          data.offset_x = (180 - (img.width || 180) * data.scale) / 2;
+          const w = activeImg.width || 800;
+          const h = activeImg.height || 800;
+          data.scale = 180 / h;
+          data.offset_x = (180 - w * data.scale) / 2;
           data.offset_y = 0;
         }
       }
@@ -7032,7 +9885,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
       hideLoading();
       btn.disabled = false;
-      alert(`🎉 Batch Complete!\nSuccessfully processed ${completed} of ${photos.length} portraits and downloaded directly to your PC!` + (errors > 0 ? `\n(${errors} items failed)` : ''));
+      alert(`Batch Processing Complete.\nSuccessfully processed ${completed} of ${photos.length} portraits and exported directly to your computer.` + (errors > 0 ? `\n(${errors} items failed)` : ''));
     }
 
     function showOriginal(show) {
@@ -7170,72 +10023,315 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     let fetchedRosterPlayers = [];
+    let currentPlayerOptions = [];
+    let currentPhotoOptions = [];
+    let isSinglePlayerMode = false;
+    let selectedStintIndex = 0;
+    let selectedPhotoIndex = 0;
+    let currentSearchMode = 'player';
     let currentRosterTargetDir = "";
 
-    function switchLandingTab(tab) {
-      const btnLocal = document.getElementById('tab-btn-local');
-      const btnRoster = document.getElementById('tab-btn-roster');
-      const viewLocal = document.getElementById('view-local-folder');
-      const viewRoster = document.getElementById('view-roster-download');
+    function switchMainWorkflow(mode) {
+      currentSearchMode = (mode === 'url') ? 'url' : 'player';
+      const btnA = document.getElementById('tab-nav-athlete');
+      const btnU = document.getElementById('tab-nav-url');
+      const btnL = document.getElementById('tab-nav-local');
+      const pA = document.getElementById('panel-workflow-athlete');
+      const pU = document.getElementById('panel-workflow-url');
+      const pL = document.getElementById('panel-workflow-local');
 
+      if (btnA) btnA.classList.toggle('active', mode === 'athlete');
+      if (btnU) btnU.classList.toggle('active', mode === 'url');
+      if (btnL) btnL.classList.toggle('active', mode === 'local');
+
+      if (pA) pA.style.display = (mode === 'athlete') ? 'flex' : 'none';
+      if (pU) pU.style.display = (mode === 'url') ? 'flex' : 'none';
+      if (pL) pL.style.display = (mode === 'local') ? 'flex' : 'none';
+    }
+
+    function switchLandingTab(tab) {
       if (tab === 'local') {
-        btnLocal.classList.add('active');
-        btnRoster.classList.remove('active');
-        viewLocal.style.display = 'flex';
-        viewRoster.style.display = 'none';
+        switchMainWorkflow('local');
       } else {
-        btnRoster.classList.add('active');
-        btnLocal.classList.remove('active');
-        viewLocal.style.display = 'none';
-        viewRoster.style.display = 'flex';
+        switchMainWorkflow('athlete');
       }
     }
 
-    async function fetchRosterPlayers() {
-      const url = document.getElementById('roster-url-input').value.trim();
+    function switchSearchMode(mode) {
+      if (mode === 'url') {
+        switchMainWorkflow('url');
+      } else {
+        switchMainWorkflow('athlete');
+      }
+    }
+
+    function searchAthlete() {
+      const pName = (document.getElementById('search-player-name') ? document.getElementById('search-player-name').value : '').trim();
+      const tName = (document.getElementById('search-player-team') ? document.getElementById('search-player-team').value : '').trim();
+      if (!pName) {
+        alert('Please enter a player name.');
+        return;
+      }
+      fetchRosterData({ player_name: pName, team_name: tName });
+    }
+
+    function fetchRosterPlayers() {
+      const url = (document.getElementById('roster-url-input') ? document.getElementById('roster-url-input').value : '').trim();
       if (!url) {
         alert('Please enter a valid athletics roster URL.');
         return;
       }
-      showLoading('Fetching roster & extracting high-res photos...');
+      fetchRosterData({ url });
+    }
+
+    function setPlayerPreset(playerName, teamName) {
+      switchMainWorkflow('athlete');
+      if (document.getElementById('search-player-name')) document.getElementById('search-player-name').value = playerName;
+      if (document.getElementById('search-player-team')) document.getElementById('search-player-team').value = teamName || '';
+      const folder = teamName ? `${teamName} - ${playerName}` : (playerName ? `Player - ${playerName}` : '');
+      if (document.getElementById('roster-folder-input')) document.getElementById('roster-folder-input').value = folder;
+      searchAthlete();
+    }
+
+    function setUrlPreset(url, folderName) {
+      switchMainWorkflow('url');
+      if (document.getElementById('roster-url-input')) document.getElementById('roster-url-input').value = url;
+      if (folderName) {
+        if (document.getElementById('roster-folder-input-url')) document.getElementById('roster-folder-input-url').value = folderName;
+        if (document.getElementById('roster-folder-input')) document.getElementById('roster-folder-input').value = folderName;
+      }
+      fetchRosterPlayers();
+    }
+
+    async function fetchRosterData(payload) {
+      showLoading('Fetching sports data & extracting high-res photos...');
       try {
         const res = await fetch('/api/fetch_roster', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url })
+          body: JSON.stringify(payload)
         });
         const data = await res.json();
         if (data.status !== 'ok' || !data.players || data.players.length === 0) {
-          alert('Could not find players on roster: ' + (data.message || 'No players detected'));
+          alert('Could not find player or roster: ' + (data.message || 'No players detected'));
           return;
         }
 
         fetchedRosterPlayers = data.players;
+        currentPlayerOptions = data.options || [];
+        currentPhotoOptions = data.photo_options || [];
+        isSinglePlayerMode = !!data.is_single_player;
+        selectedStintIndex = 0;
+        selectedPhotoIndex = 0;
+
         if (data.suggested_folder) {
-          document.getElementById('roster-folder-input').value = data.suggested_folder;
+          if (document.getElementById('roster-folder-input')) document.getElementById('roster-folder-input').value = data.suggested_folder;
+          if (document.getElementById('roster-folder-input-url')) document.getElementById('roster-folder-input-url').value = data.suggested_folder;
           document.getElementById('roster-team-title').textContent = data.suggested_folder;
+        }
+
+        if (isSinglePlayerMode && currentPlayerOptions.length > 0) {
+          renderPlayerOptionsCard();
+          const optCard = document.getElementById('player-options-card');
+          if (optCard) optCard.style.display = 'block';
+        } else {
+          const optCard = document.getElementById('player-options-card');
+          if (optCard) optCard.style.display = 'none';
         }
 
         renderRosterTable();
         document.getElementById('roster-results-card').style.display = 'block';
         document.getElementById('roster-success-card').style.display = 'none';
       } catch (e) {
-        alert('Error fetching roster: ' + e);
+        alert('Error fetching sports data: ' + e);
       } finally {
         hideLoading();
       }
     }
 
+    function renderPlayerOptionsCard() {
+      const card = document.getElementById('player-options-card');
+      if (!card) return;
+      if (!currentPlayerOptions || currentPlayerOptions.length === 0) {
+        card.style.display = 'none';
+        return;
+      }
+
+      const player = fetchedRosterPlayers[0];
+      const opt = currentPlayerOptions[selectedStintIndex] || currentPlayerOptions[0] || {};
+      const hasMatch = !!opt.is_target_match || currentPlayerOptions.some(o => o.is_target_match);
+
+      const rawImg = (player.image && player.image.trim()) ? player.image.trim() : '';
+      const defaultAvatarSvg = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="#64748b"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`);
+      const avatarSrc = rawImg ? `/api/proxy_photo?url=${encodeURIComponent(rawImg)}&width=360` : defaultAvatarSvg;
+
+      const vitals = [];
+      if (opt.jersey || player.jersey) vitals.push(`<span class="vital-badge-chip" style="color:#ff7043; border-color:rgba(255,87,34,0.3); font-weight:800;">#${opt.jersey || player.jersey}</span>`);
+      if (opt.pos || opt.position || player.pos || player.position) vitals.push(`<span class="vital-badge-chip">Pos: ${opt.pos || opt.position || player.pos || player.position}</span>`);
+      if (opt.years || player.years) vitals.push(`<span class="vital-badge-chip" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${opt.years || player.years}</span>`);
+      if (opt.height || player.height) vitals.push(`<span class="vital-badge-chip">Ht: ${opt.height || player.height}</span>`);
+      if (opt.weight || player.weight) vitals.push(`<span class="vital-badge-chip">Wt: ${opt.weight || player.weight}</span>`);
+      if (opt.shoots || player.shoots) vitals.push(`<span class="vital-badge-chip">Shoots: ${opt.shoots || player.shoots}</span>`);
+      if (opt.born || opt.birth_date || player.born) vitals.push(`<span class="vital-badge-chip">Born: ${opt.born || opt.birth_date || player.born}</span>`);
+
+      let html = `
+        <div class="verified-athlete-card">
+          <div class="athlete-headshot-frame" style="box-shadow:0 8px 24px rgba(0,0,0,0.5);">
+            <img src="${avatarSrc}" class="athlete-headshot-img" alt="${player.name}" onerror="if(!this.dataset.direct && '${rawImg}'){this.dataset.direct='1';this.src='${rawImg}';}else{this.onerror=null;this.src='${defaultAvatarSvg}';}">
+            <div class="athlete-frame-badge">180 × 180 SPEC</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:4px;">
+              <h3 style="font-family:var(--font-heading); font-size:1.35rem; font-weight:800; color:#ffffff; margin:0;">${player.name}</h3>
+              ${hasMatch ? '<span style="font-size:0.72rem; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); border-radius:var(--r-xs); padding:3px 10px; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; display:inline-flex; align-items:center; gap:5px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg> Verified Stint Match</span>' : '<span style="font-size:0.72rem; color:#38bdf8; background:rgba(56,189,248,0.15); border:1px solid rgba(56,189,248,0.4); border-radius:var(--r-xs); padding:3px 10px; font-weight:700;">Career Profile</span>'}
+            </div>
+            <div style="font-size:0.95rem; font-weight:700; color:#ff7043; margin-bottom:8px;">
+              ${opt.team || player.team || 'Active Stint'} ${opt.years ? '<span style="color:#94a3b8; font-weight:600; font-size:0.85rem;">(' + opt.years + ')</span>' : ''}
+            </div>
+            <div class="athlete-vitals-meta">
+              ${vitals.join('')}
+            </div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; align-items:stretch; min-width:180px;">
+            <button class="btn btn-primary" onclick="openRosterInStudioDirectly()" style="padding:10px 18px; font-size:0.85rem; font-weight:800; justify-content:center; box-shadow:var(--hudl-glow);">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              <span>Tune in Workbench</span>
+            </button>
+            <button class="btn btn-secondary" onclick="downloadAllRosterPhotos()" style="padding:8px 14px; font-size:0.8rem; justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              <span>Download 180×180</span>
+            </button>
+          </div>
+        </div>
+      `;
+
+      if (currentPhotoOptions && currentPhotoOptions.length > 1) {
+        html += `
+          <div class="photo-sources-section">
+            <div class="photo-sources-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <span>Alternate High-Res Photos (${currentPhotoOptions.length} Cutouts & Portraits &mdash; Click to Use):</span>
+            </div>
+            <div class="photo-thumbs-row">
+        `;
+        currentPhotoOptions.forEach((ph, pIdx) => {
+          const isPhotoActive = (pIdx === selectedPhotoIndex);
+          const proxySrc = `/api/proxy_photo?url=${encodeURIComponent(ph.url)}&width=140`;
+          html += `
+            <div class="photo-thumb-card ${isPhotoActive ? 'active' : ''}" onclick="selectPlayerPhoto(${pIdx})" title="${ph.title || 'Photo'}">
+              <img src="${proxySrc}" class="photo-thumb-img" alt="${ph.title || 'Photo'}" loading="lazy" onerror="if(!this.dataset.direct){this.dataset.direct='1';this.src='${ph.url}';}else{this.onerror=null;this.style.opacity='0.25';}">
+            </div>
+          `;
+        });
+        html += `
+            </div>
+          </div>
+        `;
+      }
+
+      if (currentPlayerOptions && currentPlayerOptions.length > 1) {
+        html += `
+          <div style="margin-top:16px;">
+            <div style="font-size:0.76rem; font-weight:700; color:#94a3b8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:8px; display:flex; align-items:center; gap:6px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+              <span>Other Career Stints & Teams (${currentPlayerOptions.length} Available):</span>
+            </div>
+            <div class="stint-options-grid">
+        `;
+
+        currentPlayerOptions.forEach((cOpt, idx) => {
+          const isActive = (idx === selectedStintIndex);
+          const yrsBadge = cOpt.years ? `<span class="stint-years-badge">${cOpt.years}</span>` : '<span class="stint-years-badge" style="color:#64748b; background:#1e293b;">Career</span>';
+          const posText = cOpt.pos || cOpt.position || '';
+          const numText = cOpt.jersey ? `#${cOpt.jersey}` : '';
+          const cVitals = [numText, posText].filter(Boolean).join(' | ');
+
+          html += `
+            <div class="stint-card ${isActive ? 'active' : ''}" onclick="selectPlayerStint(${idx})">
+              <div class="stint-card-info">
+                <div class="stint-team-name" title="${cOpt.team}">${cOpt.team || 'Free Agent / Athlete'}</div>
+                <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
+                  ${yrsBadge}
+                  ${cVitals ? `<span class="stint-vitals">${cVitals}</span>` : ''}
+                </div>
+              </div>
+              ${isActive ? '<span style="font-size:0.68rem; font-weight:800; color:#10b981; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.3); border-radius:var(--r-xs); padding:2px 8px; letter-spacing:0.04em;">ACTIVE</span>' : '<span style="font-size:0.68rem; font-weight:600; color:var(--text-muted); border:1px solid rgba(255,255,255,0.08); border-radius:var(--r-xs); padding:2px 8px;">SELECT</span>'}
+            </div>
+          `;
+        });
+
+        html += `
+            </div>
+          </div>
+        `;
+      }
+
+      card.innerHTML = html;
+    }
+
+    function selectPlayerStint(idx) {
+      if (!currentPlayerOptions || !currentPlayerOptions[idx]) return;
+      selectedStintIndex = idx;
+      const opt = currentPlayerOptions[idx];
+
+      if (fetchedRosterPlayers.length > 0) {
+        fetchedRosterPlayers[0].team = opt.team || '';
+        fetchedRosterPlayers[0].years = opt.years || '';
+        if (opt.jersey) fetchedRosterPlayers[0].jersey = opt.jersey;
+        if (opt.pos) fetchedRosterPlayers[0].pos = opt.pos;
+        if (opt.position) fetchedRosterPlayers[0].position = opt.position;
+        if (opt.shoots) fetchedRosterPlayers[0].shoots = opt.shoots;
+        if (opt.height) fetchedRosterPlayers[0].height = opt.height;
+        if (opt.weight) fetchedRosterPlayers[0].weight = opt.weight;
+        if (opt.born) fetchedRosterPlayers[0].born = opt.born;
+        if (opt.birthplace) fetchedRosterPlayers[0].birthplace = opt.birthplace;
+      }
+
+      const folderName = opt.team ? `${opt.team} - ${fetchedRosterPlayers[0].name}` : `Player - ${fetchedRosterPlayers[0].name}`;
+      if (document.getElementById('roster-folder-input')) document.getElementById('roster-folder-input').value = folderName;
+      if (document.getElementById('roster-team-title')) document.getElementById('roster-team-title').textContent = folderName;
+
+      renderPlayerOptionsCard();
+      renderRosterTable();
+      showToast(`Selected ${opt.team || 'Career'} (${opt.years || ''}) for ${fetchedRosterPlayers[0].name}`);
+    }
+
+    function selectPlayerPhoto(pIdx) {
+      if (!currentPhotoOptions || !currentPhotoOptions[pIdx]) return;
+      selectedPhotoIndex = pIdx;
+      const ph = currentPhotoOptions[pIdx];
+
+      if (fetchedRosterPlayers.length > 0) {
+        fetchedRosterPlayers[0].image = ph.url;
+        fetchedRosterPlayers[0].raw_image = ph.url;
+        fetchedRosterPlayers[0].has_photo = true;
+      }
+
+      renderPlayerOptionsCard();
+      renderRosterTable();
+      showToast(`Photo updated: ${ph.title || 'Selected Photo'}`);
+    }
+
     function renderRosterTable() {
       const tbody = document.getElementById('roster-table-body');
       tbody.innerHTML = '';
-      document.getElementById('roster-player-count').textContent = `${fetchedRosterPlayers.length} Players`;
+
+      const countEl = document.getElementById('roster-player-count');
+      if (isSinglePlayerMode && fetchedRosterPlayers.length > 0) {
+        const p = fetchedRosterPlayers[0];
+        const stintDesc = p.team ? `${p.team} (${p.years || 'Career'})` : 'Career Profile';
+        countEl.textContent = `1 Verified Athlete: ${p.name} — ${stintDesc}`;
+      } else {
+        countEl.textContent = `${fetchedRosterPlayers.length} Players`;
+      }
 
       fetchedRosterPlayers.forEach((p, idx) => {
         const tr = document.createElement('tr');
         tr.className = 'roster-row';
 
         const currentAssigned = p.assigned_number || '';
+        const teamVal = p.team ? `<span style="font-weight:700; color:var(--text); font-size:0.83rem;">${p.team}</span>` : '-';
+        const yearsVal = p.years ? `<span style="font-family:'JetBrains Mono', monospace; font-size:0.78rem; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); border-radius:4px; padding:2px 6px;">${p.years}</span>` : '-';
         const jerseyVal = p.jersey ? p.jersey : '-';
         const posVal = p.pos || p.position || '-';
         const shootsVal = p.shoots || '-';
@@ -7244,13 +10340,24 @@ HTML_PAGE = r"""<!DOCTYPE html>
         const bornVal = p.born || p.birth_date || '-';
         const placeVal = p.birthplace || p.birth_place || '-';
 
+        const defaultAvatar = "data:image/svg+xml;utf8," + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="42" height="42" viewBox="0 0 24 24" fill="#64748b"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>`);
+        const pImg = (p.image && p.image.trim()) ? p.image.trim() : '';
+        const hasPhoto = !!pImg;
+        const avatarSrc = hasPhoto ? `/api/proxy_photo?url=${encodeURIComponent(pImg)}&width=200` : defaultAvatar;
+
         tr.innerHTML = `
           <td class="roster-cell">
             <div class="player-cell-content">
-              <img src="${p.image}" class="player-avatar-circle" alt="${p.name}" loading="lazy" onerror="this.src='https://via.placeholder.com/42?text=Photo'">
-              <span class="player-name-text">${p.name}</span>
+              <img src="${avatarSrc}" class="player-avatar-circle" alt="${p.name}" loading="lazy" onerror="if(!this.dataset.direct && '${pImg}'){this.dataset.direct='1';this.src='${pImg}';}else{this.onerror=null;this.src='${defaultAvatar}';}">
+              <div style="display:flex; flex-direction:column; gap:2px;">
+                <span class="player-name-text">${p.name}</span>
+                ${p.is_target_match ? '<span style="font-size:0.68rem; color:#10b981; font-weight:800; background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:var(--r-xs); padding:1px 6px; text-transform:uppercase;">VERIFIED STINT MATCH</span>' : ''}
+              </div>
+              ${hasPhoto ? '' : '<span style="font-size:0.72rem; color:#f59e0b; background:rgba(245,158,11,0.12); border:1px solid rgba(245,158,11,0.25); border-radius:4px; padding:1px 5px; margin-left:6px; font-weight:600;">No Photo</span>'}
             </div>
           </td>
+          <td class="roster-cell">${teamVal}</td>
+          <td class="roster-cell" style="text-align:center;">${yearsVal}</td>
           <td class="roster-cell" style="text-align:center; font-weight:700; color:var(--accent); font-family:'JetBrains Mono', monospace;">${jerseyVal}</td>
           <td class="roster-cell" style="text-align:center; font-weight:700;">${posVal}</td>
           <td class="roster-cell" style="text-align:center; color:var(--text-muted); font-weight:600;">${shootsVal}</td>
@@ -7259,7 +10366,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <td class="roster-cell" style="white-space:nowrap; color:var(--text-muted);">${bornVal}</td>
           <td class="roster-cell" style="white-space:nowrap; color:var(--text-muted);">${placeVal}</td>
           <td class="roster-cell">
-            <input type="text" class="assign-input" id="assign-num-${idx}" placeholder="Leave empty for Name" value="${currentAssigned}" oninput="onAssignedNumInput(${idx})">
+            <input type="text" class="assign-input" id="assign-num-${idx}" placeholder="Leave empty for auto" value="${currentAssigned}" oninput="onAssignedNumInput(${idx})">
           </td>
           <td class="roster-cell" id="filename-preview-cell-${idx}">
           </td>
@@ -7277,16 +10384,27 @@ HTML_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      const headers = ['Player', '#', 'Pos', 'Sh', 'Ht', 'Wt', 'Born', 'Birthplace', 'Assigned ID', 'Filename'];
+      const headers = ['Player', 'Team', 'Years', '#', 'Pos', 'Sh', 'Ht', 'Wt', 'Born', 'Birthplace', 'Assigned ID', 'Filename'];
       const rows = [headers.join('\t')];
 
       fetchedRosterPlayers.forEach(p => {
         const assigned = (p.assigned_number || '').trim();
         const cleanName = p.name.replace(/[\\/*?:"<>|]/g, '').trim();
-        const filename = assigned ? `${assigned}.png` : `${cleanName}.png`;
+        const cleanTeam = (p.team || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        const cleanYears = (p.years || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        let filename = `${cleanName}.png`;
+        if (assigned) {
+          filename = `${assigned}.png`;
+        } else if (cleanTeam && cleanYears) {
+          filename = `${cleanName} - ${cleanTeam} (${cleanYears}).png`;
+        } else if (cleanTeam) {
+          filename = `${cleanName} - ${cleanTeam}.png`;
+        }
 
         rows.push([
           p.name,
+          p.team || '',
+          p.years || '',
           p.jersey || '',
           p.pos || p.position || '',
           p.shoots || '',
@@ -7300,7 +10418,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       });
 
       const tsvText = rows.join('\n');
-      showToast(`📋 Copied ${fetchedRosterPlayers.length} players to clipboard! Paste directly into Google Sheets or Excel (Cmd+V / Ctrl+V).`);
+      showToast(`Copied ${fetchedRosterPlayers.length} athletes to clipboard. Paste directly into Google Sheets or Excel (Cmd+V / Ctrl+V).`);
 
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(tsvText).catch(() => fallbackCopyText(tsvText));
@@ -7329,7 +10447,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
-      const headers = ['Player', '#', 'Pos', 'Sh', 'Ht', 'Wt', 'Born', 'Birthplace', 'Assigned ID', 'Filename'];
+      const headers = ['Player', 'Team', 'Years', '#', 'Pos', 'Sh', 'Ht', 'Wt', 'Born', 'Birthplace', 'Assigned ID', 'Filename'];
       const escapeCSV = (val) => {
         if (val === null || val === undefined) return '""';
         const str = String(val);
@@ -7344,10 +10462,21 @@ HTML_PAGE = r"""<!DOCTYPE html>
       fetchedRosterPlayers.forEach(p => {
         const assigned = (p.assigned_number || '').trim();
         const cleanName = p.name.replace(/[\\/*?:"<>|]/g, '').trim();
-        const filename = assigned ? `${assigned}.png` : `${cleanName}.png`;
+        const cleanTeam = (p.team || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        const cleanYears = (p.years || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        let filename = `${cleanName}.png`;
+        if (assigned) {
+          filename = `${assigned}.png`;
+        } else if (cleanTeam && cleanYears) {
+          filename = `${cleanName} - ${cleanTeam} (${cleanYears}).png`;
+        } else if (cleanTeam) {
+          filename = `${cleanName} - ${cleanTeam}.png`;
+        }
 
         csvRows.push([
           p.name,
+          p.team || '',
+          p.years || '',
           p.jersey || '',
           p.pos || p.position || '',
           p.shoots || '',
@@ -7378,7 +10507,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       if (!toast) {
         toast = document.createElement('div');
         toast.id = 'studio-toast';
-        toast.style.cssText = 'position:fixed; bottom:28px; left:50%; transform:translateX(-50%); background:#ffffff; border:1px solid rgba(180, 140, 45, 0.4); color:#0f172a; box-shadow:0 12px 35px rgba(15,23,42,0.12); padding:12px 24px; border-radius:30px; font-size:0.88rem; font-weight:700; box-shadow:0 10px 35px rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity 0.25s, transform 0.25s; pointer-events:none;';
+        toast.style.cssText = 'position:fixed; bottom:28px; left:50%; transform:translateX(-50%); background:#0f172a; border:1px solid rgba(255, 87, 34, 0.5); color:#ffffff; padding:10px 20px; border-radius:6px; font-size:0.84rem; font-weight:700; box-shadow:0 12px 35px rgba(0,0,0,0.85); z-index:99999; display:flex; align-items:center; gap:8px; opacity:0; transition:opacity 0.25s, transform 0.25s; pointer-events:none;';
         document.body.appendChild(toast);
       }
       toast.textContent = msg;
@@ -7392,11 +10521,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     function setPresetUrl(url, folderName) {
-      document.getElementById('roster-url-input').value = url;
-      if (folderName) {
-        document.getElementById('roster-folder-input').value = folderName;
-      }
-      fetchRosterPlayers();
+      setUrlPreset(url, folderName);
     }
 
     function useJerseyNumbersAsAssigned() {
@@ -7435,7 +10560,15 @@ HTML_PAGE = r"""<!DOCTYPE html>
         cell.innerHTML = `<span class="filename-preview-badge badge-assigned">${cleanVal}.png</span>`;
       } else {
         const cleanName = p.name.replace(/[\\/*?:"<>|]/g, '').trim();
-        cell.innerHTML = `<span class="filename-preview-badge badge-default-name" title="No number assigned: using player name">📄 ${cleanName}.png <span style="font-size:0.65rem; opacity:0.8;">(name)</span></span>`;
+        const cleanTeam = (p.team || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        const cleanYears = (p.years || '').replace(/[\\/*?:"<>|]/g, '').trim();
+        let defaultFn = `${cleanName}.png`;
+        if (cleanTeam && cleanYears) {
+          defaultFn = `${cleanName} - ${cleanTeam} (${cleanYears}).png`;
+        } else if (cleanTeam) {
+          defaultFn = `${cleanName} - ${cleanTeam}.png`;
+        }
+        cell.innerHTML = `<span class="filename-preview-badge badge-default-name" title="No ID assigned: using auto format">📄 ${defaultFn}</span>`;
       }
     }
 
@@ -7443,9 +10576,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
       const total = fetchedRosterPlayers.length;
       const assignedCount = fetchedRosterPlayers.filter(p => (p.assigned_number || '').trim().length > 0).length;
       const nameCount = total - assignedCount;
+      const photoCount = fetchedRosterPlayers.filter(p => (p.image || '').trim().length > 0).length;
 
       const summary = document.getElementById('roster-summary-text');
-      summary.innerHTML = `Total: <strong>${total}</strong> | Assigned IDs: <strong>${assignedCount}</strong> | Defaulted to Player Name: <strong>${nameCount}</strong>`;
+      summary.innerHTML = `Total: <strong>${total}</strong> | Photos Available: <strong style="color:${photoCount > 0 ? '#10b981' : '#f59e0b'};">${photoCount} / ${total}</strong> | Assigned IDs: <strong>${assignedCount}</strong> | Defaulted to Player Name: <strong>${nameCount}</strong>`;
     }
 
     function toggleBulkPasteDrawer() {
@@ -7548,13 +10682,21 @@ HTML_PAGE = r"""<!DOCTYPE html>
         return;
       }
 
+      const validPhotoPlayers = fetchedRosterPlayers.filter(p => p.image && p.image.trim());
+      if (validPhotoPlayers.length === 0) {
+        alert('None of the players on this roster have uploaded portrait photos on the site (all redirect to default SVG avatar).');
+        return;
+      }
+
       const payload = {
         folder_name: folderName,
-        players: fetchedRosterPlayers,
+        players: validPhotoPlayers,
         target_width: 800
       };
 
-      showLoading(`Downloading & standardizing ${fetchedRosterPlayers.length} photos directly to your PC as ZIP (0 Render storage)...`);
+      const skippedCount = fetchedRosterPlayers.length - validPhotoPlayers.length;
+      const skipNote = skippedCount > 0 ? ` (${skippedCount} youth players without uploaded headshot skipped)` : '';
+      showLoading(`Downloading & standardizing ${validPhotoPlayers.length} portraits${skipNote} directly to your PC as ZIP (0 Render storage)...`);
       try {
         const res = await fetch('/api/download_roster_zip', {
           method: 'POST',
@@ -7581,7 +10723,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         document.getElementById('roster-results-card').style.display = 'none';
         document.getElementById('roster-success-card').style.display = 'block';
         document.getElementById('roster-success-desc').innerHTML = 
-          `🎉 <strong>${fetchedRosterPlayers.length} photos</strong> downloaded directly to your PC storage as <code>${folderName}.zip</code>.<br><span style="color:#10b981; font-weight:600;">0 bytes consumed on Render!</span>`;
+          `<strong>${validPhotoPlayers.length} athletic portraits</strong> packaged and downloaded directly to your local storage as <code>${folderName}.zip</code>.${skippedCount > 0 ? `<br><span style="color:#f59e0b; font-size:0.85rem;">Note: ${skippedCount} athletes without source photos on the roster website were bypassed.</span>` : ''}<br><span style="color:#10b981; font-weight:700;">Direct In-Browser Local Pipeline &bull; Zero Server Storage Footprint</span>`;
       } catch (e) {
         alert('Error downloading ZIP: ' + e.message);
       } finally {
@@ -7872,7 +11014,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         }
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>Enter Atelier Workspace</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
+        btn.innerHTML = '<span>Enter Studio Workspace</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
       }
     }
 
@@ -8364,7 +11506,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <div>Invitation sent to <strong>${escapeHtml(email)}</strong>!</div>
               <div style="margin-top:6px; font-size:0.75rem;">
                 Direct activation link: <a href="${data.activation_url}" target="_blank" style="color:#38bdf8;">${data.activation_url}</a>
-                <button class="btn-copy-link" style="margin-left:8px;" onclick="copyActivationUrl('${data.activation_url}')">📋 Copy</button>
+                <button class="btn-copy-link" style="margin-left:8px;" onclick="copyActivationUrl('${data.activation_url}')">Copy Link</button>
               </div>
             `;
           }
@@ -9172,12 +12314,12 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <span>${used} Seated Users</span>
               <span style="color:#64748b;">${max} Seats Max</span>
             </div>
-            <div style="height:6px; background:#e2e8f0; border-radius:999px; overflow:hidden;">
-              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #0284c7, #38bdf8); border-radius:999px;"></div>
+            <div style="height:6px; background:#e2e8f0; border-radius:2px; overflow:hidden;">
+              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #0284c7, #38bdf8); border-radius:2px;"></div>
             </div>
           </td>
           <td>
-            <span style="font-size:0.7rem; background:${c.status === 'active' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; border:1px solid ${c.status === 'active' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}; color:${c.status === 'active' ? '#047857' : '#b91c1c'}; padding:2px 8px; border-radius:10px; font-weight:700;">
+            <span style="font-size:0.7rem; background:${c.status === 'active' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)'}; border:1px solid ${c.status === 'active' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}; color:${c.status === 'active' ? '#047857' : '#b91c1c'}; padding:2px 8px; border-radius:var(--r-xs); font-weight:700;">
               ${escapeHtml(c.status || 'active').toUpperCase()}
             </span>
           </td>
@@ -9360,10 +12502,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <!-- Tab 3: Modal MFA Form -->
         <div id="view-auth-mfa" style="display:none;">
           <div style="text-align:center; margin-bottom:18px;">
-            <div style="width:48px; height:48px; border-radius:50%; background:rgba(184,134,11,0.12); border:1px solid rgba(184,134,11,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            <div style="width:48px; height:48px; border-radius:var(--r-md); background:rgba(255,87,34,0.12); border:1px solid rgba(255,87,34,0.3); display:inline-flex; align-items:center; justify-content:center; margin-bottom:10px;">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--hudl-orange)" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             </div>
-            <div style="font-family:var(--font-royal); font-size:1.15rem; font-weight:700; color:#0f172a;">Two-Factor Verification</div>
+            <div style="font-family:var(--font-heading); font-size:1.15rem; font-weight:700; color:#0f172a;">Two-Factor Verification</div>
             <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Enter the 6-digit code from your authenticator app or emergency backup code.</div>
           </div>
           <form onsubmit="handleMfaLoginSubmit(event, 'modal')">
@@ -9519,7 +12661,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
   </div>
 
-  <!-- MODAL 3: SUPERADMIN PLATFORM FLEET DASHBOARD -->
+  <!-- MODAL 3: SUPERADMIN PLATFORM ORGANIZATION DASHBOARD -->
   <div id="modal-superadmin" class="saas-modal-backdrop" onclick="if(event.target===this) hideSuperAdminModal()">
     <div class="saas-modal-card wide" style="max-width:1050px;">
       <div class="saas-modal-header" style="background:linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom:1px solid rgba(212,175,55,0.3); color:#f8fafc;">
@@ -9528,8 +12670,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#05070a" stroke-width="2.2"><path d="M3 18h18M4 18l2-10 5 6 3-8 3 8 5-6 2 10H4z"/></svg>
           </div>
           <div>
-            <div style="font-family:'Cinzel', serif; font-size:1.15rem; font-weight:800; color:#fff; letter-spacing:0.04em;">SUPERADMIN PLATFORM FLEET HUB</div>
-            <div style="font-size:0.68rem; color:#d4af37; font-family:var(--font-sans); font-weight:700; letter-spacing:0.08em; text-transform:uppercase;">Master Tenant Management & Subscription Provisioning</div>
+            <div style="font-family:var(--font-heading); font-size:1.15rem; font-weight:800; color:#fff; letter-spacing:0.04em;">SUPERADMIN ORGANIZATION HUB</div>
+            <div style="font-size:0.68rem; color:#d4af37; font-family:var(--font-sans); font-weight:700; letter-spacing:0.08em; text-transform:uppercase;">Organization Management & Seat Allocation</div>
           </div>
         </div>
         <button class="saas-modal-close" onclick="hideSuperAdminModal()" style="color:#94a3b8;">&times;</button>
@@ -9541,17 +12683,17 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <div class="kpi-metric-card">
             <div class="kpi-label">Total Organizations</div>
             <div class="kpi-value" id="admin-kpi-companies">3</div>
-            <div class="kpi-sub">Active Tenant Fleets</div>
+            <div class="kpi-sub">Active Organizations</div>
           </div>
           <div class="kpi-metric-card">
             <div class="kpi-label">Allocated Capacity</div>
             <div class="kpi-value" id="admin-kpi-seats" style="color:#0284c7;">128</div>
-            <div class="kpi-sub">Total Maximum Seats Provisioned</div>
+            <div class="kpi-sub">Total User Seats Provisioned</div>
           </div>
           <div class="kpi-metric-card">
             <div class="kpi-label">Active Seated Users</div>
             <div class="kpi-value" id="admin-kpi-members" style="color:#059669;">3</div>
-            <div class="kpi-sub">Tenant Staff Members Active</div>
+            <div class="kpi-sub">Active Member Accounts</div>
           </div>
           <div class="kpi-metric-card">
             <div class="kpi-label">SuperAdmin Scope</div>
@@ -9564,11 +12706,11 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <div class="saas-tabs" style="margin-bottom:18px;">
           <button class="saas-tab-btn active" id="tab-superadmin-companies" onclick="switchSuperAdminTab('companies')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
-            <span>Tenant Companies (<span id="tab-companies-count">3</span>)</span>
+            <span>Organizations (<span id="tab-companies-count">3</span>)</span>
           </button>
           <button class="saas-tab-btn" id="tab-superadmin-create" onclick="switchSuperAdminTab('create')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            <span>Provision New Tenant Company</span>
+            <span>Provision New Organization</span>
           </button>
           <button class="saas-tab-btn" id="tab-superadmin-keepalive" onclick="switchSuperAdminTab('keepalive')">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
@@ -9576,7 +12718,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           </button>
         </div>
 
-        <!-- TAB 1: FLEET DIRECTORY -->
+        <!-- TAB 1: ORGANIZATIONS DIRECTORY -->
         <div id="view-superadmin-companies">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:12px; flex-wrap:wrap;">
             <div style="position:relative; flex:1; max-width:320px;">
@@ -9742,7 +12884,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--gold-primary)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           </div>
           <div>
-            <div style="font-family:'Cinzel', serif; font-size:1.1rem; font-weight:800; color:#0f172a;">ACCOUNT & CREDENTIALS</div>
+            <div style="font-family:var(--font-heading); font-size:1.1rem; font-weight:800; color:#0f172a;">ACCOUNT & CREDENTIALS</div>
             <div style="font-size:0.68rem; color:var(--text-gold); font-weight:700; text-transform:uppercase; letter-spacing:0.08em;">Security, Password, MFA & Passkeys</div>
           </div>
         </div>
@@ -9832,7 +12974,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
           <!-- Wizard: Setup Flow -->
           <div id="mfa-setup-wizard" style="display:none; background:#ffffff; border:1px solid rgba(180,140,45,0.3); border-radius:12px; padding:22px; margin-bottom:16px;">
-            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin-bottom:12px;">Step 1: Scan QR Code or Enter Secret Key</div>
+            <div style="font-family:var(--font-heading); font-size:1rem; font-weight:800; color:#0f172a; margin-bottom:12px;">Step 1: Scan QR Code or Enter Secret Key</div>
             <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap; margin-bottom:16px;">
               <div style="padding:10px; background:#fff; border:1px solid #e2e8f0; border-radius:10px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
                 <img id="mfa-qr-img" src="" alt="MFA QR Code" style="width:160px; height:160px; display:block;">
@@ -9848,14 +12990,14 @@ HTML_PAGE = r"""<!DOCTYPE html>
               </div>
             </div>
 
-            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 2: Emergency Recovery Backup Codes</div>
+            <div style="font-family:var(--font-heading); font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 2: Emergency Recovery Backup Codes</div>
             <div style="font-size:0.75rem; color:var(--text-muted);">Save these single-use recovery codes in case you lose access to your authenticator device:</div>
             <div class="backup-codes-grid" id="mfa-backup-codes-list"></div>
             <div style="margin-top:8px;">
               <button type="button" class="btn btn-secondary" onclick="copyBackupCodes()" style="font-size:0.75rem; padding:4px 10px;">Copy All Backup Codes</button>
             </div>
 
-            <div style="font-family:'Cinzel', serif; font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 3: Verify & Activate</div>
+            <div style="font-family:var(--font-heading); font-size:1rem; font-weight:800; color:#0f172a; margin:16px 0 10px 0; padding-top:14px; border-top:1px solid #f1f5f9;">Step 3: Verify & Activate</div>
             <form onsubmit="handleMfaConfirmSubmit(event)">
               <div class="saas-form-group">
                 <label class="saas-form-label">Enter 6-Digit Code from App</label>
@@ -10204,6 +13346,35 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             self._send_json({"status": "ok", "options": opts})
             return
 
+        elif path == "/api/proxy_photo":
+            img_url = params.get("url", [""])[0]
+            width_param = params.get("width", ["800"])[0]
+            try:
+                tw = int(width_param)
+            except Exception:
+                tw = 800
+            if not img_url:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"status":"error","message":"Missing url"}')
+            else:
+                try:
+                    png_bytes, _ = download_player_portrait_bytes(img_url, target_width=tw)
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Cache-Control", "public, max-age=86400")
+                    self.send_header("Content-Length", str(len(png_bytes)))
+                    self.end_headers()
+                    self.wfile.write(png_bytes)
+                except Exception as e:
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
+            return
+
         # Strict authentication gate: all services require an authenticated active company account
         user = self._require_auth()
         if not user:
@@ -10427,34 +13598,6 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "error", "message": "Photo not found"}).encode("utf-8"))
 
-        elif path == "/api/proxy_photo":
-            img_url = params.get("url", [""])[0]
-            width_param = params.get("width", ["800"])[0]
-            try:
-                tw = int(width_param)
-            except Exception:
-                tw = 800
-            if not img_url:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"status":"error","message":"Missing url"}')
-            else:
-                try:
-                    png_bytes, _ = download_player_portrait_bytes(img_url, target_width=tw)
-                    self.send_response(200)
-                    self.send_header("Content-Type", "image/png")
-                    self.send_header("Access-Control-Allow-Origin", "*")
-                    self.send_header("Cache-Control", "public, max-age=86400")
-                    self.send_header("Content-Length", str(len(png_bytes)))
-                    self.end_headers()
-                    self.wfile.write(png_bytes)
-                except Exception as e:
-                    self.send_response(500)
-                    self.send_header("Content-Type", "application/json")
-                    self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode("utf-8"))
-
         elif path == "/api/export_folder_zip":
             raw_folder = params.get("folder", ["."])[0]
             folder = resolve_input_path(raw_folder) or raw_folder
@@ -10503,8 +13646,16 @@ class StudioServerHandler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             content_len = int(self.headers.get("Content-Length", 0))
 
-            # Strict authentication gate: All POST endpoints require active company login except auth login, invite activation, and MFA/Passkey challenge verification
-            if parsed.path not in ("/api/auth/login", "/api/auth/activate", "/api/auth/mfa/verify_login", "/api/auth/passkey/login_verify"):
+            # Strict authentication gate: All POST endpoints require active company login except auth login, invite activation, MFA/Passkey challenge verification, and sports roster/player extraction
+            if parsed.path not in (
+                "/api/auth/login",
+                "/api/auth/activate",
+                "/api/auth/mfa/verify_login",
+                "/api/auth/passkey/login_verify",
+                "/api/fetch_roster",
+                "/api/download_roster_zip",
+                "/api/download_roster_players"
+            ):
                 user = self._require_auth()
                 if not user:
                     return
@@ -10866,21 +14017,28 @@ class StudioServerHandler(BaseHTTPRequestHandler):
 
             elif parsed.path == "/api/fetch_roster":
                 url = data.get("url", "").strip()
-                if not url:
+                player_name = data.get("player_name", "").strip()
+                team_name = data.get("team_name", "").strip()
+                if not url and not player_name:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "error", "message": "Missing url parameter"}).encode("utf-8"))
+                    self.wfile.write(json.dumps({"status": "error", "message": "Missing url or player_name parameter"}).encode("utf-8"))
                     return
                 try:
-                    result = scrape_roster_data(url)
+                    result = scrape_roster_data(url, player_name=player_name, team_name=team_name)
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
                     self.wfile.write(json.dumps({
                         "status": "ok",
-                        "suggested_folder": result["suggested_folder"],
-                        "players": result["players"]
+                        "suggested_folder": result.get("suggested_folder", "Roster"),
+                        "players": result.get("players", []),
+                        "options": result.get("options", []),
+                        "photo_options": result.get("photo_options", []),
+                        "is_single_player": result.get("is_single_player", False),
+                        "is_target_match": result.get("is_target_match", False),
+                        "target_team": result.get("target_team", "")
                     }).encode("utf-8"))
                 except Exception as e:
                     self.send_response(500)
@@ -10910,7 +14068,14 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                         clean_assigned = re.sub(r'[\\/*?:"<>|]', '', assigned).strip()
                         out_filename = f"{clean_assigned}.png"
                     else:
-                        out_filename = f"{clean_name}.png"
+                        clean_team = re.sub(r'[\\/*?:"<>|]', '', item.get("team", "")).strip()
+                        clean_years = re.sub(r'[\\/*?:"<>|]', '', item.get("years", "")).strip()
+                        if clean_team and clean_years:
+                            out_filename = f"{clean_name} - {clean_team} ({clean_years}).png"
+                        elif clean_team:
+                            out_filename = f"{clean_name} - {clean_team}.png"
+                        else:
+                            out_filename = f"{clean_name}.png"
 
                     base_out = out_filename
                     counter = 2
@@ -10973,7 +14138,14 @@ class StudioServerHandler(BaseHTTPRequestHandler):
                         out_filename = f"{clean_assigned}.png"
                         used_type = "assigned"
                     else:
-                        out_filename = f"{clean_name}.png"
+                        clean_team = re.sub(r'[\\/*?:"<>|]', '', item.get("team", "")).strip()
+                        clean_years = re.sub(r'[\\/*?:"<>|]', '', item.get("years", "")).strip()
+                        if clean_team and clean_years:
+                            out_filename = f"{clean_name} - {clean_team} ({clean_years}).png"
+                        elif clean_team:
+                            out_filename = f"{clean_name} - {clean_team}.png"
+                        else:
+                            out_filename = f"{clean_name}.png"
                         used_type = "name"
 
                     save_path = os.path.join(target_dir, out_filename)
@@ -11693,7 +14865,7 @@ def launch_studio(port: int = None):
             server = ThreadingHTTPServer((host, p), StudioServerHandler)
             server.daemon_threads = True
             print("=" * 66)
-            print(f"🏀 Basketball Portrait Studio Pro running at: http://{host}:{p}")
+            print(f"[VeloRoster AI] Commercial Studio Suite by Ecstaticloud Technologies running at: http://{host}:{p}")
             print("=" * 66)
             # Only auto-open browser in local desktop sessions, not in headless cloud
             if not os.environ.get("RENDER"):

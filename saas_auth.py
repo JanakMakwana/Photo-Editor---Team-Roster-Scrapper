@@ -1,6 +1,7 @@
 """
-Authentication & Authorization Layer for Multi-Tenant Basketball Portrait Studio Pro
-Password hashing, session tokens, and bulk user parsing.
+Authentication & Authorization Layer for VeloRoster AI (Commercial Athletic Media & Roster Studio)
+Developed from scratch with full proprietary rights by Ecstaticloud Technologies.
+Commercial multi-tenant credentials, sessions, Passkeys (WebAuthn), and Two-Factor Authentication.
 """
 
 import re

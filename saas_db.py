@@ -1,6 +1,7 @@
 """
-Multi-Tenant SaaS Database Layer for Basketball Portrait Studio Pro
-Supports PostgreSQL (Production/Cloud via DATABASE_URL) and SQLite (Local Fallback).
+Multi-Tenant Database Engine for VeloRoster AI (Commercial Athletic Media & Roster Studio)
+Developed from scratch with full proprietary rights by Ecstaticloud Technologies.
+Commercial PostgreSQL / SQLite storage for organizations, licensed seats, and sports assets.
 """
 
 import os

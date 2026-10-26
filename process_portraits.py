@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Automated Basketball Portrait Processing Script
-Standardizes basketball player photographs into 180x180 transparent headshots
+VeloRoster AI — Automated Athletic Portrait Processing Engine
+Developed from scratch with full proprietary rights owned by Ecstaticloud Technologies.
+Standardizes athletic player photographs into 180x180 transparent headshots
 with customizable canvas fit, padding, and positioning.
 """
 

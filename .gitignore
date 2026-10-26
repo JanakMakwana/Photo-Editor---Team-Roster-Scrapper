@@ -25,5 +25,6 @@ Thumbs.db
 *.zip
 *.db
 .venv
+scratch/
 input_photos/*
 !input_photos/.gitkeep

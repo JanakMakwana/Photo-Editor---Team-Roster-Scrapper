@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Roster Downloader Script
-Scrapes player portraits from athletic roster URLs (e.g. Sidearm Sports / NCAA),
+VeloRoster AI — Athletic Roster Ingestion Engine
+Developed from scratch with full proprietary rights owned by Ecstaticloud Technologies.
+Scrapes player portraits from athletic roster URLs (e.g. Sidearm Sports / NCAA / BCHL / NHL),
 resizes images proportionally to width=800 using high-quality Lanczos resampling,
 and names each file according to the player's assigned ID number into a named folder.
 """
@@ -37,7 +38,8 @@ def scrape_roster(url: str):
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
         }
     )
 
@@ -111,6 +113,13 @@ def download_and_resize(img_url: str, save_path: str, target_width: int = 800):
     """
     Downloads high-resolution photo (with URL width boosted) and resizes proportionally so width=target_width.
     """
+    try:
+        from studio import download_player_portrait
+        return download_player_portrait(img_url, save_path, target_width=target_width)
+    except Exception as e:
+        if "proballers.com" in img_url:
+            raise e
+
     high_res_url = boost_image_url_width(img_url, target_width=1200)
     raw_bytes = None
 
@@ -194,12 +203,25 @@ def main():
         assigned_number = mapping.get(name) or mapping.get(jersey) or mapping.get(f"#{jersey}")
 
         if not assigned_number:
-            # If not assigned, use the player name as filename
+            # If not assigned, use the player name with team/years if multiple career options exist
             clean_name = re.sub(r'[\\/*?:"<>|]', '', name).strip()
-            assigned_number = clean_name
+            clean_team = re.sub(r'[\\/*?:"<>|]', '', p.get("team", "")).strip()
+            clean_years = re.sub(r'[\\/*?:"<>|]', '', p.get("years", "")).strip()
+            if clean_team and clean_years:
+                assigned_number = f"{clean_name} - {clean_team} ({clean_years})"
+            elif clean_team:
+                assigned_number = f"{clean_name} - {clean_team}"
+            else:
+                assigned_number = clean_name
 
         out_file = os.path.join(target_dir, f"{assigned_number}.png")
-        print(f"#{jersey:<3} | {name:<26} | Downloading -> {assigned_number}.png...", end="", flush=True)
+        print(f"#{jersey:<3} | {name:<26} | ", end="", flush=True)
+
+        if not p.get("image"):
+            print("⚠️  No photo uploaded on roster profile (skipped)")
+            continue
+
+        print(f"Downloading -> {assigned_number}.png...", end="", flush=True)
 
         try:
             saved_path, final_size = download_and_resize(p["image"], out_file, target_width=800)

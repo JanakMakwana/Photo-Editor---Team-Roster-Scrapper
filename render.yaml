@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: portrait-studio-pro
+    name: veloroster-ai
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: python studio.py
@@ -15,4 +15,4 @@ services:
       - key: KEEP_ALIVE_INTERVAL
         value: "600"
       - key: KEEP_ALIVE_URL
-        value: "https://portrait-studio-pro.onrender.com/healthz"
+        value: "https://veloroster-ai.onrender.com/healthz"
