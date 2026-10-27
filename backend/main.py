@@ -115,7 +115,14 @@ else:
 
 
 def start():
-    uvicorn.run("backend.main:app", host=settings.HOST, port=settings.PORT, reload=False)
+    raw_port = os.environ.get("PORT", "").strip()
+    try:
+        port = int(raw_port) if raw_port else settings.PORT
+    except ValueError:
+        port = 8000
+    host = os.environ.get("HOST", "0.0.0.0")
+    print(f"[{settings.APP_NAME}] Binding server to {host}:{port} (PORT env: '{raw_port}')")
+    uvicorn.run("backend.main:app", host=host, port=port, reload=False)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,12 @@
+.git
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+frontend/node_modules
+input_photos
+output_headshots
+studio_saas.db
+*.log
+.DS_Store
