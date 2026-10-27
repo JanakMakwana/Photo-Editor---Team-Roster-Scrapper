@@ -2,8 +2,8 @@ services:
   - type: web
     name: veloroster-ai
     runtime: python
-    buildCommand: pip install -r requirements.txt && (if command -v npm > /dev/null; then cd frontend && npm install && npm run build && cd ..; fi)
-    startCommand: python -m backend.main
+    buildCommand: pip install -r requirements.txt
+    startCommand: python studio.py
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION

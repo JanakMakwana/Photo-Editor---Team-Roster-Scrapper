@@ -8452,7 +8452,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span>Security</span>
         </button>
-        <button class="btn btn-secondary" id="btn-nav-team" onclick="openTeamModal('bulk')" title="Manage company users, seats, and invitations" style="border-color:#38bdf8; color:#38bdf8; font-size:0.8rem; padding:6px 12px;">
+        <button class="btn btn-secondary" id="btn-nav-team" onclick="openTeamModal('bulk')" title="Manage company users, seats, and invitations" style="font-size:0.8rem; padding:6px 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Manage Team</span>
         </button>
@@ -8483,10 +8483,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         Search athlete portraits, scrape team rosters, assign player numbers, and standardize photos into 180×180 transparent headshots.
       </p>
       <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
-        <span style="font-size:0.75rem; background:rgba(16, 185, 129, 0.12); border:1px solid rgba(16, 185, 129, 0.35); color:#34d399; padding:5px 12px; border-radius:var(--r-xs); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
+        <span style="font-size:0.75rem; background:#ecfdf5; border:1px solid #a7f3d0; color:#059669; padding:5px 12px; border-radius:var(--r-xs); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
           <span style="width:6px; height:6px; border-radius:1px; background:#10b981; box-shadow:0 0 6px #10b981; display:inline-block;"></span><span>Direct In-Browser Processing (0 Cloud Bytes Stored)</span>
         </span>
-        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:rgba(239, 68, 68, 0.3); color:#f87171; font-weight:700;">
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:#fecaca; color:#dc2626; background:#fef2f2; font-weight:700;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Memory</span>
         </button>
       </div>
@@ -8514,7 +8514,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <!-- WORKFLOW 1: SINGLE ATHLETE SEARCH PANEL -->
     <div id="panel-workflow-athlete" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center;">
       <div class="roster-config-card">
-        <div style="font-size:0.85rem; font-weight:700; color:#ff7043; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+        <div style="font-size:0.85rem; font-weight:700; color:#2563eb; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           <span>Search Athlete with Strict Team & Era Matching</span>
         </div>
@@ -8565,7 +8565,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     <!-- WORKFLOW 2: FULL TEAM ROSTER WEBSITE URL PANEL -->
     <div id="panel-workflow-url" style="width: 100%; max-width: 960px; display: none; flex-direction: column; align-items: center;">
       <div class="roster-config-card">
-        <div style="font-size:0.85rem; font-weight:700; color:#38bdf8; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+        <div style="font-size:0.85rem; font-weight:700; color:#2563eb; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"/></svg>
           <span>Full League Team Roster Ingestion (Proballers, Eurobasket, NHL, EIHL, NCAA)</span>
         </div>
@@ -8613,7 +8613,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <input type="file" id="native-files-picker" multiple accept="image/*" style="display:none;" onchange="onNativeFilesPicked(event)">
 
         <div style="margin-top: 12px;">
-          <label for="native-files-picker" style="font-size:0.84rem; color:#38bdf8; cursor:pointer; text-decoration:underline;">
+          <label for="native-files-picker" style="font-size:0.84rem; color:var(--brand-accent); font-weight:600; cursor:pointer; text-decoration:underline;">
             or click here to select individual photo files (.png, .jpg, .webp)
           </label>
         </div>
@@ -8782,7 +8782,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
 
       <div class="header-actions">
-        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge server temporary files and clear RAM" style="border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 0.8rem; padding: 6px 12px;">
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge server temporary files and clear RAM">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Free RAM</span>
         </button>
         <button class="btn btn-secondary" id="btn-cutout" onclick="triggerCutout()">
@@ -8794,10 +8794,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
         <button class="btn btn-primary" id="btn-batch-all" onclick="batchProcessFolder()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span>Process All (ZIP)</span>
         </button>
-        <button class="btn btn-secondary" style="border-color:#38bdf8; color:#38bdf8; font-weight:700;" onclick="downloadActiveEditedZip()" title="Download all edited headshots as a ZIP file">
+        <button class="btn btn-secondary" onclick="downloadActiveEditedZip()" title="Download all edited headshots as a ZIP file">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span>Download ZIP</span>
         </button>
-        <button class="btn btn-secondary" onclick="openTeamModal('bulk')" title="Team & Subscription Seats" style="font-size:0.8rem; padding:6px 12px; border-color:rgba(56,189,248,0.4); color:#7dd3fc;">
+        <button class="btn btn-secondary" onclick="openTeamModal('bulk')" title="Team & Subscription Seats">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg><span>Team</span>
         </button>
       </div>
@@ -10275,9 +10275,9 @@ HTML_PAGE = r"""<!DOCTYPE html>
       const avatarSrc = rawImg ? `/api/proxy_photo?url=${encodeURIComponent(rawImg)}&width=360` : defaultAvatarSvg;
 
       const vitals = [];
-      if (opt.jersey || player.jersey) vitals.push(`<span class="vital-badge-chip" style="color:#ff7043; border-color:rgba(255,87,34,0.3); font-weight:800;">#${opt.jersey || player.jersey}</span>`);
+      if (opt.jersey || player.jersey) vitals.push(`<span class="vital-badge-chip" style="color:#ea580c; border-color:#fed7aa; background:#fff7ed; font-weight:800;">#${opt.jersey || player.jersey}</span>`);
       if (opt.pos || opt.position || player.pos || player.position) vitals.push(`<span class="vital-badge-chip">Pos: ${opt.pos || opt.position || player.pos || player.position}</span>`);
-      if (opt.years || player.years) vitals.push(`<span class="vital-badge-chip" style="color:#38bdf8; font-family:'JetBrains Mono', monospace;">${opt.years || player.years}</span>`);
+      if (opt.years || player.years) vitals.push(`<span class="vital-badge-chip" style="color:#0284c7; background:#f0f9ff; border-color:#bae6fd; font-family:'JetBrains Mono', monospace;">${opt.years || player.years}</span>`);
       if (opt.height || player.height) vitals.push(`<span class="vital-badge-chip">Ht: ${opt.height || player.height}</span>`);
       if (opt.weight || player.weight) vitals.push(`<span class="vital-badge-chip">Wt: ${opt.weight || player.weight}</span>`);
       if (opt.shoots || player.shoots) vitals.push(`<span class="vital-badge-chip">Shoots: ${opt.shoots || player.shoots}</span>`);
@@ -10440,7 +10440,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
         const currentAssigned = p.assigned_number || '';
         const teamVal = p.team ? `<span style="font-weight:700; color:var(--text); font-size:0.83rem;">${p.team}</span>` : '-';
-        const yearsVal = p.years ? `<span style="font-family:'JetBrains Mono', monospace; font-size:0.78rem; font-weight:700; color:#38bdf8; background:rgba(56,189,248,0.1); border:1px solid rgba(56,189,248,0.25); border-radius:4px; padding:2px 6px;">${p.years}</span>` : '-';
+        const yearsVal = p.years ? `<span style="font-family:'JetBrains Mono', monospace; font-size:0.78rem; font-weight:700; color:#0369a1; background:#f0f9ff; border:1px solid #bae6fd; border-radius:4px; padding:2px 6px;">${p.years}</span>` : '-';
         const jerseyVal = p.jersey ? p.jersey : '-';
         const posVal = p.pos || p.position || '-';
         const shootsVal = p.shoots || '-';
@@ -11545,7 +11545,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <div>
                 <strong>${escapeHtml(u.full_name)}</strong> &lt;${escapeHtml(u.email)}&gt;
                 <span style="font-size:0.7rem; opacity:0.8; margin-left:6px;">(${u.role})</span>
-                ${u.email_simulated ? '<span style="font-size:0.68rem; background:rgba(56,189,248,0.2); padding:1px 6px; border-radius:6px; margin-left:6px; color:#38bdf8;">Dev Mode Link</span>' : '<span style="font-size:0.68rem; color:#34d399; margin-left:6px;">📧 Email Sent</span>'}
+                ${u.email_simulated ? '<span style="font-size:0.68rem; background:#e0f2fe; padding:1px 6px; border-radius:6px; margin-left:6px; color:#0369a1; border:1px solid #bae6fd;">Dev Mode Link</span>' : '<span style="font-size:0.68rem; color:#059669; margin-left:6px; font-weight:600;">📧 Email Sent</span>'}
               </div>
               <div>
                 <button class="btn-copy-link" onclick="copyActivationUrl('${u.activation_url}')">Copy Invite Link</button>
@@ -11608,13 +11608,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
           if (alertBox) {
             alertBox.style.display = 'block';
-            alertBox.style.background = 'rgba(16,185,129,0.15)';
-            alertBox.style.color = '#34d399';
-            alertBox.style.border = '1px solid rgba(16,185,129,0.3)';
+            alertBox.style.background = '#ecfdf5';
+            alertBox.style.color = '#065f46';
+            alertBox.style.border = '1px solid #a7f3d0';
             alertBox.innerHTML = `
               <div>Invitation sent to <strong>${escapeHtml(email)}</strong>!</div>
               <div style="margin-top:6px; font-size:0.75rem;">
-                Direct activation link: <a href="${data.activation_url}" target="_blank" style="color:#38bdf8;">${data.activation_url}</a>
+                Direct activation link: <a href="${data.activation_url}" target="_blank" style="color:#2563eb; text-decoration:underline; font-weight:600;">${data.activation_url}</a>
                 <button class="btn-copy-link" style="margin-left:8px;" onclick="copyActivationUrl('${data.activation_url}')">Copy Link</button>
               </div>
             `;
@@ -12424,7 +12424,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
               <span style="color:#64748b;">${max} Seats Max</span>
             </div>
             <div style="height:6px; background:#e2e8f0; border-radius:2px; overflow:hidden;">
-              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #0284c7, #38bdf8); border-radius:2px;"></div>
+              <div style="width:${pct}%; height:100%; background:linear-gradient(90deg, #2563eb, #3b82f6); border-radius:2px;"></div>
             </div>
           </td>
           <td>
