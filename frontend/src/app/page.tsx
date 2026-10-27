@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Shield, User as UserIcon, Users, Building, LogOut, Search, Globe, Folder,
-  Scissors, Save, Download, Sparkles, Move, Eraser, RotateCcw,
-  RefreshCw, Check, ArrowLeft, ArrowRight, Table, Copy, FileSpreadsheet,
-  Layers, Sliders, Eye, AlertCircle, KeyRound, HardDrive, Cpu
+  Shield, Users, Building, LogOut, Search, Globe, Folder,
+  Scissors, Save, Download, Sparkles, Move, Eraser,
+  RefreshCw, ArrowLeft, ArrowRight, Copy, FileSpreadsheet,
+  Layers, Eye, AlertCircle, HardDrive, Cpu, Check, ExternalLink,
+  ChevronRight, Sliders, Crosshair
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -115,7 +116,6 @@ export default function StudioApp() {
   // Modals
   const [showPlatformDashboard, setShowPlatformDashboard] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
-  const [showSecurityModal, setShowSecurityModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'company_admin'>('member');
@@ -156,7 +156,7 @@ export default function StudioApp() {
   const [photoDataMap, setPhotoDataMap] = useState<Record<string, ActivePhotoData>>({});
   const [toolMode, setToolMode] = useState<'frame' | 'recover' | 'erase'>('frame');
   const [brushSize, setBrushSize] = useState(24);
-  const [canvasBg, setCanvasBg] = useState<'checker' | 'dark' | 'white' | 'team'>('checker');
+  const [canvasBg, setCanvasBg] = useState<'checker' | 'white' | 'dark' | 'navy'>('checker');
   const [isComparingOriginal, setIsComparingOriginal] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [loadingOverlay, setLoadingOverlay] = useState<string | null>(null);
@@ -283,7 +283,7 @@ export default function StudioApp() {
 
   // Free RAM & Server Storage
   const handleFreeRAM = async () => {
-    setLoadingOverlay('Freeing memory and server temporary disk...');
+    setLoadingOverlay('Freeing RAM memory cache and temporary files...');
     try {
       const res = await fetch('/api/clear_server_storage', { method: 'POST' });
       const data = await res.json();
@@ -376,19 +376,19 @@ export default function StudioApp() {
           await loadPromise;
           data.img = img;
         } catch {
-          // Fallback avatar canvas
+          // Fallback clean avatar
           const fbCanvas = document.createElement('canvas');
           fbCanvas.width = 600;
           fbCanvas.height = 600;
           const fbCtx = fbCanvas.getContext('2d')!;
-          fbCtx.fillStyle = '#1e293b';
+          fbCtx.fillStyle = '#f8fafc';
           fbCtx.fillRect(0, 0, 600, 600);
-          fbCtx.fillStyle = '#3b82f6';
+          fbCtx.fillStyle = '#2563eb';
           fbCtx.font = 'bold 96px system-ui';
           fbCtx.textAlign = 'center';
           fbCtx.textBaseline = 'middle';
           fbCtx.fillText(photoName.slice(0, 2).toUpperCase(), 300, 270);
-          fbCtx.fillStyle = '#94a3b8';
+          fbCtx.fillStyle = '#64748b';
           fbCtx.font = '600 24px system-ui';
           fbCtx.fillText(photoName.replace('.png', ''), 300, 360);
           const fbImg = new Image();
@@ -452,7 +452,6 @@ export default function StudioApp() {
 
     setLoadingOverlay('Running AI Background Removal (u2net / rembg)...');
     try {
-      // Export current image on an offscreen canvas to base64
       const offCanvas = document.createElement('canvas');
       offCanvas.width = data.img.width;
       offCanvas.height = data.img.height;
@@ -491,9 +490,9 @@ export default function StudioApp() {
         data.hasCutout = true;
         data.cutoutImg = cutoutImg;
         setPhotoDataMap(prev => ({ ...prev, [photoName]: { ...data } }));
-        showToast('AI Cutout applied! You can now refine details using Recover or Erase brushes.');
+        showToast('AI Cutout applied! Refine anytime with Recover or Erase.');
       } else {
-        showToast(resData.message || 'Cutout failed', );
+        showToast(resData.message || 'Cutout failed');
       }
     } catch (e: unknown) {
       const err = e as Error;
@@ -589,7 +588,6 @@ export default function StudioApp() {
     const data = photoDataMap[photoName];
     if (!data || !data.img) return;
 
-    // Render precise 180x180 export canvas
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = CANVAS_PX;
     exportCanvas.height = CANVAS_PX;
@@ -608,7 +606,6 @@ export default function StudioApp() {
     }
 
     const b64 = exportCanvas.toDataURL('image/png');
-    // Save to disk or download directly
     try {
       const res = await fetch('/api/save_photo', {
         method: 'POST',
@@ -624,7 +621,6 @@ export default function StudioApp() {
         setPhotoDataMap(prev => ({ ...prev, [photoName]: { ...data } }));
         showToast(`Saved ${photoName} (180×180 PNG)!`);
       } else {
-        // Trigger browser download directly
         const a = document.createElement('a');
         a.href = b64;
         a.download = photoName;
@@ -725,7 +721,6 @@ export default function StudioApp() {
     if (!viewport) return;
     const rect = viewport.getBoundingClientRect();
 
-    // Update brush cursor
     if (brushCursorRef.current) {
       if (toolMode !== 'frame') {
         const sizePx = brushSize * 2 * (rect.width / BUFFER_PX);
@@ -927,7 +922,6 @@ export default function StudioApp() {
           setSearchPlayerOptions(data.photo_options);
           setSelectedPhotoOptionIdx(0);
         } else if (data.players && data.players.length > 0) {
-          // Direct player found
           setSearchPlayerOptions(data.players);
           setSelectedPhotoOptionIdx(0);
         } else {
@@ -1175,16 +1169,16 @@ export default function StudioApp() {
   };
 
   // ==========================================
-  // RENDER: Authentication Gateway
+  // RENDER: Clean Light Authentication View
   // ==========================================
   if (authChecking) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#080c14' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 24px rgba(59,130,246,0.5)' }}>
-            <Cpu size={24} color="#fff" />
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(37,99,235,0.25)' }}>
+            <Shield size={24} color="#fff" />
           </div>
-          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#94a3b8' }}>Initializing VeloRoster Pro...</div>
+          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#64748b' }}>Initializing VeloRoster Pro...</div>
         </div>
       </div>
     );
@@ -1192,66 +1186,68 @@ export default function StudioApp() {
 
   if (!user) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'radial-gradient(ellipse at 50% 20%, #0f1c38 0%, #080c14 70%)', padding: 24 }}>
-        <div className="designer-card" style={{ maxWidth: 440, width: '100%', padding: '36px 32px' }}>
-          {/* Brand Heading */}
-          <div style={{ textAlign: 'center', marginBottom: 28 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 48, height: 48, borderRadius: 14, background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', boxShadow: '0 8px 24px rgba(37,99,235,0.4)', marginBottom: 16 }}>
-              <Shield size={24} color="#ffffff" />
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', padding: 24 }}>
+        <div className="card-clean" style={{ maxWidth: 420, width: '100%', padding: '36px 32px' }}>
+          {/* Brand Header */}
+          <div style={{ textAlign: 'center', marginBottom: 26 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 46, height: 46, borderRadius: 12, background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', boxShadow: '0 4px 14px rgba(37,99,235,0.25)', marginBottom: 14 }}>
+              <Shield size={22} color="#ffffff" />
             </div>
-            <h1 style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.02em' }}>
-              VeloRoster <span style={{ color: '#3b82f6' }}>Pro</span>
+            <h1 style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+              VeloRoster <span style={{ color: '#2563eb' }}>Pro</span>
             </h1>
-            <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginTop: 4 }}>
-              Athletic Roster & 180×180 Studio
+            <div style={{ fontSize: '0.78125rem', fontWeight: 500, color: '#64748b', marginTop: 4 }}>
+              Athletic Roster & 180×180 Headshot Studio
             </div>
           </div>
 
-          {/* Auth Mode Switch */}
-          <div style={{ display: 'flex', background: 'rgba(15, 23, 42, 0.6)', padding: 3, borderRadius: 10, marginBottom: 24 }}>
-            <button
-              type="button"
-              className="btn-designer"
-              style={{ flex: 1, padding: '7px 0', borderRadius: 8, background: authTab === 'login' ? 'rgba(255,255,255,0.1)' : 'transparent', color: authTab === 'login' ? '#fff' : '#64748b' }}
-              onClick={() => setAuthTab('login')}
-            >
-              Sign In
-            </button>
-            <button
-              type="button"
-              className="btn-designer"
-              style={{ flex: 1, padding: '7px 0', borderRadius: 8, background: authTab === 'activate' ? 'rgba(255,255,255,0.1)' : 'transparent', color: authTab === 'activate' ? '#fff' : '#64748b' }}
-              onClick={() => setAuthTab('activate')}
-            >
-              Activate Seat
-            </button>
+          {/* Clean Segmented Tab Switch */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
+            <div className="segmented-track" style={{ width: '100%' }}>
+              <button
+                type="button"
+                className={`segmented-btn ${authTab === 'login' ? 'active' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setAuthTab('login')}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                className={`segmented-btn ${authTab === 'activate' ? 'active' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setAuthTab('activate')}
+              >
+                Activate Seat
+              </button>
+            </div>
           </div>
 
           {authError && (
-            <div style={{ padding: '10px 14px', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8, color: '#fca5a5', fontSize: '0.8125rem', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, color: '#dc2626', fontSize: '0.8125rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertCircle size={16} />
               <span>{authError}</span>
             </div>
           )}
 
           {authTab === 'login' ? (
-            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Corporate Email or Username</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Corporate Email or Username</label>
                 <input
                   type="text"
-                  className="designer-input"
-                  placeholder="enterprise@ecstaticloud.com or name@company.com"
+                  className="input-ui"
+                  placeholder="enterprise@ecstaticloud.com"
                   value={authEmail}
                   onChange={e => setAuthEmail(e.target.value)}
                   required
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Password</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Password</label>
                 <input
                   type="password"
-                  className="designer-input"
+                  className="input-ui"
                   placeholder="••••••••"
                   value={authPassword}
                   onChange={e => setAuthPassword(e.target.value)}
@@ -1261,32 +1257,19 @@ export default function StudioApp() {
               <button
                 type="submit"
                 disabled={authSubmitting}
-                className="btn-designer btn-designer-primary"
-                style={{ padding: '12px 0', marginTop: 8 }}
+                className="btn-ui btn-primary"
+                style={{ padding: '10px 0', marginTop: 4, height: 42 }}
               >
-                {authSubmitting ? 'Authenticating...' : 'Enter Studio Workspace'}
+                {authSubmitting ? 'Authenticating...' : 'Sign In to Workspace'}
               </button>
-              <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Account:</span>
-                <button
-                  type="button"
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px' }}
-                  onClick={() => {
-                    setAuthEmail('enterprise@ecstaticloud.com');
-                  }}
-                >
-                  Fill Email (enterprise@ecstaticloud.com)
-                </button>
-              </div>
             </form>
           ) : (
-            <form onSubmit={handleActivateInvite} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <form onSubmit={handleActivateInvite} style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Invitation Token</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Invitation Token</label>
                 <input
                   type="text"
-                  className="designer-input"
+                  className="input-ui"
                   placeholder="Paste 32-character invite token"
                   value={authInviteToken}
                   onChange={e => setAuthInviteToken(e.target.value)}
@@ -1294,21 +1277,21 @@ export default function StudioApp() {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Your Full Name</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Your Full Name</label>
                 <input
                   type="text"
-                  className="designer-input"
-                  placeholder="Coach Sarah Jenkins"
+                  className="input-ui"
+                  placeholder="Jordan Miller"
                   value={authName}
                   onChange={e => setAuthName(e.target.value)}
                   required
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Create Password</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Create Password</label>
                 <input
                   type="password"
-                  className="designer-input"
+                  className="input-ui"
                   placeholder="Minimum 6 characters"
                   value={authPassword}
                   onChange={e => setAuthPassword(e.target.value)}
@@ -1318,16 +1301,16 @@ export default function StudioApp() {
               <button
                 type="submit"
                 disabled={authSubmitting}
-                className="btn-designer btn-designer-primary"
-                style={{ padding: '12px 0', marginTop: 6 }}
+                className="btn-ui btn-primary"
+                style={{ padding: '10px 0', marginTop: 4, height: 42 }}
               >
-                {authSubmitting ? 'Activating...' : 'Activate Seat & Open Studio'}
+                {authSubmitting ? 'Activating...' : 'Activate Seat'}
               </button>
             </form>
           )}
 
-          <div style={{ marginTop: 24, fontSize: '0.7rem', color: '#475569', textAlign: 'center', lineHeight: 1.5 }}>
-            Ecstaticloud Technologies &bull; Commercial Edition &bull; 0 Cloud Storage
+          <div style={{ marginTop: 22, fontSize: '0.72rem', color: '#94a3b8', textAlign: 'center', lineHeight: 1.5 }}>
+            Ecstaticloud Technologies &bull; Commercial Edition &bull; 0 Cloud Storage Footprint
           </div>
         </div>
       </div>
@@ -1335,174 +1318,179 @@ export default function StudioApp() {
   }
 
   // ==========================================
-  // RENDER: Authenticated Application
+  // RENDER: Authenticated Light Application
   // ==========================================
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-app)' }}>
       {/* Toast Notification */}
       {toastMsg && (
-        <div className="designer-toast">
-          <Sparkles size={16} color="#3b82f6" />
+        <div className="toast-clean">
+          <Sparkles size={16} color="#2563eb" />
           <span>{toastMsg}</span>
         </div>
       )}
 
       {/* Loading Overlay */}
       {loadingOverlay && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.85)', backdropFilter: 'blur(8px)', zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
-          <div style={{ width: 40, height: 40, border: '3px solid rgba(59,130,246,0.2)', borderTopColor: '#3b82f6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-          <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#f8fafc' }}>{loadingOverlay}</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(6px)', zIndex: 99999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14 }}>
+          <div style={{ width: 38, height: 38, border: '3px solid #e2e8f0', borderTopColor: '#2563eb', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#0f172a' }}>{loadingOverlay}</div>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       )}
 
-      {/* Top Navbar */}
-      <header style={{ height: 60, borderBottom: '1px solid var(--border-subtle)', background: 'rgba(13,19,31,0.85)', backdropFilter: 'blur(16px)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 50 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
-          {/* Brand */}
+      {/* Unified Clean Light Navbar */}
+      <header style={{ height: 60, borderBottom: '1px solid var(--border-default)', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', position: 'sticky', top: 0, zIndex: 50 }}>
+        {/* Left: Brand & Tenant Identity */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }} onClick={() => setCurrentScreen('landing')}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 8px rgba(37,99,235,0.4)' }}>
+            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(37,99,235,0.25)' }}>
               <Shield size={18} color="#fff" />
             </div>
             <div>
-              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.01em', lineHeight: 1.1 }}>
-                VeloRoster <span style={{ color: '#3b82f6' }}>Pro</span>
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+                VeloRoster <span style={{ color: '#2563eb' }}>Pro</span>
               </div>
-              <div style={{ fontSize: '0.625rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-                180×180 Studio
+              <div style={{ fontSize: '0.625rem', fontWeight: 600, color: '#64748b', letterSpacing: '0.04em' }}>
+                180×180 STUDIO
               </div>
             </div>
           </div>
 
-          {/* Company & Seats */}
+          {/* Company Badge */}
           {user.company && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 'var(--radius-full)', border: '1px solid var(--border-subtle)' }}>
-              <Building size={13} color="#94a3b8" />
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#cbd5e1' }}>{user.company.name}</span>
-              <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 700, textTransform: 'uppercase' }}>{user.company.plan}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 10px', background: '#f8fafc', borderRadius: 'var(--radius-full)', border: '1px solid #e2e8f0' }}>
+              <Building size={13} color="#64748b" />
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155' }}>{user.company.name}</span>
+              <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
+                {user.company.plan}
+              </span>
               <span style={{ fontSize: '0.72rem', color: '#64748b' }}>&bull; {user.company.used_seats}/{user.company.max_seats} Seats</span>
             </div>
           )}
 
-          {/* SuperAdmin Scope Tag */}
+          {/* SuperAdmin Tag */}
           {user.is_superadmin && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 9px', background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 'var(--radius-full)' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#c084fc', boxShadow: '0 0 6px #c084fc' }} />
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#e9d5ff' }}>SuperAdmin Scope</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 9px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 'var(--radius-full)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8b5cf6' }} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7c3aed' }}>SuperAdmin Scope</span>
             </div>
           )}
         </div>
 
-        {/* Right Nav Actions */}
+        {/* Right: Unified Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {user.is_superadmin && (
             <button
-              className="btn-designer btn-designer-secondary"
+              className="btn-ui btn-secondary"
               style={{ fontSize: '0.75rem', padding: '6px 12px' }}
               onClick={() => setShowPlatformDashboard(true)}
             >
-              <Building size={13} />
-              <span>Platform Dashboard</span>
+              <Building size={14} />
+              <span>Platform</span>
             </button>
           )}
 
           <button
-            className="btn-designer btn-designer-secondary"
+            className="btn-ui btn-secondary"
             style={{ fontSize: '0.75rem', padding: '6px 12px' }}
             onClick={() => setShowTeamModal(true)}
           >
-            <Users size={13} />
+            <Users size={14} />
             <span>Team Seats</span>
           </button>
 
           <button
-            className="btn-designer btn-designer-secondary"
-            style={{ fontSize: '0.75rem', padding: '6px 12px', color: '#f87171' }}
+            className="btn-ui btn-danger"
+            style={{ fontSize: '0.75rem', padding: '6px 12px' }}
             onClick={handleFreeRAM}
-            title="Purge RAM and temporary server storage"
+            title="Purge RAM memory cache & clear temporary disk"
           >
-            <Cpu size={13} />
+            <Cpu size={14} />
             <span>Free RAM</span>
           </button>
 
-          {/* User Profile */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 8, borderLeft: '1px solid var(--border-subtle)' }}>
-            <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1e293b', border: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#93c5fd' }}>
+          {/* Profile & Logout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingLeft: 8, borderLeft: '1px solid #e2e8f0' }}>
+            <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#2563eb' }}>
               {user.full_name ? user.full_name.slice(0, 2).toUpperCase() : 'AD'}
             </div>
             <button
-              className="btn-designer btn-designer-secondary"
-              style={{ padding: '6px 10px' }}
+              className="btn-ui btn-ghost"
+              style={{ padding: '6px' }}
               onClick={handleLogout}
               title="Sign Out"
             >
-              <LogOut size={13} />
+              <LogOut size={15} />
             </button>
           </div>
         </div>
       </header>
 
       {/* ========================================================= */}
-      {/* SCREEN 1: LANDING WORKFLOW SCREEN */}
+      {/* SCREEN 1: UNIFIED LANDING WORKFLOW */}
       {/* ========================================================= */}
       {currentScreen === 'landing' ? (
-        <main style={{ flex: 1, maxWidth: 980, width: '100%', margin: '0 auto', padding: '36px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          {/* Hero Heading */}
-          <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 'var(--radius-full)', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', marginBottom: 14 }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', boxShadow: '0 0 6px #3b82f6' }} />
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#93c5fd' }}>Standardized 180×180 Transparent Headshots &bull; 0 Cloud Storage</span>
+        <main style={{ flex: 1, maxWidth: 980, width: '100%', margin: '0 auto', padding: '40px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          {/* Hero Header */}
+          <div style={{ textAlign: 'center', marginBottom: 30 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 14px', borderRadius: 'var(--radius-full)', background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: 14 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb' }} />
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#1d4ed8' }}>Standardized 180×180 Transparent Headshots &bull; 0 Cloud Storage</span>
             </div>
-            <h1 style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
-              Athletic Roster & <span style={{ color: '#3b82f6' }}>Headshot Studio</span>
+            <h1 style={{ fontSize: '2.25rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.025em', lineHeight: 1.2 }}>
+              Athletic Roster & <span style={{ color: '#2563eb' }}>Headshot Studio</span>
             </h1>
-            <p style={{ fontSize: '0.875rem', color: '#94a3b8', marginTop: 8, maxWidth: 640 }}>
-              Search athletes across global archives, scrape live team rosters, or batch process local photo folders with AI face centering and background removal.
+            <p style={{ fontSize: '0.9375rem', color: '#475569', marginTop: 10, maxWidth: 640 }}>
+              Search athletes across global archives, scrape team rosters, or batch process local folders with automatic face centering and background removal.
             </p>
           </div>
 
-          {/* 3-Tab Segmented Workflow Switcher */}
-          <div style={{ display: 'flex', background: 'rgba(15,23,42,0.7)', padding: 4, borderRadius: 12, border: '1px solid var(--border-default)', marginBottom: 28, width: '100%', maxWidth: 660 }}>
-            <button
-              className="btn-designer"
-              style={{ flex: 1, padding: '9px 0', borderRadius: 8, background: activeWorkflow === 'athlete' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent', color: activeWorkflow === 'athlete' ? '#fff' : '#94a3b8', boxShadow: activeWorkflow === 'athlete' ? '0 2px 8px rgba(37,99,235,0.4)' : 'none' }}
-              onClick={() => setActiveWorkflow('athlete')}
-            >
-              <Search size={14} />
-              <span>Single Athlete Search</span>
-            </button>
-            <button
-              className="btn-designer"
-              style={{ flex: 1, padding: '9px 0', borderRadius: 8, background: activeWorkflow === 'url' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent', color: activeWorkflow === 'url' ? '#fff' : '#94a3b8', boxShadow: activeWorkflow === 'url' ? '0 2px 8px rgba(37,99,235,0.4)' : 'none' }}
-              onClick={() => setActiveWorkflow('url')}
-            >
-              <Globe size={14} />
-              <span>Team Roster Website URL</span>
-            </button>
-            <button
-              className="btn-designer"
-              style={{ flex: 1, padding: '9px 0', borderRadius: 8, background: activeWorkflow === 'local' ? 'linear-gradient(135deg, #3b82f6, #2563eb)' : 'transparent', color: activeWorkflow === 'local' ? '#fff' : '#94a3b8', boxShadow: activeWorkflow === 'local' ? '0 2px 8px rgba(37,99,235,0.4)' : 'none' }}
-              onClick={() => setActiveWorkflow('local')}
-            >
-              <Folder size={14} />
-              <span>Local Photo Folder</span>
-            </button>
+          {/* Unified 3-Tab Segmented Control (Apple / Linear style) */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24, width: '100%', maxWidth: 640 }}>
+            <div className="segmented-track" style={{ width: '100%' }}>
+              <button
+                className={`segmented-btn ${activeWorkflow === 'athlete' ? 'active' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setActiveWorkflow('athlete')}
+              >
+                <Search size={14} />
+                <span>Single Athlete Search</span>
+              </button>
+              <button
+                className={`segmented-btn ${activeWorkflow === 'url' ? 'active' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setActiveWorkflow('url')}
+              >
+                <Globe size={14} />
+                <span>Team Roster Website URL</span>
+              </button>
+              <button
+                className={`segmented-btn ${activeWorkflow === 'local' ? 'active' : ''}`}
+                style={{ flex: 1 }}
+                onClick={() => setActiveWorkflow('local')}
+              >
+                <Folder size={14} />
+                <span>Local Photo Folder</span>
+              </button>
+            </div>
           </div>
 
           {/* WORKFLOW 1: SINGLE ATHLETE SEARCH */}
           {activeWorkflow === 'athlete' && (
-            <div className="designer-card" style={{ width: '100%', padding: 28 }}>
-              <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Search size={15} />
+            <div className="card-clean" style={{ width: '100%', padding: 32 }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Search size={16} />
                 <span>Search Athlete with Strict Team & Era Matching</span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 14, alignItems: 'end', marginBottom: 20 }}>
+              {/* Form Input Controls */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 1.4fr', gap: 14, marginBottom: 16 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Player Name (Required)</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>Player Name (Required)</label>
                   <input
                     type="text"
-                    className="designer-input"
+                    className="input-ui"
                     value={searchPlayerName}
                     onChange={e => setSearchPlayerName(e.target.value)}
                     placeholder="e.g. LeBron James, Wayne Gretzky"
@@ -1510,10 +1498,10 @@ export default function StudioApp() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Team Name (Strict Filter)</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>Team Name (Strict Filter)</label>
                   <input
                     type="text"
-                    className="designer-input"
+                    className="input-ui"
                     value={searchTeamName}
                     onChange={e => setSearchTeamName(e.target.value)}
                     placeholder="e.g. Miami Heat, Rangers"
@@ -1521,60 +1509,66 @@ export default function StudioApp() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Destination Folder</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>Destination Folder</label>
                   <input
                     type="text"
-                    className="designer-input"
+                    className="input-ui"
                     value={searchDestinationFolder}
                     onChange={e => setSearchDestinationFolder(e.target.value)}
                     placeholder="Miami Heat - LeBron James"
                     onKeyDown={e => e.key === 'Enter' && handleSearchAthlete()}
                   />
                 </div>
+              </div>
+
+              {/* Action Button & Preset Chips */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>Verified Stints:</span>
+                  {[
+                    { name: 'LeBron James', team: 'Miami Heat' },
+                    { name: 'Wayne Gretzky', team: 'Rangers' },
+                    { name: 'Shaquille O\'Neal', team: 'Lakers' },
+                    { name: 'Connor McDavid', team: 'Oilers' },
+                    { name: 'Caitlin Clark', team: 'Fever' }
+                  ].map((preset, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      className="preset-chip"
+                      onClick={() => {
+                        setSearchPlayerName(preset.name);
+                        setSearchTeamName(preset.team);
+                        setSearchDestinationFolder(`${preset.team} - ${preset.name}`);
+                      }}
+                    >
+                      {preset.name} ({preset.team})
+                    </button>
+                  ))}
+                </div>
+
                 <button
-                  className="btn-designer btn-designer-primary"
-                  style={{ height: 40 }}
+                  className="btn-ui btn-primary"
+                  style={{ height: 40, padding: '0 20px' }}
                   onClick={handleSearchAthlete}
                   disabled={searchLoading}
                 >
-                  <Search size={14} />
-                  <span>{searchLoading ? 'Searching...' : 'Search'}</span>
+                  <Search size={15} />
+                  <span>{searchLoading ? 'Searching Archives...' : 'Search Portraits'}</span>
                 </button>
               </div>
 
-              {/* Verified Presets */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Verified Stints:</span>
-                {[
-                  { name: 'LeBron James', team: 'Miami Heat' },
-                  { name: 'Wayne Gretzky', team: 'Rangers' },
-                  { name: 'Shaquille O\'Neal', team: 'Lakers' },
-                  { name: 'Connor McDavid', team: 'Oilers' },
-                  { name: 'Caitlin Clark', team: 'Fever' }
-                ].map((preset, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    className="btn-designer btn-designer-secondary"
-                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
-                    onClick={() => {
-                      setSearchPlayerName(preset.name);
-                      setSearchTeamName(preset.team);
-                      setSearchDestinationFolder(`${preset.team} - ${preset.name}`);
-                    }}
-                  >
-                    {preset.name} ({preset.team})
-                  </button>
-                ))}
-              </div>
-
-              {/* Player Options Results */}
+              {/* Results */}
               {searchPlayerOptions.length > 0 && (
-                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#f8fafc', marginBottom: 12 }}>
-                    Found {searchPlayerOptions.length} Verified Stints & High-Res Portraits:
+                <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0f172a' }}>
+                      Verified Stints & High-Res Portraits ({searchPlayerOptions.length}):
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Click a stint card to select</span>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12, marginBottom: 20 }}>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12, marginBottom: 20 }}>
                     {searchPlayerOptions.map((opt, idx) => (
                       <div
                         key={idx}
@@ -1583,25 +1577,26 @@ export default function StudioApp() {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 12,
-                          padding: 10,
+                          padding: 12,
                           borderRadius: 'var(--radius-md)',
-                          background: selectedPhotoOptionIdx === idx ? 'rgba(59,130,246,0.15)' : 'rgba(15,23,42,0.6)',
-                          border: `1.5px solid ${selectedPhotoOptionIdx === idx ? '#3b82f6' : 'var(--border-subtle)'}`,
+                          background: selectedPhotoOptionIdx === idx ? '#eff6ff' : '#ffffff',
+                          border: `1.5px solid ${selectedPhotoOptionIdx === idx ? '#2563eb' : '#e2e8f0'}`,
                           cursor: 'pointer',
-                          transition: 'all 0.15s ease'
+                          transition: 'all 0.15s ease',
+                          boxShadow: selectedPhotoOptionIdx === idx ? '0 0 0 1px #2563eb' : 'var(--shadow-xs)'
                         }}
                       >
                         <img
                           src={opt.image ? `/api/proxy_photo?url=${encodeURIComponent(opt.image)}&width=200` : ''}
                           alt={opt.team}
-                          style={{ width: 54, height: 54, borderRadius: 8, objectFit: 'cover', background: '#0f172a' }}
+                          style={{ width: 54, height: 54, borderRadius: 8, objectFit: 'cover', background: '#f1f5f9' }}
                           onError={(e) => { (e.target as HTMLElement).style.opacity = '0.2'; }}
                         />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {opt.team}
                           </div>
-                          <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                          <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
                             {opt.years || 'Era active'} {opt.jersey ? `&bull; #${opt.jersey}` : ''}
                           </div>
                         </div>
@@ -1609,10 +1604,10 @@ export default function StudioApp() {
                     ))}
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
-                      className="btn-designer btn-designer-primary"
-                      style={{ padding: '10px 24px', fontSize: '0.875rem' }}
+                      className="btn-ui btn-primary"
+                      style={{ padding: '10px 24px', fontSize: '0.875rem', height: 42 }}
                       onClick={loadSingleAthleteIntoStudio}
                     >
                       <Sparkles size={16} />
@@ -1626,18 +1621,19 @@ export default function StudioApp() {
 
           {/* WORKFLOW 2: TEAM ROSTER WEBSITE URL */}
           {activeWorkflow === 'url' && (
-            <div className="designer-card" style={{ width: '100%', padding: 28 }}>
-              <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Globe size={15} />
+            <div className="card-clean" style={{ width: '100%', padding: 32 }}>
+              <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#2563eb', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Globe size={16} />
                 <span>Full League Team Roster Ingestion (Proballers, Eurobasket, NHL, EIHL, NCAA)</span>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px auto', gap: 14, alignItems: 'end', marginBottom: 20 }}>
+              {/* Form Input Row */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px auto', gap: 14, alignItems: 'end', marginBottom: 16 }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Team Roster Website URL</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>Team Roster Website URL</label>
                   <input
                     type="text"
-                    className="designer-input"
+                    className="input-ui"
                     value={rosterUrl}
                     onChange={e => setRosterUrl(e.target.value)}
                     placeholder="https://www.cardiffdevils.com/team/ or Proballers URL"
@@ -1645,10 +1641,10 @@ export default function StudioApp() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Destination Folder</label>
+                  <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>Destination Folder</label>
                   <input
                     type="text"
-                    className="designer-input"
+                    className="input-ui"
                     value={rosterFolder}
                     onChange={e => setRosterFolder(e.target.value)}
                     placeholder="Cardiff Devils"
@@ -1656,19 +1652,19 @@ export default function StudioApp() {
                   />
                 </div>
                 <button
-                  className="btn-designer btn-designer-primary"
-                  style={{ height: 40 }}
+                  className="btn-ui btn-primary"
+                  style={{ height: 40, padding: '0 20px' }}
                   onClick={handleFetchTeamRoster}
                   disabled={rosterLoading}
                 >
-                  <Globe size={14} />
+                  <Globe size={15} />
                   <span>{rosterLoading ? 'Scraping...' : 'Fetch Roster'}</span>
                 </button>
               </div>
 
-              {/* Quick Presets */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', paddingTop: 16, borderTop: '1px solid var(--border-subtle)' }}>
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Supported Presets:</span>
+              {/* Supported Presets Chips */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 20 }}>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b' }}>Supported Presets:</span>
                 {[
                   { name: 'Cardiff Devils (EIHL)', url: 'https://www.cardiffdevils.com/team/', folder: 'Cardiff Devils' },
                   { name: 'Buffalo Sabres (NHL)', url: 'https://www.nhl.com/sabres/roster', folder: 'Buffalo Sabres' },
@@ -1678,8 +1674,7 @@ export default function StudioApp() {
                   <button
                     key={idx}
                     type="button"
-                    className="btn-designer btn-designer-secondary"
-                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
+                    className="preset-chip"
                     onClick={() => {
                       setRosterUrl(preset.url);
                       setRosterFolder(preset.folder);
@@ -1690,29 +1685,29 @@ export default function StudioApp() {
                 ))}
               </div>
 
-              {/* Roster Table Results */}
+              {/* Roster Table */}
               {rosterPlayers.length > 0 && (
-                <div style={{ marginTop: 24, paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
+                <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#f8fafc' }}>{rosterFolder}</span>
-                      <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 700 }}>
+                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>{rosterFolder}</span>
+                      <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: '#eff6ff', color: '#2563eb', fontWeight: 700 }}>
                         {rosterPlayers.length} Players
                       </span>
                     </div>
 
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
-                        className="btn-designer btn-designer-secondary"
-                        style={{ fontSize: '0.75rem', padding: '5px 10px' }}
+                        className="btn-ui btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '5px 12px' }}
                         onClick={handleCopyForSheets}
                       >
                         <Copy size={13} />
                         <span>Copy for Sheets</span>
                       </button>
                       <button
-                        className="btn-designer btn-designer-secondary"
-                        style={{ fontSize: '0.75rem', padding: '5px 10px' }}
+                        className="btn-ui btn-secondary"
+                        style={{ fontSize: '0.75rem', padding: '5px 12px' }}
                         onClick={() => setBulkPasteOpen(!bulkPasteOpen)}
                       >
                         <FileSpreadsheet size={13} />
@@ -1721,38 +1716,36 @@ export default function StudioApp() {
                     </div>
                   </div>
 
-                  {/* Bulk Paste Drawer */}
                   {bulkPasteOpen && (
-                    <div style={{ background: 'rgba(15,23,42,0.8)', padding: 14, borderRadius: 10, border: '1px solid var(--border-default)', marginBottom: 14 }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>
+                    <div style={{ background: '#f8fafc', padding: 14, borderRadius: 10, border: '1px solid #e2e8f0', marginBottom: 14 }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 6 }}>
                         Paste Name &lt;Tab&gt; Number from Google Sheets or Excel:
                       </div>
                       <textarea
                         rows={3}
-                        className="designer-input"
+                        className="input-ui"
                         placeholder="Marcus Meeks&#9;882177&#10;Braeden Elnicki&#9;1947454..."
                         value={bulkPasteText}
                         onChange={e => setBulkPasteText(e.target.value)}
-                        style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem' }}
+                        style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', height: 'auto', padding: 10 }}
                       />
-                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
-                        <button className="btn-designer btn-designer-secondary" style={{ fontSize: '0.72rem' }} onClick={() => setBulkPasteOpen(false)}>Cancel</button>
-                        <button className="btn-designer btn-designer-primary" style={{ fontSize: '0.72rem' }} onClick={handleApplyBulkPaste}>Apply to Table</button>
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+                        <button className="btn-ui btn-secondary" style={{ fontSize: '0.75rem' }} onClick={() => setBulkPasteOpen(false)}>Cancel</button>
+                        <button className="btn-ui btn-primary" style={{ fontSize: '0.75rem' }} onClick={handleApplyBulkPaste}>Apply to Table</button>
                       </div>
                     </div>
                   )}
 
-                  {/* Table */}
-                  <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--border-subtle)', borderRadius: 10, marginBottom: 20 }}>
-                    <table className="designer-table">
+                  <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: 10, marginBottom: 20 }}>
+                    <table className="table-clean">
                       <thead>
                         <tr>
-                          <th style={{ width: 60 }}>Avatar</th>
+                          <th style={{ width: 50 }}>Avatar</th>
                           <th>Athlete Name</th>
-                          <th style={{ width: 60, textAlign: 'center' }}>#</th>
-                          <th style={{ width: 80, textAlign: 'center' }}>Pos</th>
+                          <th style={{ width: 50, textAlign: 'center' }}>#</th>
+                          <th style={{ width: 70, textAlign: 'center' }}>Pos</th>
                           <th style={{ width: 140 }}>Assigned ID</th>
-                          <th style={{ width: 140 }}>Resulting File</th>
+                          <th style={{ width: 150 }}>Resulting File</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1762,18 +1755,18 @@ export default function StudioApp() {
                               <img
                                 src={player.image ? `/api/proxy_photo?url=${encodeURIComponent(player.image)}&width=100` : ''}
                                 alt={player.name}
-                                style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover', background: '#0f172a' }}
+                                style={{ width: 34, height: 34, borderRadius: 6, objectFit: 'cover', background: '#f1f5f9' }}
                                 onError={(e) => { (e.target as HTMLElement).style.opacity = '0.2'; }}
                               />
                             </td>
-                            <td style={{ fontWeight: 600, color: '#f8fafc' }}>{player.name}</td>
-                            <td style={{ textAlign: 'center', color: '#94a3b8' }}>{player.jersey || '-'}</td>
-                            <td style={{ textAlign: 'center', color: '#94a3b8' }}>{player.position || player.pos || '-'}</td>
+                            <td style={{ fontWeight: 600, color: '#0f172a' }}>{player.name}</td>
+                            <td style={{ textAlign: 'center', color: '#64748b' }}>{player.jersey || '-'}</td>
+                            <td style={{ textAlign: 'center', color: '#64748b' }}>{player.position || player.pos || '-'}</td>
                             <td>
                               <input
                                 type="text"
-                                className="designer-input"
-                                style={{ padding: '4px 8px', fontSize: '0.75rem', height: 28 }}
+                                className="input-ui"
+                                style={{ height: 28, padding: '0 8px', fontSize: '0.75rem' }}
                                 value={player.assigned_number || ''}
                                 placeholder={player.jersey || `${idx + 1}`}
                                 onChange={e => {
@@ -1784,7 +1777,7 @@ export default function StudioApp() {
                                 }}
                               />
                             </td>
-                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: '#38bdf8' }}>
+                            <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.75rem', color: '#0284c7' }}>
                               {player.assigned_number ? `${player.assigned_number}.png` : (player.jersey ? `${player.jersey}.png` : `${player.name}.png`)}
                             </td>
                           </tr>
@@ -1793,10 +1786,10 @@ export default function StudioApp() {
                     </table>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                     <button
-                      className="btn-designer btn-designer-primary"
-                      style={{ padding: '10px 24px', fontSize: '0.875rem' }}
+                      className="btn-ui btn-primary"
+                      style={{ padding: '10px 24px', fontSize: '0.875rem', height: 42 }}
                       onClick={loadTeamRosterIntoStudio}
                     >
                       <Sparkles size={16} />
@@ -1810,38 +1803,27 @@ export default function StudioApp() {
 
           {/* WORKFLOW 3: LOCAL PHOTO FOLDER */}
           {activeWorkflow === 'local' && (
-            <div className="designer-card" style={{ width: '100%', padding: 28 }}>
-              {/* Dropzone Card */}
-              <div
-                style={{
-                  border: '2px dashed var(--border-default)',
-                  borderRadius: 'var(--radius-lg)',
-                  padding: '40px 24px',
-                  textAlign: 'center',
-                  background: 'rgba(15,23,42,0.4)',
-                  marginBottom: 24,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 12
-                }}
-              >
-                <div style={{ width: 52, height: 52, borderRadius: 14, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#3b82f6' }}>
+            <div className="card-clean" style={{ width: '100%', padding: 32 }}>
+              {/* Clean Light Dropzone */}
+              <div className="dropzone-clean" style={{ marginBottom: 24 }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2563eb' }}>
                   <Folder size={26} />
                 </div>
-                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f8fafc' }}>
-                  Choose Photo Folder or Drag & Drop Images Here
+                <div>
+                  <div style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>
+                    Choose Photo Folder from Your Computer
+                  </div>
+                  <div style={{ fontSize: '0.8125rem', color: '#64748b', marginTop: 4 }}>
+                    Select an entire folder using native webkit directory picker
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.8125rem', color: '#94a3b8' }}>
-                  Select an entire folder from your computer with native webkit folder picker
-                </div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-                  <label className="btn-designer btn-designer-primary" style={{ cursor: 'pointer' }}>
-                    <Folder size={15} />
+                <div>
+                  <label className="btn-ui btn-primary" style={{ cursor: 'pointer', height: 40, padding: '0 20px' }}>
+                    <Folder size={16} />
                     <span>Choose Photo Folder</span>
                     <input
                       type="file"
-                      // @ts-expect-error webkitdirectory is standard for Chromium/Safari folder picker
+                      // @ts-expect-error webkitdirectory is standard for folder picker
                       webkitdirectory=""
                       directory=""
                       multiple
@@ -1853,18 +1835,19 @@ export default function StudioApp() {
               </div>
 
               {/* Manual Path Bar */}
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 28 }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', whiteSpace: 'nowrap' }}>Or enter folder path:</span>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 26 }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>Or enter folder path:</span>
                 <input
                   type="text"
-                  className="designer-input"
+                  className="input-ui"
                   placeholder="/Users/.../Downloads/Team_Photos or 1908-Saint Anselm"
                   value={manualPath}
                   onChange={e => setManualPath(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && handleOpenLocalFolder(manualPath)}
                 />
                 <button
-                  className="btn-designer btn-designer-secondary"
+                  className="btn-ui btn-secondary"
+                  style={{ height: 40, padding: '0 18px' }}
                   onClick={() => handleOpenLocalFolder(manualPath)}
                   disabled={folderLoading}
                 >
@@ -1875,24 +1858,24 @@ export default function StudioApp() {
               {/* Detected Folders in Downloads */}
               <div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <HardDrive size={15} color="#3b82f6" />
+                  <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <HardDrive size={16} color="#2563eb" />
                     <span>Detected Photo Folders in Downloads</span>
-                    <span style={{ fontSize: '0.6875rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(59,130,246,0.15)', color: '#60a5fa', fontWeight: 700 }}>
+                    <span style={{ fontSize: '0.6875rem', padding: '1px 7px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', fontWeight: 700 }}>
                       {detectedFolders.length}
                     </span>
                   </div>
                   <button
-                    className="btn-designer btn-designer-secondary"
-                    style={{ fontSize: '0.72rem', padding: '3px 8px' }}
+                    className="btn-ui btn-secondary"
+                    style={{ fontSize: '0.72rem', padding: '4px 10px' }}
                     onClick={loadSuggestedFolders}
                   >
-                    <RefreshCw size={11} />
+                    <RefreshCw size={12} />
                     <span>Refresh</span>
                   </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 10 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
                   {detectedFolders.length > 0 ? (
                     detectedFolders.map((f, idx) => (
                       <div
@@ -1904,25 +1887,26 @@ export default function StudioApp() {
                           gap: 12,
                           padding: '12px 14px',
                           borderRadius: 10,
-                          background: 'rgba(15,23,42,0.6)',
-                          border: '1px solid var(--border-subtle)',
+                          background: '#ffffff',
+                          border: '1px solid var(--border-default)',
                           cursor: 'pointer',
-                          transition: 'all 0.15s ease'
+                          transition: 'all 0.15s ease',
+                          boxShadow: 'var(--shadow-xs)'
                         }}
                       >
-                        <Folder size={18} color="#3b82f6" />
+                        <Folder size={20} color="#2563eb" />
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {f.name}
                           </div>
-                          <div style={{ fontSize: '0.7rem', color: '#94a3b8' }}>
+                          <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>
                             {f.count} {f.count === 1 ? 'photo' : 'photos'} &bull; Ready to edit
                           </div>
                         </div>
                       </div>
                     ))
                   ) : (
-                    <div style={{ gridColumn: '1 / -1', padding: 20, textAlign: 'center', color: '#64748b', fontSize: '0.8125rem' }}>
+                    <div style={{ gridColumn: '1 / -1', padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: '0.8125rem' }}>
                       No photo folders found automatically in Downloads. Use Choose Photo Folder above.
                     </div>
                   )}
@@ -1933,46 +1917,57 @@ export default function StudioApp() {
         </main>
       ) : (
         /* ========================================================= */
-        /* SCREEN 2: STUDIO WORKBENCH SCREEN */
+        /* SCREEN 2: UNIFIED STUDIO WORKBENCH (LIGHT THEME) */
         /* ========================================================= */
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 60px)', overflow: 'hidden' }}>
-          {/* Workbench Action Header */}
-          <div style={{ height: 52, borderBottom: '1px solid var(--border-subtle)', background: 'rgba(13,19,31,0.95)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px' }}>
+          {/* Action Header */}
+          <div style={{ height: 52, borderBottom: '1px solid var(--border-default)', background: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <button
-                className="btn-designer btn-designer-secondary"
-                style={{ fontSize: '0.75rem', padding: '5px 10px' }}
+                className="btn-ui btn-secondary"
+                style={{ fontSize: '0.75rem', padding: '5px 12px' }}
                 onClick={() => setCurrentScreen('landing')}
               >
-                <ArrowLeft size={13} />
+                <ArrowLeft size={14} />
                 <span>Change Folder</span>
               </button>
 
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a' }}>
                   {currentFolder.replaceAll('\\', '/').split('/').filter(Boolean).pop() || currentFolder}
                 </span>
-                <span style={{ fontSize: '0.6875rem', fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>
-                  &rarr; {editedFolder.replaceAll('\\', '/').split('/').filter(Boolean).pop() || editedFolder}/
+                <ChevronRight size={14} color="#94a3b8" />
+                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: '#0284c7' }}>
+                  {editedFolder.replaceAll('\\', '/').split('/').filter(Boolean).pop() || editedFolder}/
                 </span>
               </div>
             </div>
 
-            {/* Header Actions */}
+            {/* Photo Counter */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 10px', background: '#f8fafc', borderRadius: 'var(--radius-full)', border: '1px solid #e2e8f0' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#334155' }}>
+                Photo {currentIndex + 1} of {photos.length}
+              </span>
+              <span style={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'var(--font-mono)' }}>
+                &bull; {photos[currentIndex]}
+              </span>
+            </div>
+
+            {/* Workbench Top Actions */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
-                className="btn-designer btn-designer-secondary"
-                style={{ fontSize: '0.75rem' }}
+                className="btn-ui btn-secondary"
+                style={{ fontSize: '0.78125rem', padding: '6px 14px' }}
                 onClick={handleCutout}
                 title="Automated background removal with u2net"
               >
-                <Scissors size={14} color="#a855f7" />
+                <Scissors size={14} color="#8b5cf6" />
                 <span>AI Cutout</span>
               </button>
 
               <button
-                className="btn-designer btn-designer-secondary"
-                style={{ fontSize: '0.75rem' }}
+                className="btn-ui btn-secondary"
+                style={{ fontSize: '0.78125rem', padding: '6px 14px' }}
                 onClick={handleSaveActivePhoto}
                 title="Save 180×180 PNG directly"
               >
@@ -1981,8 +1976,8 @@ export default function StudioApp() {
               </button>
 
               <button
-                className="btn-designer btn-designer-primary"
-                style={{ fontSize: '0.75rem' }}
+                className="btn-ui btn-primary"
+                style={{ fontSize: '0.78125rem', padding: '6px 16px' }}
                 onClick={handleDownloadAllZip}
                 title="Export all photos as 180×180 ZIP package"
               >
@@ -1995,32 +1990,32 @@ export default function StudioApp() {
           {/* Workbench Body */}
           <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
             {/* Left Controls Sidebar */}
-            <div style={{ width: 280, borderRight: '1px solid var(--border-subtle)', background: 'rgba(13,19,31,0.6)', padding: 18, display: 'flex', flexDirection: 'column', gap: 20, overflowY: 'auto' }}>
-              {/* Tool Mode Tabs */}
+            <div style={{ width: 290, borderRight: '1px solid var(--border-default)', background: '#ffffff', padding: 18, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+              {/* Tool Mode Segmented Control */}
               <div>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
                   Tool Mode
                 </div>
-                <div style={{ display: 'flex', background: 'rgba(15,23,42,0.8)', padding: 3, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+                <div className="segmented-track" style={{ width: '100%' }}>
                   <button
-                    className="btn-designer"
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem', borderRadius: 6, background: toolMode === 'frame' ? 'rgba(59,130,246,0.2)' : 'transparent', color: toolMode === 'frame' ? '#60a5fa' : '#94a3b8' }}
+                    className={`segmented-btn ${toolMode === 'frame' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.75rem', padding: '6px 0' }}
                     onClick={() => setToolMode('frame')}
                   >
                     <Move size={13} />
                     <span>Pan</span>
                   </button>
                   <button
-                    className="btn-designer"
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem', borderRadius: 6, background: toolMode === 'recover' ? 'rgba(16,185,129,0.2)' : 'transparent', color: toolMode === 'recover' ? '#34d399' : '#94a3b8' }}
+                    className={`segmented-btn ${toolMode === 'recover' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.75rem', padding: '6px 0' }}
                     onClick={() => setToolMode('recover')}
                   >
                     <Sparkles size={13} />
                     <span>Recover</span>
                   </button>
                   <button
-                    className="btn-designer"
-                    style={{ flex: 1, padding: '6px 0', fontSize: '0.75rem', borderRadius: 6, background: toolMode === 'erase' ? 'rgba(239,68,68,0.2)' : 'transparent', color: toolMode === 'erase' ? '#f87171' : '#94a3b8' }}
+                    className={`segmented-btn ${toolMode === 'erase' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.75rem', padding: '6px 0' }}
                     onClick={() => setToolMode('erase')}
                   >
                     <Eraser size={13} />
@@ -2032,10 +2027,10 @@ export default function StudioApp() {
               {/* Mode 1: Pan & Zoom Controls */}
               {toolMode === 'frame' ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div className="designer-card" style={{ padding: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>Zoom Scale</span>
-                      <span style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>
+                  <div className="card-clean" style={{ padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>Zoom Scale</span>
+                      <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: '#0284c7', fontWeight: 700 }}>
                         {photoDataMap[photos[currentIndex]] ? Math.round(photoDataMap[photos[currentIndex]].scale * 100) : 45}%
                       </span>
                     </div>
@@ -2053,40 +2048,40 @@ export default function StudioApp() {
                           setPhotoDataMap(prev => ({ ...prev, [pName]: { ...data } }));
                         }
                       }}
-                      style={{ width: '100%', accentColor: '#3b82f6', marginBottom: 12 }}
+                      style={{ width: '100%', accentColor: '#2563eb', marginBottom: 12 }}
                     />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                      <button className="btn-designer btn-designer-secondary" style={{ fontSize: '0.72rem', padding: '6px 0' }} onClick={handleAutoAlignCurrent}>Auto-Align Face</button>
-                      <button className="btn-designer btn-designer-secondary" style={{ fontSize: '0.72rem', padding: '6px 0' }} onClick={handleFitWidth}>Fit Width</button>
-                      <button className="btn-designer btn-designer-secondary" style={{ fontSize: '0.72rem', padding: '6px 0' }} onClick={handleFitHeight}>Fit Height</button>
-                      <button className="btn-designer btn-designer-secondary" style={{ fontSize: '0.72rem', padding: '6px 0' }} onClick={handleCenter}>Center</button>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <button className="btn-ui btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 0' }} onClick={handleAutoAlignCurrent}>Auto-Align Face</button>
+                      <button className="btn-ui btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 0' }} onClick={handleCenter}>Center</button>
+                      <button className="btn-ui btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 0' }} onClick={handleFitWidth}>Fit Width</button>
+                      <button className="btn-ui btn-secondary" style={{ fontSize: '0.75rem', padding: '6px 0' }} onClick={handleFitHeight}>Fit Height</button>
                     </div>
                   </div>
 
-                  <div className="designer-card" style={{ padding: 14 }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#f8fafc', marginBottom: 4 }}>
+                  <div className="card-clean" style={{ padding: 14 }}>
+                    <div style={{ fontSize: '0.78125rem', fontWeight: 700, color: '#0f172a', marginBottom: 4 }}>
                       Batch Team Framing
                     </div>
-                    <p style={{ fontSize: '0.7rem', color: '#94a3b8', lineHeight: 1.4, marginBottom: 10 }}>
-                      Apply this photo&apos;s scale & position to all {photos.length} portraits in roster:
+                    <p style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.4, marginBottom: 10 }}>
+                      Apply this photo&apos;s framing to all {photos.length} portraits:
                     </p>
                     <button
-                      className="btn-designer btn-designer-secondary"
-                      style={{ width: '100%', fontSize: '0.75rem' }}
+                      className="btn-ui btn-secondary"
+                      style={{ width: '100%', fontSize: '0.75rem', padding: '7px 0' }}
                       onClick={handleApplyFramingToAll}
                     >
-                      <Layers size={13} />
+                      <Layers size={14} />
                       <span>Apply Framing to All</span>
                     </button>
                   </div>
                 </div>
               ) : (
-                /* Mode 2 & 3: Retouch Brush Controls */
+                /* Mode 2 & 3: Brush Controls */
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div className="designer-card" style={{ padding: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8' }}>Brush Radius</span>
-                      <span style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>{brushSize} px</span>
+                  <div className="card-clean" style={{ padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>Brush Radius</span>
+                      <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: '#0284c7', fontWeight: 700 }}>{brushSize} px</span>
                     </div>
                     <input
                       type="range"
@@ -2097,82 +2092,91 @@ export default function StudioApp() {
                       style={{ width: '100%', accentColor: toolMode === 'recover' ? '#10b981' : '#ef4444', marginBottom: 12 }}
                     />
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <button className="btn-designer btn-designer-secondary" style={{ flex: 1, fontSize: '0.72rem' }} onClick={handleUndoMask}>Undo</button>
-                      <button className="btn-designer btn-designer-secondary" style={{ flex: 1, fontSize: '0.72rem' }} onClick={handleResetMask}>Reset Cutout</button>
+                      <button className="btn-ui btn-secondary" style={{ flex: 1, fontSize: '0.75rem', padding: '6px 0' }} onClick={handleUndoMask}>Undo Stroke</button>
+                      <button className="btn-ui btn-secondary" style={{ flex: 1, fontSize: '0.75rem', padding: '6px 0' }} onClick={handleResetMask}>Reset Mask</button>
                     </div>
-                    <p style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 10, lineHeight: 1.4 }}>
+                    <p style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 10, lineHeight: 1.4 }}>
                       {toolMode === 'recover'
-                        ? 'Painting recovers lost hair strands and jersey details from original photo.'
-                        : 'Painting erases leftover background artifacts.'}
+                        ? 'Recover restores hair/jersey details from original photo.'
+                        : 'Erase cleans up background residue.'}
                     </p>
                   </div>
                 </div>
               )}
 
-              {/* Standardized Specs Card */}
-              <div className="designer-card" style={{ padding: 14, marginTop: 'auto' }}>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: 6 }}>
-                  Target Calibration
+              {/* Canvas Background & Original View */}
+              <div className="card-clean" style={{ padding: 14 }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                  Canvas Background
                 </div>
-                <div style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.6, fontFamily: 'var(--font-mono)' }}>
-                  <div>Target: <strong style={{ color: '#38bdf8' }}>180 × 180 px</strong></div>
-                  <div>Guideline: <strong style={{ color: '#7dd3fc' }}>35% Eye Line</strong></div>
-                  <div>Guideline: <strong style={{ color: '#fcd34d' }}>85% Chin Line</strong></div>
-                  <div>Format: <strong style={{ color: '#34d399' }}>PNG (RGBA)</strong></div>
+                <div className="segmented-track" style={{ width: '100%', marginBottom: 10 }}>
+                  <button
+                    className={`segmented-btn ${canvasBg === 'checker' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.72rem', padding: '4px 0' }}
+                    onClick={() => setCanvasBg('checker')}
+                  >
+                    Transparent
+                  </button>
+                  <button
+                    className={`segmented-btn ${canvasBg === 'white' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.72rem', padding: '4px 0' }}
+                    onClick={() => setCanvasBg('white')}
+                  >
+                    White
+                  </button>
+                  <button
+                    className={`segmented-btn ${canvasBg === 'dark' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.72rem', padding: '4px 0' }}
+                    onClick={() => setCanvasBg('dark')}
+                  >
+                    Dark
+                  </button>
+                  <button
+                    className={`segmented-btn ${canvasBg === 'navy' ? 'active' : ''}`}
+                    style={{ flex: 1, fontSize: '0.72rem', padding: '4px 0' }}
+                    onClick={() => setCanvasBg('navy')}
+                  >
+                    Navy
+                  </button>
                 </div>
-              </div>
-            </div>
 
-            {/* Center Stage & HUD Canvas */}
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' }}>
-              {/* Background Color Toolbar */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
                 <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', background: canvasBg === 'checker' ? 'rgba(59,130,246,0.2)' : 'transparent', color: canvasBg === 'checker' ? '#60a5fa' : '#94a3b8' }}
-                  onClick={() => setCanvasBg('checker')}
-                >
-                  Transparent
-                </button>
-                <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', background: canvasBg === 'dark' ? 'rgba(59,130,246,0.2)' : 'transparent', color: canvasBg === 'dark' ? '#60a5fa' : '#94a3b8' }}
-                  onClick={() => setCanvasBg('dark')}
-                >
-                  Dark
-                </button>
-                <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', background: canvasBg === 'white' ? 'rgba(59,130,246,0.2)' : 'transparent', color: canvasBg === 'white' ? '#60a5fa' : '#94a3b8' }}
-                  onClick={() => setCanvasBg('white')}
-                >
-                  White
-                </button>
-                <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', background: canvasBg === 'team' ? 'rgba(59,130,246,0.2)' : 'transparent', color: canvasBg === 'team' ? '#60a5fa' : '#94a3b8' }}
-                  onClick={() => setCanvasBg('team')}
-                >
-                  Team Navy
-                </button>
-                <span style={{ width: 1, height: 16, background: 'var(--border-subtle)', margin: '0 4px' }} />
-                <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ fontSize: '0.72rem', padding: '4px 10px', background: isComparingOriginal ? '#3b82f6' : 'transparent', color: isComparingOriginal ? '#fff' : '#94a3b8' }}
+                  className="btn-ui btn-secondary"
+                  style={{ width: '100%', fontSize: '0.75rem', padding: '6px 0', background: isComparingOriginal ? '#2563eb' : '#ffffff', color: isComparingOriginal ? '#ffffff' : '#334155' }}
                   onMouseDown={() => setIsComparingOriginal(true)}
                   onMouseUp={() => setIsComparingOriginal(false)}
                   onMouseLeave={() => setIsComparingOriginal(false)}
                 >
-                  <Eye size={12} />
+                  <Eye size={13} />
                   <span>Hold: View Original</span>
                 </button>
               </div>
 
-              {/* Viewport Canvas Frame */}
-              <div className="hud-viewport-wrapper">
+              {/* Standard Calibration Box */}
+              <div className="card-clean" style={{ padding: 14, marginTop: 'auto', background: '#f8fafc' }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginBottom: 6 }}>
+                  Standard Calibration
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#475569', lineHeight: 1.6, fontFamily: 'var(--font-mono)' }}>
+                  <div>Target: <strong style={{ color: '#0284c7' }}>180 × 180 px</strong></div>
+                  <div>Guide: <strong style={{ color: '#0369a1' }}>35% Eye Line</strong></div>
+                  <div>Guide: <strong style={{ color: '#b45309' }}>85% Chin Line</strong></div>
+                  <div>Format: <strong style={{ color: '#059669' }}>PNG (RGBA)</strong></div>
+                </div>
+              </div>
+            </div>
+
+            {/* Center Stage & HUD Viewport */}
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', position: 'relative', overflow: 'hidden' }}>
+              {/* Viewport Frame */}
+              <div className="stage-wrapper">
                 <div
                   ref={viewportRef}
-                  className={`hud-viewport bg-${canvasBg} ${toolMode !== 'frame' ? 'brush-mode' : ''}`}
+                  className={`hud-viewport-clean ${
+                    canvasBg === 'checker' ? 'bg-checkerboard-light' :
+                    canvasBg === 'white' ? 'bg-stage-white' :
+                    canvasBg === 'dark' ? 'bg-stage-dark' : 'bg-stage-navy'
+                  } ${toolMode !== 'frame' ? 'brush-mode' : ''}`}
                   onMouseDown={handleCanvasMouseDown}
                   onMouseMove={handleCanvasMouseMove}
                   onMouseUp={handleCanvasMouseUp}
@@ -2186,30 +2190,30 @@ export default function StudioApp() {
                   />
 
                   {/* HUD Guidelines */}
-                  <div className="hud-guidelines-overlay">
-                    <div className="hud-guide-eye">
+                  <div className="hud-overlay">
+                    <div className="guide-line-eye">
                       <span>35% Eye Line</span>
                     </div>
-                    <div className="hud-guide-chin">
+                    <div className="guide-line-chin">
                       <span>85% Chin Line</span>
                     </div>
-                    <div className="hud-crosshair-v" />
-                    <div className="hud-crosshair-h" />
+                    <div className="guide-cross-v" />
+                    <div className="guide-cross-h" />
                   </div>
 
                   {/* Brush Indicator */}
                   <div
                     ref={brushCursorRef}
-                    className={`brush-cursor-indicator ${toolMode}`}
+                    className={`brush-cursor-indicator-clean ${toolMode}`}
                   />
                 </div>
               </div>
 
               {/* Coordinates Hint */}
-              <div style={{ marginTop: 12, fontSize: '0.72rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span>Drag to reposition &bull; Wheel to zoom</span>
+              <div style={{ marginTop: 14, fontSize: '0.75rem', color: '#64748b', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span>Drag to position &bull; Wheel to zoom</span>
                 <span>&bull;</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: '#38bdf8' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', color: '#0284c7', fontWeight: 600 }}>
                   {photos[currentIndex] && photoDataMap[photos[currentIndex]]
                     ? `x: ${Math.round(photoDataMap[photos[currentIndex]].offset_x)}px, y: ${Math.round(photoDataMap[photos[currentIndex]].offset_y)}px`
                     : 'x: 0px, y: 0px'}
@@ -2219,48 +2223,48 @@ export default function StudioApp() {
           </div>
 
           {/* Bottom Filmstrip Carousel */}
-          <div style={{ height: 130, borderTop: '1px solid var(--border-subtle)', background: 'rgba(13,19,31,0.95)', padding: '8px 16px', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: 126, borderTop: '1px solid var(--border-default)', background: '#ffffff', padding: '8px 20px', display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                <span style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                   Team Roster Filmstrip
                 </span>
-                <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: 4, background: 'rgba(59,130,246,0.12)', color: '#60a5fa', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.6875rem', padding: '1px 8px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', fontWeight: 600 }}>
                   Photo {currentIndex + 1} of {photos.length}
                 </span>
               </div>
 
-              <div style={{ display: 'flex', gap: 4 }}>
+              <div style={{ display: 'flex', gap: 6 }}>
                 <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ padding: '3px 7px' }}
+                  className="btn-ui btn-secondary"
+                  style={{ padding: '3px 8px' }}
                   onClick={() => selectPhotoByIndex((currentIndex - 1 + photos.length) % photos.length)}
                   title="Previous Photo (Left Arrow)"
                 >
-                  <ArrowLeft size={12} />
+                  <ArrowLeft size={13} />
                 </button>
                 <button
-                  className="btn-designer btn-designer-secondary"
-                  style={{ padding: '3px 7px' }}
+                  className="btn-ui btn-secondary"
+                  style={{ padding: '3px 8px' }}
                   onClick={() => selectPhotoByIndex((currentIndex + 1) % photos.length)}
                   title="Next Photo (Right Arrow)"
                 >
-                  <ArrowRight size={12} />
+                  <ArrowRight size={13} />
                 </button>
               </div>
             </div>
 
-            <div className="filmstrip-container">
+            <div className="filmstrip-track">
               {photos.map((name, idx) => {
                 const data = photoDataMap[name];
                 return (
                   <div
                     key={idx}
-                    className={`filmstrip-card ${idx === currentIndex ? 'active' : ''}`}
+                    className={`filmstrip-item-clean ${idx === currentIndex ? 'active' : ''}`}
                     onClick={() => selectPhotoByIndex(idx)}
                   >
-                    {data?.saved && <div className="status-dot-badge dot-saved" title="Saved" />}
-                    {data?.hasCutout && !data?.saved && <div className="status-dot-badge dot-cutout" title="AI Cutout" />}
+                    {data?.saved && <div className="dot-indicator dot-saved-clean" title="Saved" />}
+                    {data?.hasCutout && !data?.saved && <div className="dot-indicator dot-cutout-clean" title="AI Cutout" />}
                     <img
                       src={data?.proxiedUrl || data?.blobUrl || `/api/proxy_photo?url=${encodeURIComponent(name)}&width=100`}
                       alt={name}
@@ -2279,50 +2283,50 @@ export default function StudioApp() {
       {/* MODAL: Platform Dashboard (SuperAdmin) */}
       {/* ========================================================= */}
       {showPlatformDashboard && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.8)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div className="designer-card" style={{ maxWidth: 640, width: '100%', padding: 28, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.25)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 620, width: '100%', padding: 28, maxHeight: '85vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Building size={20} color="#3b82f6" />
-                <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#f8fafc' }}>Multi-Tenant Platform Dashboard</h2>
+                <Building size={20} color="#2563eb" />
+                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>Platform Dashboard</h2>
               </div>
-              <button className="btn-designer btn-designer-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowPlatformDashboard(false)}>Close</button>
+              <button className="btn-ui btn-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowPlatformDashboard(false)}>Close</button>
             </div>
 
-            {/* Metrics Grid */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
-              <div style={{ padding: 12, borderRadius: 10, background: 'rgba(15,23,42,0.6)', border: '1px solid var(--border-subtle)' }}>
+            {/* Metrics */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+              <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                 <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Active Companies</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f8fafc', marginTop: 4 }}>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0f172a', marginTop: 4 }}>
                   {user.platform_metrics?.total_companies || 1}
                 </div>
               </div>
-              <div style={{ padding: 12, borderRadius: 10, background: 'rgba(15,23,42,0.6)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                 <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Seats Allocated</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#38bdf8', marginTop: 4 }}>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#2563eb', marginTop: 4 }}>
                   {user.platform_metrics?.total_used_seats || 1} / {user.platform_metrics?.total_seats_allocated || 25}
                 </div>
               </div>
-              <div style={{ padding: 12, borderRadius: 10, background: 'rgba(15,23,42,0.6)', border: '1px solid var(--border-subtle)' }}>
+              <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                 <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Users</div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#34d399', marginTop: 4 }}>
-                  {user.platform_metrics?.total_users || 2}
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#10b981', marginTop: 4 }}>
+                  {user.platform_metrics?.total_users || 1}
                 </div>
               </div>
             </div>
 
-            {/* Companies List */}
-            <div style={{ fontSize: '0.8125rem', fontWeight: 700, color: '#f8fafc', marginBottom: 10 }}>Registered Tenants</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Tenants */}
+            <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', marginBottom: 10 }}>Tenants</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {(user.platform_metrics?.companies || [
-                { id: '1', name: 'Athletics Media Group', plan: 'enterprise', max_seats: 25, used_seats: 1, status: 'active' }
+                { id: '1', name: 'Ecstaticloud Technologies', plan: 'enterprise', max_seats: 9968, used_seats: 1, status: 'active' }
               ]).map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 8, background: 'rgba(15,23,42,0.4)', border: '1px solid var(--border-subtle)' }}>
+                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
                   <div>
-                    <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#f8fafc' }}>{c.name}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Plan: {c.plan} &bull; Status: {c.status}</div>
+                    <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0f172a' }}>{c.name}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>Plan: {c.plan} &bull; Status: {c.status}</div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#93c5fd' }}>
+                  <div style={{ fontSize: '0.78125rem', fontWeight: 600, color: '#2563eb' }}>
                     {c.used_seats} / {c.max_seats} Seats Used
                   </div>
                 </div>
@@ -2336,18 +2340,18 @@ export default function StudioApp() {
       {/* MODAL: Team Seats & Member Invitations */}
       {/* ========================================================= */}
       {showTeamModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(8,12,20,0.8)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div className="designer-card" style={{ maxWidth: 480, width: '100%', padding: 28 }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.25)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 460, width: '100%', padding: 28 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Users size={18} color="#3b82f6" />
-                <h2 style={{ fontSize: '1.1rem', fontWeight: 800, color: '#f8fafc' }}>Team Seats & Invitations</h2>
+                <Users size={20} color="#2563eb" />
+                <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a' }}>Team Seats & Invitations</h2>
               </div>
-              <button className="btn-designer btn-designer-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowTeamModal(false)}>Close</button>
+              <button className="btn-ui btn-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowTeamModal(false)}>Close</button>
             </div>
 
-            <div style={{ padding: 12, borderRadius: 8, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)', marginBottom: 18 }}>
-              <div style={{ fontSize: '0.75rem', color: '#93c5fd' }}>
+            <div style={{ padding: 12, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: 18 }}>
+              <div style={{ fontSize: '0.78125rem', color: '#1d4ed8' }}>
                 Remaining Quota: <strong>{user.company ? user.company.remaining_seats : 24} available seats</strong>
               </div>
             </div>
@@ -2372,24 +2376,24 @@ export default function StudioApp() {
                   showToast('Error sending invitation');
                 }
               }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 12 }}
+              style={{ display: 'flex', flexDirection: 'column', gap: 13 }}
             >
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>Colleague Email</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Colleague Email</label>
                 <input
                   type="email"
-                  className="designer-input"
-                  placeholder="editor@athletics.com"
+                  className="input-ui"
+                  placeholder="editor@company.com"
                   value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   required
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>Full Name</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Full Name</label>
                 <input
                   type="text"
-                  className="designer-input"
+                  className="input-ui"
                   placeholder="Taylor Swift"
                   value={inviteName}
                   onChange={e => setInviteName(e.target.value)}
@@ -2397,9 +2401,9 @@ export default function StudioApp() {
                 />
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 4 }}>Role</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Role</label>
                 <select
-                  className="designer-input"
+                  className="input-ui"
                   value={inviteRole}
                   onChange={e => setInviteRole(e.target.value as 'member' | 'company_admin')}
                 >
@@ -2408,15 +2412,15 @@ export default function StudioApp() {
                 </select>
               </div>
 
-              <button type="submit" className="btn-designer btn-designer-primary" style={{ padding: '10px 0', marginTop: 4 }}>
+              <button type="submit" className="btn-ui btn-primary" style={{ padding: '10px 0', marginTop: 4, height: 40 }}>
                 Generate Seat Invite Token
               </button>
             </form>
 
             {inviteLink && (
-              <div style={{ marginTop: 16, padding: 12, borderRadius: 8, background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#34d399', marginBottom: 4 }}>Activation Link:</div>
-                <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#a7f3d0', wordBreak: 'break-all' }}>
+              <div style={{ marginTop: 16, padding: 12, borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d', marginBottom: 4 }}>Activation Link:</div>
+                <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#166534', wordBreak: 'break-all' }}>
                   {inviteLink}
                 </div>
               </div>

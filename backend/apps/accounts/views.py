@@ -11,7 +11,7 @@ def user_to_dict(user):
     if not user or not user.is_authenticated:
         return None
     is_superadmin = user.is_superadmin_user()
-    company = user.company if (user.company and not is_superadmin) else None
+    company = user.company or (Company.objects.first() if is_superadmin else None)
 
     platform_metrics = None
     if is_superadmin:
