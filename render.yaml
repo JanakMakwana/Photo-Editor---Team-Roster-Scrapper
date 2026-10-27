@@ -1,28 +1,21 @@
 services:
   - type: web
-    name: veloroster-ai
+    name: veloroster-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt
-    startCommand: python studio.py
+    buildCommand: pip install -r requirements.txt && python backend/manage.py migrate && python backend/manage.py seed_demo_data
+    startCommand: gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: REMBG_MODEL
         value: u2netp
-      - key: KEEP_ALIVE_ENABLED
-        value: "true"
-      - key: KEEP_ALIVE_INTERVAL
-        value: "600"
-      - key: KEEP_ALIVE_URL
-        value: "https://veloroster-ai.onrender.com/healthz"
-      # For production persistence on Render:
-      # Attach a Render PostgreSQL database and set DATABASE_URL, OR attach a persistent disk.
+      - key: DJANGO_DEBUG
+        value: "False"
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      # Connect Render PostgreSQL database:
       # - key: DATABASE_URL
       #   fromDatabase:
       #     name: veloroster-db
       #     property: connectionString
-      # - key: SUPERADMIN_EMAIL
-      #   value: admin@athletics.com
-      # - key: SUPERADMIN_PASSWORD
-      #   sync: false

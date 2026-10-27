@@ -24,6 +24,8 @@ Thumbs.db
 *_edited/
 *.zip
 *.db
+*.sqlite3
+.next/
 .venv
 scratch/
 input_photos/*
