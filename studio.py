@@ -6608,22 +6608,22 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
 
     /* =========================================================================
-       PAGE 1: LANDING WORKSPACE (LIGHT THEME)
+       PAGE 1: LANDING WORKSPACE (LIGHT MODERN SAAS)
        ========================================================================= */
     #page-folder-select {
       display: flex;
       flex-direction: column;
       width: 100%;
-      max-width: 1140px;
+      max-width: 960px;
       margin: 0 auto;
-      padding: 32px 20px 60px 20px;
+      padding: 36px 20px 64px 20px;
       align-items: center;
       position: relative;
     }
     .landing-hero {
       text-align: center;
-      max-width: 720px;
-      margin-bottom: 24px;
+      max-width: 680px;
+      margin-bottom: 28px;
     }
     .hero-badge {
       display: inline-flex;
@@ -6632,23 +6632,30 @@ HTML_PAGE = r"""<!DOCTYPE html>
       background: #eff6ff;
       border: 1px solid #bfdbfe;
       color: #1d4ed8;
-      padding: 5px 14px;
+      padding: 4px 12px;
       border-radius: var(--r-full);
-      font-size: 0.74rem;
+      font-size: 0.72rem;
       font-family: var(--font-heading);
       font-weight: 700;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
       text-transform: uppercase;
-      margin-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    .hero-badge .hero-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #2563eb;
+      box-shadow: 0 0 8px rgba(37, 99, 235, 0.6);
     }
     .landing-title {
       font-family: var(--font-heading);
-      font-size: 2.3rem;
+      font-size: 2.1rem;
       font-weight: 800;
       letter-spacing: -0.03em;
       margin-bottom: 8px;
       color: #0f172a;
-      line-height: 1.18;
+      line-height: 1.2;
     }
     .landing-title span {
       background: linear-gradient(135deg, #2563eb 0%, #0284c7 100%);
@@ -6656,17 +6663,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
       -webkit-text-fill-color: transparent;
     }
     .landing-subtitle {
-      font-size: 0.94rem;
+      font-size: 0.92rem;
       color: #64748b;
-      line-height: 1.55;
+      line-height: 1.5;
+      margin-bottom: 0;
     }
 
-    /* Unified 3-Tab Segmented Control (Light Modern Pill Track) */
+    /* Unified 3-Tab Segmented Control (Linear / Raycast Style) */
     .hudl-segmented-bar {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       width: 100%;
-      max-width: 820px;
+      max-width: 680px;
       background: #f1f5f9;
       border: 1px solid #e2e8f0;
       border-radius: var(--r-lg);
@@ -6697,25 +6705,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
     }
     .hudl-seg-btn.active {
       background: #ffffff;
-      border-color: #e2e8f0;
+      border-color: rgba(0, 0, 0, 0.04);
       color: #0f172a;
       font-weight: 700;
-      box-shadow: var(--shadow-sm);
-    }
-    .hudl-pill-tag {
-      font-size: 0.62rem;
-      background: #e2e8f0;
-      color: #475569;
-      border-radius: var(--r-xs);
-      padding: 1px 6px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .hudl-seg-btn.active .hudl-pill-tag {
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04);
     }
 
     /* Cards & Containers */
@@ -6834,66 +6827,109 @@ HTML_PAGE = r"""<!DOCTYPE html>
       margin-top: 14px;
     }
 
-    /* Local Folder Action Box */
+    /* Modern Dropzone & Local Photo Panel */
     .folder-action-card {
       width: 100%;
       background: #ffffff;
-      border: 2px dashed #cbd5e1;
+      border: 1.5px dashed #cbd5e1;
       border-radius: var(--r-xl);
-      padding: 32px 24px;
+      padding: 34px 24px;
       text-align: center;
-      margin-bottom: 24px;
-      transition: border-color 0.2s, background-color 0.2s;
+      margin-bottom: 14px;
+      transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+      position: relative;
     }
     .folder-action-card:hover {
       border-color: #2563eb;
-      background: #f8fafc;
+      background: #fcfdfe;
+      box-shadow: 0 4px 16px rgba(37, 99, 235, 0.04);
     }
-    .drop-zone-icon {
+    .drop-zone-icon-circle {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: #eff6ff;
+      border: 1px solid #dbeafe;
       color: #2563eb;
-      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 12px auto;
+      transition: transform 0.2s;
     }
-    .browse-btn-big {
-      background: #0f172a;
-      color: #ffffff;
-      border: 1px solid #0f172a;
-      padding: 11px 26px;
-      border-radius: var(--r-md);
-      font-size: 0.9rem;
+    .folder-action-card:hover .drop-zone-icon-circle {
+      transform: translateY(-2px);
+    }
+    .drop-zone-title {
+      font-family: var(--font-heading);
+      font-size: 1.05rem;
       font-weight: 700;
-      cursor: pointer;
+      color: #0f172a;
+      margin-bottom: 4px;
+    }
+    .drop-zone-subtitle {
+      font-size: 0.82rem;
+      color: #64748b;
+      margin-bottom: 18px;
+    }
+    .drop-zone-actions {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .drop-zone-actions .btn {
+      padding: 8px 18px;
+      font-size: 0.84rem;
+    }
+    .drop-zone-hint {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 14px;
+    }
+
+    /* Clean Manual Path Input Bar */
+    .manual-path-bar {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: var(--r-lg);
+      padding: 8px 12px;
+      margin-bottom: 24px;
+      box-shadow: var(--shadow-xs);
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .manual-path-bar:focus-within {
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    .manual-path-label {
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      box-shadow: var(--shadow-sm);
-      transition: all 0.15s;
+      gap: 6px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #64748b;
+      white-space: nowrap;
     }
-    .browse-btn-big:hover {
-      background: #1e293b;
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-md);
-    }
-    .path-input-row {
-      display: flex;
-      gap: 8px;
-      max-width: 580px;
-      margin: 16px auto 0 auto;
-    }
-    .path-input {
+    .manual-path-input {
       flex: 1;
-      background: #ffffff;
-      border: 1px solid #cbd5e1;
-      border-radius: var(--r-md);
-      padding: 9px 14px;
-      color: #0f172a;
+      border: none;
+      background: transparent;
+      outline: none;
+      padding: 4px 6px;
       font-family: var(--font-mono);
       font-size: 0.82rem;
-      outline: none;
-      box-shadow: var(--shadow-xs);
+      color: #0f172a;
     }
-    .path-input:focus {
-      border-color: #2563eb;
-      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    .manual-path-btn {
+      padding: 6px 14px;
+      font-size: 0.78rem;
+      flex-shrink: 0;
     }
 
     /* Detected Folders Grid */
@@ -6910,45 +6946,67 @@ HTML_PAGE = r"""<!DOCTYPE html>
       align-items: center;
       justify-content: space-between;
     }
+    .detected-title-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .detected-count-badge {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 700;
+      color: #2563eb;
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      padding: 1px 7px;
+      border-radius: var(--r-full);
+    }
     .detected-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
       gap: 12px;
     }
     .folder-card {
       background: #ffffff;
       border: 1px solid #e2e8f0;
-      border-radius: var(--r-md);
-      padding: 12px 14px;
+      border-radius: var(--r-lg);
+      padding: 13px 15px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 12px;
-      box-shadow: var(--shadow-xs);
-      transition: all 0.15s;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .folder-card:hover {
-      background: #f8fafc;
-      border-color: #2563eb;
-      transform: translateY(-1px);
-      box-shadow: var(--shadow-sm);
+      background: #ffffff;
+      border-color: #93c5fd;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px -4px rgba(37, 99, 235, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.04);
     }
-    .folder-icon {
+    .folder-icon-box {
+      width: 38px;
+      height: 38px;
+      border-radius: var(--r-md);
       background: #eff6ff;
-      border: 1px solid #bfdbfe;
+      border: 1px solid #dbeafe;
       color: #2563eb;
-      padding: 7px 10px;
-      border-radius: var(--r-sm);
       display: flex;
       align-items: center;
       justify-content: center;
+      flex-shrink: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    .folder-card:hover .folder-icon-box {
+      background: #2563eb;
+      color: #ffffff;
     }
     .folder-info {
       flex: 1;
       overflow: hidden;
     }
     .folder-card-name {
-      font-size: 0.85rem;
+      font-size: 0.86rem;
       font-weight: 700;
       white-space: nowrap;
       overflow: hidden;
@@ -6958,19 +7016,32 @@ HTML_PAGE = r"""<!DOCTYPE html>
     .folder-card-sub {
       font-size: 0.72rem;
       color: #64748b;
-      margin-top: 2px;
+      margin-top: 3px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
     }
     .photo-count-pill {
       background: #eff6ff;
       border: 1px solid #bfdbfe;
       color: #1d4ed8;
-      padding: 1px 6px;
+      padding: 1px 7px;
       border-radius: var(--r-xs);
       font-weight: 700;
       font-size: 0.68rem;
+    }
+    .folder-ready-hint {
+      color: #64748b;
+      font-size: 0.7rem;
+    }
+    .folder-card-arrow {
+      color: #cbd5e1;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .folder-card:hover .folder-card-arrow {
+      color: #2563eb;
+      transform: translateX(2px);
     }
 
     /* =========================================================================
@@ -8426,9 +8497,8 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
       <!-- Platform SuperAdmin Scope Badge (Shown ONLY for SuperAdmin) -->
       <div id="nav-superadmin-scope-badge" class="saas-platform-admin-badge" style="display:none;">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        <span style="font-weight:800; color:var(--text); letter-spacing:0.02em;">SuperAdmin Scope</span>
-        <span class="scope-tag">Global Administrator</span>
+        <span class="scope-dot"></span>
+        <span>SuperAdmin Scope</span>
       </div>
     </div>
 
@@ -8442,7 +8512,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
       </div>
 
       <!-- State 2: Logged In -->
-      <div id="nav-auth-logged-in" style="display:none; align-items:center; gap:10px;">
+      <div id="nav-auth-logged-in" style="display:none; align-items:center; gap:8px;">
         <div class="user-profile-pill" id="nav-user-profile-pill" onclick="openAccountSettingsModal('credentials')" title="Account & Security Settings: Change password, credentials, MFA & Passkeys" style="cursor:pointer;">
           <div class="user-avatar-chip" id="nav-user-avatar">AD</div>
           <span id="nav-user-name" style="font-weight:700;">Admin</span>
@@ -8460,6 +8530,10 @@ HTML_PAGE = r"""<!DOCTYPE html>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="9" y1="22" x2="9" y2="12"/><line x1="15" y1="22" x2="15" y2="12"/></svg>
           <span>Platform Dashboard (<strong id="nav-company-count-badge">3</strong>)</span>
         </button>
+        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge server temporary cache and clear RAM" style="font-size:0.8rem; padding:6px 11px; color:#dc2626;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          <span>Free RAM</span>
+        </button>
         <button class="btn btn-secondary" onclick="logoutUser()" title="Log out of VeloRoster AI" style="font-size:0.8rem; padding:6px 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           <span>Sign Out</span>
@@ -8475,21 +8549,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
   <div id="page-folder-select">
     <div class="landing-hero">
       <div class="hero-badge">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
-        <span>VELOROSTER AI &bull; ECSTATICLOUD TECHNOLOGIES</span>
+        <span class="hero-badge-dot"></span>
+        <span>Zero Cloud Storage &bull; Standardized 180×180 Headshots</span>
       </div>
       <h1 class="landing-title">Athletic Roster & <span>Headshot Studio</span></h1>
       <p class="landing-subtitle">
-        Search athlete portraits, scrape team rosters, assign player numbers, and standardize photos into 180×180 transparent headshots.
+        Standardize athlete portraits, scrape team rosters, and prepare transparent 180×180 headshots in real time.
       </p>
-      <div style="display:flex; justify-content:center; align-items:center; gap:12px; margin-top:14px; flex-wrap:wrap;">
-        <span style="font-size:0.75rem; background:#ecfdf5; border:1px solid #a7f3d0; color:#059669; padding:5px 12px; border-radius:var(--r-xs); font-weight:700; display:inline-flex; align-items:center; gap:6px;">
-          <span style="width:6px; height:6px; border-radius:1px; background:#10b981; box-shadow:0 0 6px #10b981; display:inline-block;"></span><span>Direct In-Browser Processing (0 Cloud Bytes Stored)</span>
-        </span>
-        <button class="btn btn-secondary" onclick="freeServerStorageAndMemory()" title="Purge temporary files on Render and clear RAM" style="font-size:0.75rem; padding:5px 14px; border-color:#fecaca; color:#dc2626; background:#fef2f2; font-weight:700;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg><span>Purge Memory</span>
-        </button>
-      </div>
     </div>
 
     <!-- PRIMARY WORKFLOW: UNIFIED 3-TAB SEGMENTED BAR -->
@@ -8497,22 +8563,19 @@ HTML_PAGE = r"""<!DOCTYPE html>
       <button type="button" class="hudl-seg-btn active" id="tab-nav-athlete" onclick="switchMainWorkflow('athlete')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         <span>Single Athlete Search</span>
-        <span class="hudl-pill-tag">Athlete Search</span>
       </button>
       <button type="button" class="hudl-seg-btn" id="tab-nav-url" onclick="switchMainWorkflow('url')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"/></svg>
         <span>Team Roster Website URL</span>
-        <span class="hudl-pill-tag">URL Scraper</span>
       </button>
       <button type="button" class="hudl-seg-btn" id="tab-nav-local" onclick="switchMainWorkflow('local')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         <span>Local Photo Folder</span>
-        <span class="hudl-pill-tag">Local Upload</span>
       </button>
     </div>
 
     <!-- WORKFLOW 1: SINGLE ATHLETE SEARCH PANEL -->
-    <div id="panel-workflow-athlete" style="width: 100%; max-width: 960px; display: flex; flex-direction: column; align-items: center;">
+    <div id="panel-workflow-athlete" style="width: 100%; max-width: 860px; display: flex; flex-direction: column; align-items: center;">
       <div class="roster-config-card">
         <div style="font-size:0.85rem; font-weight:700; color:#2563eb; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -8563,7 +8626,7 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
 
     <!-- WORKFLOW 2: FULL TEAM ROSTER WEBSITE URL PANEL -->
-    <div id="panel-workflow-url" style="width: 100%; max-width: 960px; display: none; flex-direction: column; align-items: center;">
+    <div id="panel-workflow-url" style="width: 100%; max-width: 860px; display: none; flex-direction: column; align-items: center;">
       <div class="roster-config-card">
         <div style="font-size:0.85rem; font-weight:700; color:#2563eb; text-transform:uppercase; letter-spacing:0.06em; margin-bottom:14px; display:flex; align-items:center; gap:8px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -8600,39 +8663,51 @@ HTML_PAGE = r"""<!DOCTYPE html>
     </div>
 
     <!-- WORKFLOW 3: LOCAL PHOTO FOLDER PANEL -->
-    <div id="panel-workflow-local" style="width: 100%; max-width: 960px; display: none; flex-direction: column; align-items: center;">
+    <div id="panel-workflow-local" style="width: 100%; max-width: 860px; display: none; flex-direction: column; align-items: center;">
       <!-- Folder Action Box -->
       <div class="folder-action-card" id="folder-drop-zone">
-        <div class="drop-zone-icon">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <div class="drop-zone-icon-circle">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
-        <label for="native-folder-picker" class="browse-btn-big" style="cursor: pointer;">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span>Choose Local Photo Folder</span>
-        </label>
-        <input type="file" id="native-files-picker" multiple accept="image/*" style="display:none;" onchange="onNativeFilesPicked(event)">
+        <div class="drop-zone-title">Drag & drop photo folder or image files here</div>
+        <div class="drop-zone-subtitle">Drop a folder directly, or choose photo files from your computer</div>
 
-        <div style="margin-top: 12px;">
-          <label for="native-files-picker" style="font-size:0.84rem; color:var(--brand-accent); font-weight:600; cursor:pointer; text-decoration:underline;">
-            or click here to select individual photo files (.png, .jpg, .webp)
+        <div class="drop-zone-actions">
+          <label for="native-folder-picker" class="btn btn-primary" style="cursor: pointer;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span>Choose Photo Folder</span>
+          </label>
+          <label for="native-files-picker" class="btn btn-secondary" style="cursor: pointer;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <span>Select Individual Files</span>
           </label>
         </div>
+        <input type="file" id="native-files-picker" multiple accept="image/*" style="display:none;" onchange="onNativeFilesPicked(event)">
 
-        <div style="margin-top: 16px; font-size: 0.85rem; color: var(--text-muted);">
-          or drag & drop a folder or photo files directly into this box:
+        <div class="drop-zone-hint">
+          Supports PNG, JPG, JPEG, WEBP &bull; Instant batch processing &bull; 0 Cloud bytes stored
         </div>
+      </div>
 
-        <div class="path-input-row" style="margin-top: 16px;">
-          <input type="text" id="manual-path-input" class="path-input" spellcheck="false" placeholder="e.g. 1908-Saint Anselm or full folder path" onkeydown="if(event.key==='Enter') openManualPath()">
-          <button class="btn btn-primary" onclick="openManualPath()">Open Folder</button>
+      <!-- Clean Manual Path Input Bar -->
+      <div class="manual-path-bar">
+        <div class="manual-path-label">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>Or enter folder path:</span>
         </div>
+        <input type="text" id="manual-path-input" class="manual-path-input" spellcheck="false" placeholder="e.g. 1908-Saint Anselm or full folder path" onkeydown="if(event.key==='Enter') openManualPath()">
+        <button class="btn btn-secondary manual-path-btn" onclick="openManualPath()">Open Folder</button>
       </div>
 
       <!-- Detected Team Folders Section -->
       <div class="detected-section">
         <div class="detected-heading">
-          <div style="display:inline-flex; align-items:center; gap:8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>Detected Photo Folders in Downloads</span></div>
-          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">Click any folder to open</span>
+          <div class="detected-title-group">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <span>Detected Photo Folders in Downloads</span>
+            <span class="detected-count-badge" id="detected-count-badge">8</span>
+          </div>
+          <span style="font-size:0.75rem; color:var(--text-muted); font-weight:normal;">Click any folder to load into studio</span>
         </div>
         <div class="detected-grid" id="detected-folders-grid">
           <!-- Rendered dynamically -->
@@ -8986,9 +9061,13 @@ HTML_PAGE = r"""<!DOCTYPE html>
 
     function renderDetectedFolders(folders) {
       const grid = document.getElementById('detected-folders-grid');
+      const badge = document.getElementById('detected-count-badge');
+      if (badge) {
+        badge.textContent = folders ? folders.length : 0;
+      }
       grid.innerHTML = '';
       if (!folders || folders.length === 0) {
-        grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem;">No photo folders automatically detected in Downloads. Use the browse button above.</div>';
+        grid.innerHTML = '<div style="color:var(--text-muted); font-size:0.85rem; padding: 24px; text-align: center; grid-column: 1 / -1; background: #ffffff; border: 1px solid #e2e8f0; border-radius: var(--r-md);">No photo folders automatically detected in Downloads. Use the browse button above.</div>';
         return;
       }
       folders.forEach(f => {
@@ -8996,13 +9075,18 @@ HTML_PAGE = r"""<!DOCTYPE html>
         card.className = 'folder-card';
         card.onclick = () => openFolder(f.path);
         card.innerHTML = `
-          <div class="folder-icon" style="color:var(--accent);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div>
+          <div class="folder-icon-box">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          </div>
           <div class="folder-info">
-            <div class="folder-card-name">${f.name}</div>
+            <div class="folder-card-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
             <div class="folder-card-sub">
-              <span class="photo-count-pill">${f.count} photos</span>
-              <span>→ ${f.name}_edited/</span>
+              <span class="photo-count-pill">${f.count} ${f.count === 1 ? 'photo' : 'photos'}</span>
+              <span class="folder-ready-hint">Ready to edit</span>
             </div>
+          </div>
+          <div class="folder-card-arrow">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
           </div>
         `;
         grid.appendChild(card);
