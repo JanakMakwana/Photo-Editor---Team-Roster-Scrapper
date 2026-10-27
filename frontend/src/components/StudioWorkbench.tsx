@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Player } from '../types';
 import {
-  ZoomIn, ZoomOut, RotateCcw, Download, Sparkles, Sliders, Eraser,
-  Brush, Image as ImageIcon, Check, Eye, ChevronLeft, ChevronRight, CheckSquare
+  ZoomIn, ZoomOut, RotateCcw, Download, Sparkles, Image as ImageIcon,
+  Check, ChevronLeft, ChevronRight, Sliders, Maximize2
 } from 'lucide-react';
 
 interface StudioWorkbenchProps {
@@ -16,31 +16,43 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Active athlete & photo list
-  const [photos, setPhotos] = useState<Array<{ name: string; url?: string; img?: HTMLImageElement; scale: number; offset_x: number; offset_y: number }>>([]);
+  // Photos list
+  const [photos, setPhotos] = useState<Array<{
+    name: string;
+    url?: string;
+    img?: HTMLImageElement;
+    scale: number;
+    offset_x: number;
+    offset_y: number;
+  }>>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
 
   // Transform controls
-  const [scale, setScale] = useState(0.4);
+  const [scale, setScale] = useState(0.45);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
 
   // Canvas stage state
-  const [bgMode, setBgMode] = useState<'checker' | 'white' | 'dark' | 'team'>('checker');
-  const [activeTool, setActiveTool] = useState<'pan' | 'erase' | 'restore'>('pan');
-  const [brushSize, setBrushSize] = useState(24);
+  const [bgMode, setBgMode] = useState<'checker' | 'white' | 'dark'>('checker');
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [statusMsg, setStatusMsg] = useState('');
+  const [isAligning, setIsAligning] = useState(false);
 
-  // Initialize photos from props
+  // Stage dimensions (Fixed aspect ratio 720 x 480 to prevent canvas distortion)
+  const STAGE_WIDTH = 720;
+  const STAGE_HEIGHT = 480;
+  const HUD_SIZE = 220; // 180x180 scaled for visual comfort
+
+  // Initialize photos
   useEffect(() => {
     const list: typeof photos = [];
+
     if (initialPlayer && initialPlayer.image) {
       list.push({
         name: `${initialPlayer.name}.png`,
         url: initialPlayer.image,
-        scale: 0.4,
+        scale: 0.45,
         offset_x: 0,
         offset_y: 0
       });
@@ -52,7 +64,7 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
           list.push({
             name: `${p.name}.png`,
             url: p.image,
-            scale: 0.4,
+            scale: 0.45,
             offset_x: 0,
             offset_y: 0
           });
@@ -60,12 +72,11 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
       });
     }
 
-    // Default sample if empty
     if (list.length === 0) {
       list.push({
         name: 'Sample Athlete.png',
         url: '',
-        scale: 0.4,
+        scale: 0.45,
         offset_x: 0,
         offset_y: 0
       });
@@ -75,9 +86,9 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
     setSelectedIdx(0);
   }, [initialPlayer, rosterList]);
 
-  // Load current photo image
   const currentPhoto = photos[selectedIdx];
 
+  // Load image object
   useEffect(() => {
     if (!currentPhoto) return;
 
@@ -88,20 +99,20 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
       if (currentPhoto.url) {
         img.src = `/api/proxy_photo?url=${encodeURIComponent(currentPhoto.url)}&width=800`;
       } else {
-        // Generate placeholder canvas
+        // Crisp placeholder canvas
         const fb = document.createElement('canvas');
         fb.width = 600;
         fb.height = 600;
         const ctx = fb.getContext('2d')!;
-        ctx.fillStyle = '#f1f5f9';
+        ctx.fillStyle = '#f8fafc';
         ctx.fillRect(0, 0, 600, 600);
         ctx.fillStyle = '#2563eb';
-        ctx.font = 'bold 80px sans-serif';
+        ctx.font = 'bold 120px -apple-system, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(currentPhoto.name.charAt(0).toUpperCase() || 'A', 300, 280);
+        ctx.fillText(currentPhoto.name.charAt(0).toUpperCase() || 'A', 300, 270);
         ctx.fillStyle = '#64748b';
-        ctx.font = '600 24px sans-serif';
+        ctx.font = '600 24px -apple-system, sans-serif';
         ctx.fillText(currentPhoto.name.replace('.png', ''), 300, 360);
         img.src = fb.toDataURL();
       }
@@ -120,151 +131,167 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
       setOffsetX(currentPhoto.offset_x);
       setOffsetY(currentPhoto.offset_y);
     }
-  }, [selectedIdx, currentPhoto?.url]);
+  }, [selectedIdx, currentPhoto]);
 
-  // Render Canvas
-  const drawCanvas = useCallback(() => {
+  // Main Canvas Render
+  const renderCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = canvas.width;
-    const height = canvas.height;
-    ctx.clearRect(0, 0, width, height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
-    // 1. Draw Background
+    // Clear background
+    ctx.clearRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
+
     if (bgMode === 'white') {
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     } else if (bgMode === 'dark') {
       ctx.fillStyle = '#0f172a';
-      ctx.fillRect(0, 0, width, height);
-    } else if (bgMode === 'team') {
-      ctx.fillStyle = '#002855';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(0, 0, STAGE_WIDTH, STAGE_HEIGHT);
     }
-    // Checkerboard is handled via CSS on parent container
 
-    // Center origin
-    const centerX = width / 2;
-    const centerY = height / 2;
+    const centerX = STAGE_WIDTH / 2;
+    const centerY = STAGE_HEIGHT / 2;
 
-    // 2. Draw Transformed Athlete Image
+    // Draw athlete portrait
     if (currentPhoto && currentPhoto.img) {
       const img = currentPhoto.img;
-      const sw = img.width * scale;
-      const sh = img.height * scale;
-      const dx = centerX - 90 + offsetX;
-      const dy = centerY - 90 + offsetY;
+      const w = img.width * scale;
+      const h = img.height * scale;
+      const x = centerX - w / 2 + offsetX;
+      const y = centerY - h / 2 + offsetY;
 
       ctx.save();
-      ctx.drawImage(img, dx, dy, sw, sh);
+      ctx.drawImage(img, x, y, w, h);
       ctx.restore();
     }
 
-    // 3. Draw 180x180 HUD Boundary Guidelines
-    ctx.save();
-    const hudX = centerX - 90;
-    const hudY = centerY - 90;
-    const hudW = 180;
-    const hudH = 180;
+    // 180x180 HUD Framing Guide
+    const hudX = centerX - HUD_SIZE / 2;
+    const hudY = centerY - HUD_SIZE / 2;
 
-    // Darken exterior masking
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.12)';
-    ctx.beginPath();
-    ctx.rect(0, 0, width, height);
-    ctx.rect(hudX, hudY, hudW, hudH);
-    ctx.fill('evenodd');
+    // Darken exterior slightly for focal concentration
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.18)';
+    ctx.fillRect(0, 0, STAGE_WIDTH, hudY);
+    ctx.fillRect(0, hudY + HUD_SIZE, STAGE_WIDTH, STAGE_HEIGHT - (hudY + HUD_SIZE));
+    ctx.fillRect(0, hudY, hudX, HUD_SIZE);
+    ctx.fillRect(hudX + HUD_SIZE, hudY, STAGE_WIDTH - (hudX + HUD_SIZE), HUD_SIZE);
 
-    // Dashed boundary box
+    // Bounding Box
     ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([]);
+    ctx.strokeRect(hudX, hudY, HUD_SIZE, HUD_SIZE);
+
+    // Eye guideline (35% from top)
+    const eyeY = hudY + HUD_SIZE * 0.35;
+    ctx.strokeStyle = 'rgba(37, 99, 235, 0.65)';
+    ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
-    ctx.strokeRect(hudX, hudY, hudW, hudH);
-
-    // Rule of thirds / chin & eye reference lines
-    ctx.strokeStyle = 'rgba(37, 99, 235, 0.3)';
-    ctx.setLineDash([2, 4]);
-    // Eye line ~35%
     ctx.beginPath();
-    ctx.moveTo(hudX, hudY + hudH * 0.35);
-    ctx.lineTo(hudX + hudW, hudY + hudH * 0.35);
+    ctx.moveTo(hudX, eyeY);
+    ctx.lineTo(hudX + HUD_SIZE, eyeY);
     ctx.stroke();
 
-    // Chin line ~75%
+    // Chin guideline (85% from top)
+    const chinY = hudY + HUD_SIZE * 0.85;
     ctx.beginPath();
-    ctx.moveTo(hudX, hudY + hudH * 0.75);
-    ctx.lineTo(hudX + hudW, hudY + hudH * 0.75);
+    ctx.moveTo(hudX, chinY);
+    ctx.lineTo(hudX + HUD_SIZE, chinY);
     ctx.stroke();
 
-    ctx.restore();
-  }, [bgMode, currentPhoto, scale, offsetX, offsetY]);
+    // Vertical center crosshair
+    ctx.strokeStyle = 'rgba(37, 99, 235, 0.4)';
+    ctx.beginPath();
+    ctx.moveTo(centerX, hudY);
+    ctx.lineTo(centerX, hudY + HUD_SIZE);
+    ctx.stroke();
+
+    // HUD Label
+    ctx.fillStyle = '#2563eb';
+    ctx.font = '600 11px -apple-system, sans-serif';
+    ctx.fillText('180 × 180 HUD FRAME', hudX + 4, hudY - 6);
+  }, [currentPhoto, scale, offsetX, offsetY, bgMode]);
 
   useEffect(() => {
-    drawCanvas();
-  }, [drawCanvas]);
+    renderCanvas();
+  }, [renderCanvas]);
 
-  // Pan interaction
+  // Drag and Pan
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (activeTool === 'pan') {
-      setIsDragging(true);
-      setDragStart({ x: e.clientX - offsetX, y: e.clientY - offsetY });
-    }
+    setIsDragging(true);
+    setDragStart({ x: e.clientX - offsetX, y: e.clientY - offsetY });
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (isDragging && activeTool === 'pan') {
-      const nextX = e.clientX - dragStart.x;
-      const nextY = e.clientY - dragStart.y;
-      setOffsetX(nextX);
-      setOffsetY(nextY);
-    }
+    if (!isDragging) return;
+    const nextX = e.clientX - dragStart.x;
+    const nextY = e.clientY - dragStart.y;
+    setOffsetX(nextX);
+    setOffsetY(nextY);
+
+    setPhotos((prev) => {
+      const next = [...prev];
+      if (next[selectedIdx]) {
+        next[selectedIdx] = { ...next[selectedIdx], offset_x: nextX, offset_y: nextY };
+      }
+      return next;
+    });
   };
 
   const handleMouseUp = () => {
-    if (isDragging) {
-      setIsDragging(false);
-      // Persist transform into active item
-      setPhotos((prev) => {
-        const next = [...prev];
-        if (next[selectedIdx]) {
-          next[selectedIdx] = { ...next[selectedIdx], scale, offset_x: offsetX, offset_y: offsetY };
-        }
-        return next;
-      });
-    }
+    setIsDragging(false);
   };
 
+  // Zoom via wheel
   const handleWheel = (e: React.WheelEvent<HTMLElement>) => {
     const delta = e.deltaY < 0 ? 0.02 : -0.02;
     const nextScale = Math.max(0.1, Math.min(2.5, scale + delta));
     setScale(nextScale);
+
+    setPhotos((prev) => {
+      const next = [...prev];
+      if (next[selectedIdx]) {
+        next[selectedIdx] = { ...next[selectedIdx], scale: nextScale };
+      }
+      return next;
+    });
   };
 
-  // Automated face centering calculation
+  // Auto-Align
   const handleAutoAlign = async () => {
     if (!currentPhoto) return;
-    setStatusMsg('Calculating face position...');
+    setIsAligning(true);
+    setStatusMsg('Detecting face geometry...');
 
     try {
-      // If photo has an image, auto-align to center standard bust
-      if (currentPhoto.img) {
-        const w = currentPhoto.img.width;
-        const h = currentPhoto.img.height;
-        const targetDim = 180 * 0.92;
-        const newScale = targetDim / Math.max(w * 0.6, h * 0.6);
-        const newOffX = (180 - w * newScale) / 2;
-        const newOffY = 180 - h * newScale * 0.85;
-
-        setScale(newScale);
-        setOffsetX(newOffX);
-        setOffsetY(newOffY);
-        setStatusMsg('Framed face to 180×180 standard.');
-        setTimeout(() => setStatusMsg(''), 2000);
+      const q = new URLSearchParams({ name: currentPhoto.name });
+      const res = await fetch(`/api/auto_align?${q.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.scale) {
+          setScale(data.scale);
+          setOffsetX(data.offset_x || 0);
+          setOffsetY(data.offset_y || 0);
+          setStatusMsg('Face centered & framed.');
+        }
+      } else {
+        // Fallback calculation
+        setScale(0.48);
+        setOffsetX(0);
+        setOffsetY(-10);
+        setStatusMsg('Standard portrait framing applied.');
       }
-    } catch (e: any) {
-      setStatusMsg(`Auto-align failed: ${e.message}`);
+    } catch (e) {
+      setScale(0.48);
+      setStatusMsg('Standard portrait framing applied.');
+    } finally {
+      setIsAligning(false);
+      setTimeout(() => setStatusMsg(''), 3000);
     }
   };
 
@@ -272,136 +299,140 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
   const handleExportPNG = () => {
     if (!currentPhoto || !currentPhoto.img) return;
 
-    const exportCanvas = document.createElement('canvas');
-    exportCanvas.width = 180;
-    exportCanvas.height = 180;
-    const eCtx = exportCanvas.getContext('2d')!;
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = 180;
+    outCanvas.height = 180;
+    const ctx = outCanvas.getContext('2d')!;
 
     const img = currentPhoto.img;
-    const sw = img.width * scale;
-    const sh = img.height * scale;
+    const factor = 180 / HUD_SIZE;
+    const w = img.width * scale * factor;
+    const h = img.height * scale * factor;
+    const x = 90 - w / 2 + offsetX * factor;
+    const y = 90 - h / 2 + offsetY * factor;
 
-    eCtx.drawImage(img, offsetX, offsetY, sw, sh);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, x, y, w, h);
 
-    exportCanvas.toBlob((blob) => {
-      if (!blob) return;
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = currentPhoto.name || 'headshot_180x180.png';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 'image/png');
+    const link = document.createElement('a');
+    link.download = currentPhoto.name.endsWith('.png') ? currentPhoto.name : `${currentPhoto.name}.png`;
+    link.href = outCanvas.toDataURL('image/png');
+    link.click();
+    setStatusMsg('Exported 180×180 PNG.');
+    setTimeout(() => setStatusMsg(''), 2500);
   };
 
   return (
-    <div style={{ maxWidth: 1100, margin: '0 auto', textAlign: 'left' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
-        {/* Left: Workbench Stage */}
-        <div className="stage-container">
-          {/* Stage Top Toolbar */}
-          <div style={{
-            padding: '10px 16px',
-            borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: '#ffffff'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text)' }}>
+    <div style={{ maxWidth: 1160, margin: '0 auto', textAlign: 'left' }}>
+      <div className="studio-container">
+        {/* Left: Interactive Stage */}
+        <div className="stage-card">
+          {/* Top Stage Bar */}
+          <div className="stage-top-bar">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text-main)' }}>
                 {currentPhoto?.name || 'Athlete Headshot'}
               </span>
               {statusMsg && (
-                <span style={{ fontSize: '0.74rem', color: 'var(--brand-accent)', fontWeight: 600 }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--brand)', fontWeight: 600 }}>
                   &bull; {statusMsg}
                 </span>
               )}
             </div>
 
-            {/* Background Selector Chips */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>Canvas BG:</span>
-              {(['checker', 'white', 'dark', 'team'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={`btn btn-sm ${bgMode === mode ? 'btn-primary' : 'btn-ghost'}`}
-                  style={{ textTransform: 'capitalize', padding: '3px 8px', fontSize: '0.72rem' }}
-                  onClick={() => setBgMode(mode)}
-                >
-                  {mode}
-                </button>
-              ))}
+            {/* Background Selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>BG:</span>
+              <button
+                type="button"
+                className={`btn btn-sm ${bgMode === 'checker' ? 'btn-secondary' : 'btn-ghost'}`}
+                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                onClick={() => setBgMode('checker')}
+              >
+                Checker
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${bgMode === 'white' ? 'btn-secondary' : 'btn-ghost'}`}
+                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                onClick={() => setBgMode('white')}
+              >
+                White
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm ${bgMode === 'dark' ? 'btn-secondary' : 'btn-ghost'}`}
+                style={{ padding: '3px 8px', fontSize: '0.75rem' }}
+                onClick={() => setBgMode('dark')}
+              >
+                Dark
+              </button>
             </div>
           </div>
 
-          {/* Canvas Interactive Viewport */}
+          {/* Viewport Canvas (720 x 480 fixed aspect ratio) */}
           <div
-            className={`stage-canvas-wrapper ${bgMode === 'checker' ? 'checkerboard-light' : ''}`}
+            className={`stage-viewport ${
+              bgMode === 'checker' ? 'viewport-checkerboard' : bgMode === 'white' ? 'viewport-white' : 'viewport-dark'
+            }`}
             onWheel={handleWheel}
+            style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
           >
             <canvas
               ref={canvasRef}
-              width={700}
-              height={480}
+              width={STAGE_WIDTH}
+              height={STAGE_HEIGHT}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
               onMouseLeave={handleMouseUp}
-              style={{ width: '100%', height: '100%' }}
+              style={{ width: '100%', height: '100%', display: 'block' }}
             />
           </div>
 
-          {/* Stage Bottom Transform Bar */}
-          <div style={{
-            padding: '10px 16px',
-            borderTop: '1px solid var(--border-subtle)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: '#f8fafc'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ZoomOut size={15} color="var(--text-muted)" />
-                <input
-                  type="range"
-                  min="0.1"
-                  max="1.5"
-                  step="0.01"
-                  value={scale}
-                  onChange={(e) => setScale(parseFloat(e.target.value))}
-                  style={{ width: 120, accentColor: 'var(--brand-accent)' }}
-                />
-                <ZoomIn size={15} color="var(--text-muted)" />
-                <span style={{ fontSize: '0.76rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', width: 44 }}>
-                  {Math.round(scale * 100)}%
-                </span>
-              </div>
+          {/* Bottom Stage Bar */}
+          <div className="stage-bottom-bar">
+            {/* Zoom Slider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <ZoomOut size={16} color="var(--text-muted)" />
+              <input
+                type="range"
+                min="0.1"
+                max="1.5"
+                step="0.01"
+                value={scale}
+                onChange={(e) => setScale(parseFloat(e.target.value))}
+                style={{ width: 130, accentColor: 'var(--brand)' }}
+              />
+              <ZoomIn size={16} color="var(--text-muted)" />
+              <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', minWidth: 42 }}>
+                {Math.round(scale * 100)}%
+              </span>
+            </div>
 
+            {/* Quick Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => { setScale(0.4); setOffsetX(0); setOffsetY(0); }}
-                title="Reset transform to default"
+                onClick={() => { setScale(0.45); setOffsetX(0); setOffsetY(0); }}
+                title="Reset position and zoom"
               >
-                <RotateCcw size={13} />
+                <RotateCcw size={14} />
                 <span>Reset</span>
               </button>
-            </div>
 
-            <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={handleAutoAlign}
+                disabled={isAligning}
               >
                 <Sparkles size={14} color="#2563eb" />
-                <span>Auto-Frame Face</span>
+                <span>{isAligning ? 'Aligning...' : 'Auto-Frame Face'}</span>
               </button>
+
               <button
                 type="button"
                 className="btn btn-primary btn-sm"
@@ -412,88 +443,94 @@ export const StudioWorkbench: React.FC<StudioWorkbenchProps> = ({
               </button>
             </div>
           </div>
-        </div>
 
-        {/* Right: Tools & Filmstrip Column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Quick Specifications Card */}
-          <div className="saas-card" style={{ padding: 18 }}>
-            <h4 style={{ fontSize: '0.86rem', fontWeight: 800, marginBottom: 8 }}>180×180 HUD Standards</h4>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div>&bull; Top dashed line marks upper eye level.</div>
-              <div>&bull; Lower dashed line marks chin clearance.</div>
-              <div>&bull; Output standardizes to 180×180 transparent PNG with 0 cloud storage footprint.</div>
-            </div>
-          </div>
-
-          {/* Filmstrip Carousel */}
-          <div className="saas-card" style={{ padding: 18, flex: 1, display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <h4 style={{ fontSize: '0.86rem', fontWeight: 800 }}>Roster Filmstrip</h4>
-              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                {photos.length} Photo{photos.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 8,
-              maxHeight: 380,
-              overflowY: 'auto'
-            }}>
-              {photos.map((p, idx) => {
-                const active = idx === selectedIdx;
-                return (
+          {/* Filmstrip Reel */}
+          {photos.length > 1 && (
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', background: '#f8fafc' }}>
+              <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                Roster Filmstrip ({photos.length} Athletes)
+              </div>
+              <div className="filmstrip-reel">
+                {photos.map((p, idx) => (
                   <div
                     key={idx}
+                    className={`filmstrip-item ${idx === selectedIdx ? 'active' : ''}`}
                     onClick={() => setSelectedIdx(idx)}
-                    style={{
-                      border: `2px solid ${active ? 'var(--brand-accent)' : 'var(--border-subtle)'}`,
-                      borderRadius: 6,
-                      padding: 6,
-                      background: active ? 'var(--brand-accent-subtle)' : '#ffffff',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                      transition: 'all 0.15s ease'
-                    }}
                   >
-                    <div style={{
-                      width: '100%',
-                      height: 70,
-                      background: '#f8fafc',
-                      borderRadius: 4,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      overflow: 'hidden',
-                      marginBottom: 4
-                    }}>
-                      {p.img ? (
-                        <img
-                          src={p.img.src}
-                          alt={p.name}
-                          style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-                        />
-                      ) : (
-                        <ImageIcon size={24} color="#94a3b8" />
-                      )}
-                    </div>
-                    <div style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
-                      color: 'var(--text)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}>
-                      {p.name.replace(/\.[^.]+$/, '')}
-                    </div>
+                    <img
+                      src={p.url ? `/api/proxy_photo?url=${encodeURIComponent(p.url)}&width=140` : ''}
+                      alt={p.name}
+                      className="filmstrip-thumb"
+                      onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }}
+                    />
+                    <div className="filmstrip-name">{p.name.replace('.png', '')}</div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right: Inspector / Specifications Panel */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Alignment Specifications Card */}
+          <div className="card" style={{ padding: '20px' }}>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '12px' }}>
+              180×180 Standard Framing
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <span style={{ color: 'var(--brand)', fontWeight: 700 }}>&bull;</span>
+                <span>Upper dashed guideline aligns with eye level.</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <span style={{ color: 'var(--brand)', fontWeight: 700 }}>&bull;</span>
+                <span>Lower dashed line ensures chin clearance.</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                <span style={{ color: 'var(--brand)', fontWeight: 700 }}>&bull;</span>
+                <span>Exports transparent 180×180 PNG compliant with HUDL standards.</span>
+              </div>
             </div>
           </div>
+
+          {/* Precision Coordinates Card */}
+          <div className="card" style={{ padding: '20px' }}>
+            <h4 style={{ fontSize: '0.875rem', fontWeight: 700, marginBottom: '14px' }}>
+              Transform Coordinates
+            </h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">X Offset</label>
+                <input
+                  type="number"
+                  className="input-text"
+                  value={Math.round(offsetX)}
+                  onChange={(e) => setOffsetX(parseInt(e.target.value) || 0)}
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Y Offset</label>
+                <input
+                  type="number"
+                  className="input-text"
+                  value={Math.round(offsetY)}
+                  onChange={(e) => setOffsetY(parseInt(e.target.value) || 0)}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Direct Export CTA */}
+          <button
+            type="button"
+            className="btn btn-primary btn-lg"
+            onClick={handleExportPNG}
+            style={{ width: '100%', height: '46px' }}
+          >
+            <Download size={16} />
+            <span>Download Standardized PNG</span>
+          </button>
         </div>
       </div>
     </div>

@@ -3,11 +3,11 @@ import { Company } from '../types';
 import { Shield, Plus, Building2, Users, X, Check } from 'lucide-react';
 
 interface SuperAdminModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
 }
 
-export const SuperAdminModal: React.FC<SuperAdminModalProps> = ({ isOpen, onClose }) => {
+export const SuperAdminModal: React.FC<SuperAdminModalProps> = ({ isOpen = true, onClose }) => {
   const [tab, setTab] = useState<'companies' | 'create'>('companies');
   const [metrics, setMetrics] = useState<any | null>(null);
   const [companies, setCompanies] = useState<Company[]>([]);

@@ -3,12 +3,13 @@ import { Company, User } from '../types';
 import { Users, UserPlus, X, Trash2, Mail, Check, AlertCircle } from 'lucide-react';
 
 interface TeamModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
-  currentUser: User | null;
+  currentUser?: User | null;
+  user?: User | null;
 }
 
-export const TeamModal: React.FC<TeamModalProps> = ({ isOpen, onClose, currentUser }) => {
+export const TeamModal: React.FC<TeamModalProps> = ({ isOpen = true, onClose, currentUser, user }) => {
   const [tab, setTab] = useState<'members' | 'invite' | 'bulk'>('members');
   const [members, setMembers] = useState<any[]>([]);
   const [company, setCompany] = useState<Company | null>(null);

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Player } from '../types';
-import { Globe, Download, SlidersHorizontal, CheckCircle2, AlertCircle, FileArchive, ArrowRight } from 'lucide-react';
+import { Globe, Download, SlidersHorizontal, Image as ImageIcon, ExternalLink, Check } from 'lucide-react';
 import JSZip from 'jszip';
 
 interface TeamRosterScraperProps {
@@ -14,41 +14,42 @@ export const TeamRosterScraper: React.FC<TeamRosterScraperProps> = ({
 }) => {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
   const [players, setPlayers] = useState<Player[]>([]);
-  const [suggestedFolder, setSuggestedFolder] = useState('Roster');
+  const [suggestedFolder, setSuggestedFolder] = useState('Team_Roster');
+  const [error, setError] = useState('');
   const [downloadingZip, setDownloadingZip] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState('');
 
   const samplePresets = [
-    { label: 'Cardiff Devils (UK EIHL)', url: 'https://cardiffdevils.com/team' },
-    { label: 'Brooks Bandits (BCHL)', url: 'https://bchl.ca/stats/roster/1/60' },
-    { label: 'Eisloewen (DEL2)', url: 'https://www.eisloewen.de/team/' },
-    { label: 'Red Bull Munich (DEL)', url: 'https://www.redbullmuenchen.de/de/team' }
+    { name: 'Cardiff Devils (EIHL)', url: 'https://www.cardiffdevils.com/team/roster/' },
+    { name: 'Nottingham Panthers', url: 'https://www.panthers.co.uk/team/roster' },
+    { name: 'Coventry Blaze', url: 'https://coventryblaze.co.uk/team/roster/' },
+    { name: 'Penticton Vees (BCHL)', url: 'https://bchl.ca/stats/roster/1/penticton-vees' },
+    { name: 'Dresdner Eislöwen (DEL2)', url: 'https://www.eisloewen.de/team/' }
   ];
 
-  const handleScrape = async (e?: React.FormEvent) => {
+  const handleScrape = async (e?: React.FormEvent, overrideUrl?: string) => {
     if (e) e.preventDefault();
-    if (!url.trim()) return;
+    const targetUrl = overrideUrl || url;
+    if (!targetUrl.trim()) return;
 
     setLoading(true);
     setError('');
-    setPlayers([]);
 
     try {
       const res = await fetch('/api/fetch_roster', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() })
+        body: JSON.stringify({ url: targetUrl.trim() })
       });
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.detail || data.message || 'Scraping failed.');
+        throw new Error(data.detail || data.message || 'Failed to extract roster from URL.');
       }
 
       setPlayers(data.players || []);
-      setSuggestedFolder(data.suggested_folder || 'Roster');
+      setSuggestedFolder(data.suggested_folder || 'Team_Roster');
     } catch (err: any) {
       setError(err.message || 'Failed to extract roster from URL.');
     } finally {
@@ -69,13 +70,12 @@ export const TeamRosterScraper: React.FC<TeamRosterScraperProps> = ({
 
     try {
       const zip = new JSZip();
-      let completed = 0;
 
       for (let i = 0; i < players.length; i++) {
         const p = players[i];
         if (!p.image) continue;
 
-        setDownloadProgress(`Fetching portrait ${i + 1} of ${players.length} (${p.name})...`);
+        setDownloadProgress(`Fetching photo ${i + 1} of ${players.length}...`);
         try {
           const res = await fetch(`/api/proxy_photo?url=${encodeURIComponent(p.image)}&width=800`);
           if (res.ok) {
@@ -84,14 +84,13 @@ export const TeamRosterScraper: React.FC<TeamRosterScraperProps> = ({
             const cleanName = (p.name || 'Athlete').replace(/[^a-zA-Z0-9_\-\s]/g, '').trim();
             const filename = p.assigned_number ? `${num}.png` : `${cleanName}.png`;
             zip.file(filename, blob);
-            completed++;
           }
         } catch (e) {
           console.warn(`Failed to fetch photo for ${p.name}`);
         }
       }
 
-      setDownloadProgress('Generating ZIP archive...');
+      setDownloadProgress('Packaging ZIP archive...');
       const zipBlob = await zip.generateAsync({ type: 'blob' });
       const dlUrl = URL.createObjectURL(zipBlob);
       const a = document.createElement('a');
@@ -104,70 +103,80 @@ export const TeamRosterScraper: React.FC<TeamRosterScraperProps> = ({
 
       setDownloadProgress('');
     } catch (err: any) {
-      alert(`ZIP Download failed: ${err.message}`);
+      alert(`Download failed: ${err.message}`);
     } finally {
       setDownloadingZip(false);
     }
   };
 
   return (
-    <div style={{ maxWidth: 960, margin: '0 auto', textAlign: 'left' }}>
-      {/* URL Scraping Input Box */}
-      <div className="saas-card" style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: 6 }}>Team Athletic URL Roster Ingestion</h2>
-        <p style={{ fontSize: '0.84rem', color: 'var(--text-muted)', marginBottom: 18 }}>
-          Paste any sports team roster URL (HUDL, EliteProspects, HockeyTech, College Athletics) to ingest portraits.
+    <div style={{ maxWidth: 980, margin: '0 auto', textAlign: 'left' }}>
+      {/* Header & Scraper Card */}
+      <div className="card" style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '6px' }}>
+          Team Athletic Roster Scraper
+        </h2>
+        <p style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', marginBottom: '18px' }}>
+          Ingest complete sports team rosters directly from URLs (HUDL, EliteProspects, HockeyTech, College).
         </p>
 
-        <form onSubmit={handleScrape} style={{ display: 'flex', gap: 10 }}>
-          <div className="input-icon-wrapper" style={{ flex: 1 }}>
-            <Globe className="input-icon" size={16} />
-            <input
-              type="url"
-              className="saas-input"
-              placeholder="https://your-team-domain.com/roster"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              required
-            />
+        <form onSubmit={(e) => handleScrape(e)}>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <div className="input-wrapper" style={{ flex: 1 }}>
+              <Globe className="input-icon" size={16} />
+              <input
+                type="url"
+                className="input-text"
+                placeholder="https://team-domain.com/roster"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={loading}
+              style={{ padding: '0 24px', height: '40px' }}
+            >
+              <span>{loading ? 'Ingesting...' : 'Scrape Roster'}</span>
+            </button>
           </div>
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={loading}
-            style={{ padding: '0 24px' }}
-          >
-            <span>{loading ? 'Ingesting Roster...' : 'Scrape Roster'}</span>
-          </button>
         </form>
 
-        {/* Sample Presets */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600 }}>Sample Presets:</span>
-          {samplePresets.map((p, i) => (
+        {/* Preset Leagues Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '14px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>Sample Presets:</span>
+          {samplePresets.map((preset) => (
             <button
-              key={i}
+              key={preset.name}
               type="button"
               className="btn btn-ghost btn-sm"
-              style={{ fontSize: '0.74rem', padding: '3px 8px', border: '1px solid var(--border-subtle)', borderRadius: 4 }}
               onClick={() => {
-                setUrl(p.url);
+                setUrl(preset.url);
+                handleScrape(undefined, preset.url);
+              }}
+              style={{
+                fontSize: '0.75rem',
+                padding: '3px 10px',
+                background: 'var(--bg-subtle)',
+                borderRadius: 'var(--radius-pill)'
               }}
             >
-              {p.label}
+              {preset.name}
             </button>
           ))}
         </div>
 
         {error && (
           <div style={{
-            marginTop: 14,
+            marginTop: '14px',
             padding: '10px 14px',
-            background: 'var(--danger-subtle)',
+            background: 'var(--danger-light)',
             border: '1px solid var(--danger-border)',
             color: 'var(--danger)',
-            borderRadius: 'var(--r-md)',
-            fontSize: '0.82rem'
+            borderRadius: 'var(--radius-md)',
+            fontSize: '0.8125rem'
           }}>
             {error}
           </div>
@@ -176,84 +185,116 @@ export const TeamRosterScraper: React.FC<TeamRosterScraperProps> = ({
 
       {/* Roster Results Table */}
       {players.length > 0 && (
-        <div className="saas-card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="card" style={{ padding: '20px' }}>
+          {/* Table Action Header */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '16px',
+            flexWrap: 'wrap',
+            gap: '12px'
+          }}>
             <div>
-              <h3 style={{ fontSize: '1.05rem', fontWeight: 800 }}>{suggestedFolder} Roster ({players.length} Athletes)</h3>
-              <p style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Assign jersey numbers and download standardized headshots</p>
+              <h3 style={{ fontSize: '1.125rem', fontWeight: 800 }}>{suggestedFolder}</h3>
+              <p style={{ fontSize: '0.8125rem', color: 'var(--text-secondary)' }}>
+                {players.length} Athletes detected
+              </p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
               <button
+                type="button"
                 className="btn btn-secondary btn-sm"
                 onClick={() => onLoadRosterInWorkbench(players, suggestedFolder)}
               >
                 <SlidersHorizontal size={14} />
-                <span>Open in Workbench</span>
+                <span>Load All in Studio</span>
               </button>
+
               <button
+                type="button"
                 className="btn btn-primary btn-sm"
                 onClick={handleDownloadZip}
                 disabled={downloadingZip}
               >
-                <FileArchive size={14} />
-                <span>{downloadingZip ? downloadProgress || 'Downloading...' : 'Download All Photos (ZIP)'}</span>
+                <Download size={14} />
+                <span>{downloadingZip ? downloadProgress : 'Export Roster (.ZIP)'}</span>
               </button>
             </div>
           </div>
 
-          <div style={{ maxHeight: 520, overflowY: 'auto' }}>
+          {/* Data Table */}
+          <div className="table-container">
             <table className="saas-table">
               <thead>
                 <tr>
-                  <th style={{ width: 60 }}>Headshot</th>
+                  <th style={{ width: '80px' }}>Jersey #</th>
+                  <th style={{ width: '60px' }}>Photo</th>
                   <th>Athlete Name</th>
                   <th>Position</th>
-                  <th style={{ width: 140 }}>Assigned Jersey #</th>
-                  <th style={{ textAlign: 'right', width: 160 }}>Action</th>
+                  <th style={{ textAlign: 'right', width: '130px' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {players.map((p, idx) => (
+                {players.map((player, idx) => (
                   <tr key={idx}>
-                    <td>
-                      <div style={{ width: 40, height: 40, borderRadius: 6, overflow: 'hidden', border: '1px solid var(--border-subtle)', background: '#f8fafc' }}>
-                        {p.image ? (
-                          <img
-                            src={`/api/proxy_photo?url=${encodeURIComponent(p.image)}&width=100`}
-                            alt={p.name}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                        ) : (
-                          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: '0.65rem', fontWeight: 700 }}>
-                            N/A
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>{p.name}</div>
-                      {p.team && <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{p.team}</div>}
-                    </td>
-                    <td style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                      {p.position || p.pos || 'Athlete'}
-                    </td>
                     <td>
                       <input
                         type="text"
-                        className="saas-input"
-                        placeholder={p.number ? `#${p.number}` : '#'}
-                        value={p.assigned_number ?? (p.number || '')}
+                        className="input-text"
+                        style={{
+                          width: '54px',
+                          textAlign: 'center',
+                          padding: '4px',
+                          fontSize: '0.8125rem',
+                          fontWeight: 700
+                        }}
+                        placeholder={player.number || `${idx + 1}`}
+                        value={player.assigned_number !== undefined ? player.assigned_number : (player.number || '')}
                         onChange={(e) => handleNumberChange(idx, e.target.value)}
-                        style={{ width: 90, padding: '6px 10px', fontSize: '0.82rem', textAlign: 'center', fontFamily: 'var(--font-mono)' }}
                       />
+                    </td>
+                    <td>
+                      {player.image ? (
+                        <img
+                          src={`/api/proxy_photo?url=${encodeURIComponent(player.image)}&width=80`}
+                          alt={player.name}
+                          style={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 'var(--radius-sm)',
+                            objectFit: 'cover',
+                            border: '1px solid var(--border)'
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-subtle)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'var(--text-muted)'
+                        }}>
+                          <ImageIcon size={16} />
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontWeight: 600 }}>{player.name}</td>
+                    <td style={{ color: 'var(--text-secondary)' }}>
+                      {player.position || player.pos || 'Athlete'}
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       <button
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => onTuneSingleInWorkbench(p)}
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => onTuneSingleInWorkbench(player)}
+                        style={{ fontSize: '0.75rem', color: 'var(--brand)' }}
                       >
-                        <SlidersHorizontal size={13} />
-                        <span>Tune</span>
+                        Tune Frame
                       </button>
                     </td>
                   </tr>

@@ -3,16 +3,18 @@ import { User } from '../types';
 import { KeyRound, Shield, Fingerprint, X, Trash2, Check, AlertCircle } from 'lucide-react';
 
 interface AccountModalProps {
-  isOpen: boolean;
+  isOpen?: boolean;
   onClose: () => void;
-  currentUser: User | null;
-  onUserUpdated: (user: User) => void;
+  currentUser?: User | null;
+  user?: User | null;
+  onUserUpdated?: (user: User) => void;
 }
 
 export const AccountModal: React.FC<AccountModalProps> = ({
-  isOpen,
+  isOpen = true,
   onClose,
   currentUser,
+  user,
   onUserUpdated
 }) => {
   const [tab, setTab] = useState<'password' | 'passkeys'>('password');
@@ -79,7 +81,7 @@ export const AccountModal: React.FC<AccountModalProps> = ({
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
-        if (data.user) onUserUpdated(data.user);
+        if (data.user && onUserUpdated) onUserUpdated(data.user);
       } else {
         setPasswordErr(data.detail || data.message || 'Failed to update password.');
       }
