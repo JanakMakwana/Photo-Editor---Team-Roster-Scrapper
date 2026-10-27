@@ -81,13 +81,27 @@ def api_login(request):
     except Exception:
         data = {}
 
-    email = (data.get("email") or "").strip().lower()
+    identifier = (data.get("email") or data.get("username") or "").strip()
     password = data.get("password", "")
 
-    if not email or not password:
+    if not identifier or not password:
         return JsonResponse({"status": "error", "message": "Email and password are required."}, status=400)
 
-    user = authenticate(request, username=email, password=password)
+    # 1. Try standard authenticate
+    user = authenticate(request, username=identifier.lower(), password=password)
+
+    # 2. Case-insensitive fallback across email and username
+    if not user:
+        from django.db.models import Q
+        candidate = User.objects.filter(
+            Q(email__iexact=identifier) | Q(username__iexact=identifier)
+        ).first()
+        if candidate and candidate.check_password(password) and candidate.is_active:
+            user = candidate
+            if candidate.username != candidate.email:
+                candidate.username = candidate.email
+                candidate.save(update_fields=['username'])
+
     if not user:
         return JsonResponse({"status": "error", "message": "Invalid credentials or inactive account."}, status=401)
 

@@ -24,6 +24,9 @@ class Company(models.Model):
 
 
 class UserManager(BaseUserManager):
+    def get_by_natural_key(self, username):
+        return self.get(models.Q(email__iexact=username) | models.Q(username__iexact=username))
+
     def create_user(self, email, password=None, **extra_fields):
         if not email:
             raise ValueError('Email address is required')
@@ -64,11 +67,19 @@ class User(AbstractUser):
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
+    def save(self, *args, **kwargs):
+        if self.email:
+            self.email = self.email.strip().lower()
+            if not self.username or self.username != self.email:
+                self.username = self.email
+        super().save(*args, **kwargs)
+
     def is_superadmin_user(self):
         return self.role == 'superadmin' or self.is_superuser
 
     def __str__(self):
         return f"{self.email} ({self.role})"
+
 
 
 class Invitation(models.Model):

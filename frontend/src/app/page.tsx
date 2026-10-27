@@ -1237,11 +1237,11 @@ export default function StudioApp() {
           {authTab === 'login' ? (
             <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Corporate Email</label>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}>Corporate Email or Username</label>
                 <input
-                  type="email"
+                  type="text"
                   className="designer-input"
-                  placeholder="coach@athletics.com"
+                  placeholder="enterprise@ecstaticloud.com or name@company.com"
                   value={authEmail}
                   onChange={e => setAuthEmail(e.target.value)}
                   required
@@ -1267,17 +1267,16 @@ export default function StudioApp() {
                 {authSubmitting ? 'Authenticating...' : 'Enter Studio Workspace'}
               </button>
               <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>SuperAdmin Demo:</span>
+                <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Account:</span>
                 <button
                   type="button"
                   className="btn-designer btn-designer-secondary"
                   style={{ fontSize: '0.72rem', padding: '4px 10px' }}
                   onClick={() => {
-                    setAuthEmail('admin@athletics.com');
-                    setAuthPassword('admin');
+                    setAuthEmail('enterprise@ecstaticloud.com');
                   }}
                 >
-                  Quick Fill (SuperAdmin)
+                  Fill Email (enterprise@ecstaticloud.com)
                 </button>
               </div>
             </form>
