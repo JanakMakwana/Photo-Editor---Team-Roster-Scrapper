@@ -164,6 +164,8 @@ CSRF_TRUSTED_ORIGINS = [
     'https://*.supabase.co',
     'https://*.supabase.com',
     'https://*.up.railway.app',
+    'https://*.ecstaticloud.com',
+    'https://ecstaticloud.com',
 ]
 
 extra_csrf = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
