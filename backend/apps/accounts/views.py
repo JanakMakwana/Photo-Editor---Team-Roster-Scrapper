@@ -1,18 +1,27 @@
 import json
 import secrets
 import time
+import datetime
 from django.contrib.auth import authenticate, login, logout
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django.utils.text import slugify
+from django.utils import timezone
 from .models import User, Company, Invitation, Plan
+from .permissions import (
+    require_auth, require_role, require_perm,
+    get_user_permissions, error_json,
+    PERM_PLATFORM_MANAGE, PERM_TEAM_VIEW, PERM_TEAM_INVITE,
+    PERM_TEAM_MANAGE_ROLES, PERM_TEAM_REMOVE, PERM_TEAM_REVOKE_INVITE
+)
 
 
 def user_to_dict(user):
     if not user or not user.is_authenticated:
         return None
     is_superadmin = user.is_superadmin_user()
+    is_company_admin = user.is_company_admin_user()
     company = user.company or (Company.objects.first() if is_superadmin else None)
 
     platform_metrics = None
@@ -38,6 +47,8 @@ def user_to_dict(user):
                     "plan": c.plan,
                     "max_seats": c.max_seats,
                     "used_seats": c.used_seats(),
+                    "pending_invitations": c.pending_invitations_count(),
+                    "remaining_seats": c.remaining_seats(),
                     "status": c.status,
                     "created_at": c.created_at.isoformat()
                 }
@@ -51,6 +62,9 @@ def user_to_dict(user):
         "full_name": user.full_name or user.email.split('@')[0],
         "role": user.role,
         "is_superadmin": is_superadmin,
+        "is_company_admin": is_company_admin,
+        "can_manage_team": is_company_admin or is_superadmin,
+        "permissions": sorted(list(get_user_permissions(user))),
         "mfa_enabled": user.mfa_enabled,
         "passkeys_count": 0,
         "platform_metrics": platform_metrics,
@@ -61,6 +75,7 @@ def user_to_dict(user):
             "plan": company.plan,
             "max_seats": company.max_seats,
             "used_seats": company.used_seats(),
+            "pending_invitations": company.pending_invitations_count(),
             "remaining_seats": company.remaining_seats(),
             "status": company.status
         } if company else None
@@ -161,12 +176,10 @@ def api_dashboard_stats(request):
 
 @csrf_exempt
 @require_http_methods(["POST"])
+@require_auth
 def api_invite_user(request):
-    if not request.user.is_authenticated:
-        return JsonResponse({"status": "error", "message": "Authentication required."}, status=401)
-
-    if request.user.role not in ('superadmin', 'company_admin') and not request.user.is_superuser:
-        return JsonResponse({"status": "error", "message": "Permission denied."}, status=403)
+    if not (request.user.is_superadmin_user() or request.user.is_company_admin_user()):
+        return error_json("Permission denied: Company Admin or SuperAdmin role required.", status=403)
 
     try:
         data = json.loads(request.body or "{}")
@@ -178,35 +191,80 @@ def api_invite_user(request):
     role = data.get("role", "member")
     company_id = data.get("company_id")
 
+    if not email:
+        return JsonResponse({"status": "error", "message": "Email is required."}, status=400)
+
+    if role not in ('company_admin', 'member', 'viewer'):
+        role = 'member'
+
     company = None
     if request.user.is_superadmin_user() and company_id:
         company = Company.objects.filter(id=company_id).first()
     elif request.user.company:
         company = request.user.company
+    elif request.user.is_superadmin_user():
+        company = Company.objects.first()
 
     if not company:
         return JsonResponse({"status": "error", "message": "Target company not found or not specified."}, status=400)
 
     if company.remaining_seats() <= 0:
-        return JsonResponse({"status": "error", "message": f"Company seat quota ({company.max_seats} seats) is exhausted."}, status=400)
+        return JsonResponse({
+            "status": "error",
+            "code": "SEAT_QUOTA_EXCEEDED",
+            "message": f"Company seat quota ({company.max_seats} seats) is exhausted ({company.used_seats()} active, {company.pending_invitations_count()} pending)."
+        }, status=400)
 
-    if User.objects.filter(email=email).exists():
-        return JsonResponse({"status": "error", "message": "A user with this email already exists."}, status=400)
+    # Check if active member already
+    existing_user = User.objects.filter(email=email).first()
+    if existing_user and existing_user.company_id == company.id and existing_user.is_active:
+        return JsonResponse({"status": "error", "message": "A user with this email is already an active member of this organization."}, status=400)
 
     token = secrets.token_urlsafe(32)
+    expires_at = timezone.now() + datetime.timedelta(days=7)
     invitation = Invitation.objects.create(
         company=company,
+        invited_by=request.user,
         email=email,
         full_name=full_name,
         role=role,
-        token=token
+        token=token,
+        expires_at=expires_at
     )
 
     activation_url = f"/activate?token={token}"
     return JsonResponse({
         "status": "ok",
         "message": f"Invitation created for {email}",
-        "activation_url": activation_url
+        "activation_url": activation_url,
+        "token": token,
+        "remaining_seats": company.remaining_seats()
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+def api_invitation_details(request):
+    token = request.GET.get("token", "").strip()
+    if not token:
+        return JsonResponse({"status": "error", "message": "Token parameter is required."}, status=400)
+
+    invite = Invitation.objects.filter(token=token).first()
+    if not invite:
+        return JsonResponse({"status": "error", "code": "NOT_FOUND", "message": "Invitation not found."}, status=404)
+
+    return JsonResponse({
+        "status": "ok",
+        "valid": invite.is_valid(),
+        "email": invite.email,
+        "full_name": invite.full_name,
+        "role": invite.role,
+        "company_name": invite.company.name,
+        "company_plan": invite.company.plan,
+        "is_expired": invite.is_expired(),
+        "is_accepted": invite.is_accepted,
+        "is_revoked": invite.is_revoked,
+        "expires_at": invite.expires_at.isoformat() if invite.expires_at else None
     })
 
 
@@ -225,26 +283,49 @@ def api_activate_invite(request):
     if not token or not password:
         return JsonResponse({"status": "error", "message": "Token and password are required."}, status=400)
 
-    invite = Invitation.objects.filter(token=token, is_accepted=False).first()
+    invite = Invitation.objects.filter(token=token).first()
     if not invite:
-        return JsonResponse({"status": "error", "message": "Invalid or expired invitation token."}, status=404)
+        return JsonResponse({"status": "error", "message": "Invalid invitation token."}, status=404)
 
-    user = User.objects.create_user(
-        email=invite.email,
-        password=password,
-        full_name=full_name or invite.full_name,
-        company=invite.company,
-        role=invite.role
-    )
+    if invite.is_accepted:
+        return JsonResponse({"status": "error", "message": "This invitation has already been activated. Please log in directly."}, status=400)
+
+    if invite.is_revoked:
+        return JsonResponse({"status": "error", "message": "This invitation was revoked by your organization administrator."}, status=400)
+
+    if invite.is_expired():
+        return JsonResponse({"status": "error", "message": "This invitation has expired. Contact your administrator to request a new invitation."}, status=400)
+
+    user = User.objects.filter(email=invite.email).first()
+    if user:
+        user.set_password(password)
+        if full_name:
+            user.full_name = full_name
+        elif invite.full_name and not user.full_name:
+            user.full_name = invite.full_name
+        user.company = invite.company
+        user.role = invite.role
+        user.is_active = True
+        user.save()
+    else:
+        user = User.objects.create_user(
+            email=invite.email,
+            password=password,
+            full_name=full_name or invite.full_name,
+            company=invite.company,
+            role=invite.role
+        )
+
     invite.is_accepted = True
-    invite.save()
+    invite.save(update_fields=['is_accepted'])
 
     login(request, user)
     return JsonResponse({
         "status": "ok",
-        "message": "Seat activated successfully.",
+        "message": f"Welcome to {invite.company.name}! Seat activated successfully.",
         "user": user_to_dict(user)
     })
+
 
 
 # --------------------------------------------------------------------------
@@ -690,3 +771,377 @@ def api_keep_alive_ping_now(request):
         "latency_ms": 14,
         "target_url": target
     })
+
+
+# --------------------------------------------------------------------------
+# Organization Admin Workflow Endpoints (Company Admin & SuperAdmin)
+# --------------------------------------------------------------------------
+
+@csrf_exempt
+@require_http_methods(["GET"])
+@require_auth
+def api_org_overview(request):
+    is_superadmin = request.user.is_superadmin_user()
+    company_id = request.GET.get("company_id")
+
+    company = None
+    if is_superadmin and company_id:
+        company = Company.objects.filter(id=company_id).first()
+    elif request.user.company:
+        company = request.user.company
+    elif is_superadmin:
+        company = Company.objects.first()
+
+    if not company:
+        return JsonResponse({"status": "error", "code": "NO_COMPANY", "message": "No organization associated with this account."}, status=404)
+
+    return JsonResponse({
+        "status": "ok",
+        "company": {
+            "id": str(company.id),
+            "name": company.name,
+            "slug": company.slug,
+            "plan": company.plan,
+            "max_seats": company.max_seats,
+            "used_seats": company.used_seats(),
+            "pending_invitations": company.pending_invitations_count(),
+            "remaining_seats": company.remaining_seats(),
+            "status": company.status,
+            "created_at": company.created_at.isoformat()
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+@require_auth
+def api_org_members(request):
+    is_superadmin = request.user.is_superadmin_user()
+    company_id = request.GET.get("company_id")
+
+    company = None
+    if is_superadmin and company_id:
+        company = Company.objects.filter(id=company_id).first()
+    elif request.user.company:
+        company = request.user.company
+    elif is_superadmin:
+        company = Company.objects.first()
+
+    if not company:
+        return JsonResponse({"status": "ok", "members": []})
+
+    if not is_superadmin and request.user.company_id != company.id:
+        return error_json("Permission denied: tenant isolation boundary.", status=403)
+
+    members = company.members.filter(is_active=True).order_by('full_name', 'email')
+    return JsonResponse({
+        "status": "ok",
+        "company_name": company.name,
+        "company_id": str(company.id),
+        "members": [
+            {
+                "id": str(m.id),
+                "email": m.email,
+                "full_name": m.full_name or m.email.split('@')[0],
+                "role": m.role,
+                "is_superadmin": m.role == 'superadmin' or m.is_superuser,
+                "is_self": str(m.id) == str(request.user.id),
+                "date_joined": m.date_joined.isoformat()
+            }
+            for m in members
+        ]
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_auth
+def api_org_update_member_role(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied: Company Admin or SuperAdmin role required.", status=403)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except Exception:
+        data = {}
+
+    user_id = data.get("user_id")
+    new_role = (data.get("role") or "").strip()
+
+    if not user_id or new_role not in ('company_admin', 'member', 'viewer'):
+        return JsonResponse({"status": "error", "message": "Valid user_id and target role required."}, status=400)
+
+    target_user = User.objects.filter(id=user_id, is_active=True).first()
+    if not target_user:
+        return JsonResponse({"status": "error", "message": "User not found."}, status=404)
+
+    if not is_superadmin:
+        if not request.user.company or target_user.company_id != request.user.company.id:
+            return error_json("Cannot manage members of other organizations.", status=403)
+        if str(target_user.id) == str(request.user.id):
+            return JsonResponse({"status": "error", "message": "Cannot modify your own administrative role."}, status=400)
+        if target_user.role == 'superadmin':
+            return error_json("Cannot modify platform root administrator.", status=403)
+
+        # Protect last company_admin from being demoted
+        if target_user.role == 'company_admin' and new_role != 'company_admin':
+            admin_count = request.user.company.members.filter(is_active=True, role='company_admin').count()
+            if admin_count <= 1:
+                return JsonResponse({"status": "error", "message": "Cannot demote the sole Company Admin. Promote another member first."}, status=400)
+
+    target_user.role = new_role
+    target_user.save(update_fields=['role'])
+
+    return JsonResponse({
+        "status": "ok",
+        "message": f"Updated role for {target_user.email} to {new_role}.",
+        "user": {
+            "id": str(target_user.id),
+            "email": target_user.email,
+            "full_name": target_user.full_name,
+            "role": target_user.role
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_auth
+def api_org_remove_member(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied: Company Admin or SuperAdmin role required.", status=403)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except Exception:
+        data = {}
+
+    user_id = data.get("user_id")
+    target_user = User.objects.filter(id=user_id).first()
+    if not target_user:
+        return JsonResponse({"status": "error", "message": "User not found."}, status=404)
+
+    if str(target_user.id) == str(request.user.id):
+        return JsonResponse({"status": "error", "message": "Cannot remove yourself from the organization."}, status=400)
+
+    if not is_superadmin:
+        if not request.user.company or target_user.company_id != request.user.company.id:
+            return error_json("Cannot remove members from another organization.", status=403)
+        if target_user.role in ('superadmin', 'company_admin'):
+            return error_json("Cannot remove fellow administrators. Please demote their role first.", status=403)
+
+    comp = target_user.company
+    target_user.company = None
+    target_user.role = 'member'
+    target_user.save()
+
+    return JsonResponse({
+        "status": "ok",
+        "message": f"User {target_user.email} removed from organization.",
+        "remaining_seats": comp.remaining_seats() if comp else 0
+    })
+
+
+@csrf_exempt
+@require_http_methods(["GET"])
+@require_auth
+def api_org_invitations(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied.", status=403)
+
+    company_id = request.GET.get("company_id")
+    company = None
+    if is_superadmin and company_id:
+        company = Company.objects.filter(id=company_id).first()
+    elif request.user.company:
+        company = request.user.company
+    elif is_superadmin:
+        company = Company.objects.first()
+
+    if not company:
+        return JsonResponse({"status": "ok", "invitations": []})
+
+    invitations = company.invitations.filter(is_accepted=False, is_revoked=False).order_by('-created_at')
+    return JsonResponse({
+        "status": "ok",
+        "invitations": [
+            {
+                "id": str(inv.id),
+                "email": inv.email,
+                "full_name": inv.full_name,
+                "role": inv.role,
+                "token": inv.token,
+                "activation_url": f"/activate?token={inv.token}",
+                "is_expired": inv.is_expired(),
+                "created_at": inv.created_at.isoformat(),
+                "expires_at": inv.expires_at.isoformat() if inv.expires_at else None,
+                "invited_by": inv.invited_by.email if inv.invited_by else None
+            }
+            for inv in invitations
+        ]
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_auth
+def api_org_create_invitation(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied: Company Admin or SuperAdmin role required.", status=403)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except Exception:
+        data = {}
+
+    email = (data.get("email") or "").strip().lower()
+    full_name = (data.get("full_name") or "").strip()
+    role = data.get("role", "member")
+    company_id = data.get("company_id")
+
+    if not email:
+        return JsonResponse({"status": "error", "message": "Email is required."}, status=400)
+
+    if role not in ('company_admin', 'member', 'viewer'):
+        role = 'member'
+
+    company = None
+    if is_superadmin and company_id:
+        company = Company.objects.filter(id=company_id).first()
+    elif request.user.company:
+        company = request.user.company
+    elif is_superadmin:
+        company = Company.objects.first()
+
+    if not company:
+        return JsonResponse({"status": "error", "message": "Organization not found."}, status=400)
+
+    if company.remaining_seats() <= 0:
+        return JsonResponse({
+            "status": "error",
+            "code": "SEAT_QUOTA_EXCEEDED",
+            "message": f"Organization seat quota reached ({company.used_seats()}/{company.max_seats} used, {company.pending_invitations_count()} pending). Upgrade plan to add seats."
+        }, status=400)
+
+    existing_user = User.objects.filter(email=email).first()
+    if existing_user and existing_user.company_id == company.id and existing_user.is_active:
+        return JsonResponse({"status": "error", "message": f"{email} is already an active member of {company.name}."}, status=400)
+
+    pending_invite = Invitation.objects.filter(company=company, email=email, is_accepted=False, is_revoked=False).first()
+    if pending_invite and not pending_invite.is_expired():
+        return JsonResponse({
+            "status": "ok",
+            "message": f"Active invitation already exists for {email}.",
+            "activation_url": f"/activate?token={pending_invite.token}",
+            "token": pending_invite.token,
+            "remaining_seats": company.remaining_seats()
+        })
+
+    token = secrets.token_urlsafe(32)
+    expires_at = timezone.now() + datetime.timedelta(days=7)
+
+    invitation = Invitation.objects.create(
+        company=company,
+        invited_by=request.user,
+        email=email,
+        full_name=full_name,
+        role=role,
+        token=token,
+        expires_at=expires_at
+    )
+
+    return JsonResponse({
+        "status": "ok",
+        "message": f"Invitation issued for {email}.",
+        "activation_url": f"/activate?token={token}",
+        "token": token,
+        "remaining_seats": company.remaining_seats(),
+        "invitation": {
+            "id": str(invitation.id),
+            "email": invitation.email,
+            "full_name": invitation.full_name,
+            "role": invitation.role,
+            "expires_at": expires_at.isoformat()
+        }
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_auth
+def api_org_revoke_invitation(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied.", status=403)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except Exception:
+        data = {}
+
+    invitation_id = data.get("invitation_id")
+    invite = Invitation.objects.filter(id=invitation_id).first()
+    if not invite:
+        return JsonResponse({"status": "error", "message": "Invitation not found."}, status=404)
+
+    if not is_superadmin and (not request.user.company or invite.company_id != request.user.company.id):
+        return error_json("Cannot revoke invitations of other organizations.", status=403)
+
+    invite.is_revoked = True
+    invite.save(update_fields=['is_revoked'])
+
+    return JsonResponse({
+        "status": "ok",
+        "message": f"Invitation for {invite.email} revoked. Seat released.",
+        "remaining_seats": invite.company.remaining_seats()
+    })
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
+@require_auth
+def api_org_resend_invitation(request):
+    is_superadmin = request.user.is_superadmin_user()
+    is_company_admin = request.user.is_company_admin_user()
+
+    if not (is_superadmin or is_company_admin):
+        return error_json("Permission denied.", status=403)
+
+    try:
+        data = json.loads(request.body or "{}")
+    except Exception:
+        data = {}
+
+    invitation_id = data.get("invitation_id")
+    invite = Invitation.objects.filter(id=invitation_id).first()
+    if not invite:
+        return JsonResponse({"status": "error", "message": "Invitation not found."}, status=404)
+
+    if not is_superadmin and (not request.user.company or invite.company_id != request.user.company.id):
+        return error_json("Cannot resend invitations of other organizations.", status=403)
+
+    invite.expires_at = timezone.now() + datetime.timedelta(days=7)
+    invite.is_revoked = False
+    invite.save(update_fields=['expires_at', 'is_revoked'])
+
+    return JsonResponse({
+        "status": "ok",
+        "message": f"Invitation refreshed for {invite.email}.",
+        "activation_url": f"/activate?token={invite.token}",
+        "token": invite.token
+    })
+

@@ -15,8 +15,11 @@ interface User {
   id: string;
   email: string;
   full_name: string;
-  role: 'superadmin' | 'company_admin' | 'member';
+  role: 'superadmin' | 'company_admin' | 'member' | 'viewer';
   is_superadmin: boolean;
+  is_company_admin: boolean;
+  can_manage_team: boolean;
+  permissions: string[];
   mfa_enabled: boolean;
   company: {
     id: string;
@@ -25,6 +28,7 @@ interface User {
     plan: string;
     max_seats: number;
     used_seats: number;
+    pending_invitations?: number;
     remaining_seats: number;
     status: string;
   } | null;
@@ -46,6 +50,42 @@ interface User {
       created_at: string;
     }>;
   };
+}
+
+interface OrgMember {
+  id: string;
+  email: string;
+  full_name: string;
+  role: 'superadmin' | 'company_admin' | 'member' | 'viewer';
+  is_superadmin: boolean;
+  is_self: boolean;
+  date_joined: string;
+}
+
+interface OrgInvitation {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  token: string;
+  activation_url: string;
+  is_expired: boolean;
+  created_at: string;
+  expires_at: string | null;
+  invited_by: string | null;
+}
+
+interface InvitationDetails {
+  valid: boolean;
+  email: string;
+  full_name: string;
+  role: string;
+  company_name: string;
+  company_plan: string;
+  is_expired: boolean;
+  is_accepted: boolean;
+  is_revoked: boolean;
+  expires_at: string | null;
 }
 
 interface PlanItem {
@@ -150,7 +190,26 @@ export default function StudioApp() {
 
   // Modals & Navigation
   const [showPlatformDashboard, setShowPlatformDashboard] = useState(false);
-  const [showTeamModal, setShowTeamModal] = useState(false);
+  const [showOrgHub, setShowOrgHub] = useState(false);
+  const [orgHubTab, setOrgHubTab] = useState<'members' | 'invitations' | 'invite'>('members');
+  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([]);
+  const [orgInvitations, setOrgInvitations] = useState<OrgInvitation[]>([]);
+  const [orgDataLoading, setOrgDataLoading] = useState(false);
+  const [orgActionLoading, setOrgActionLoading] = useState(false);
+  const [orgMemberSearch, setOrgMemberSearch] = useState('');
+  const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
+
+  // Dedicated Activation Modal State
+  const [showActivationModal, setShowActivationModal] = useState(false);
+  const [activationToken, setActivationToken] = useState('');
+  const [activationDetails, setActivationDetails] = useState<InvitationDetails | null>(null);
+  const [activationPassword, setActivationPassword] = useState('');
+  const [activationConfirmPassword, setActivationConfirmPassword] = useState('');
+  const [activationFullName, setActivationFullName] = useState('');
+  const [activationLoading, setActivationLoading] = useState(false);
+  const [activationError, setActivationError] = useState('');
+
+  // Legacy / Direct Invite State
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'company_admin'>('member');
@@ -288,7 +347,276 @@ export default function StudioApp() {
 
   useEffect(() => {
     checkAuth();
+
+    // Check for Invitation Activation Token in URL (?token=... or #activate?token=...)
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      let token = urlParams.get('token');
+      if (!token && window.location.hash) {
+        const hashStr = window.location.hash.replace(/^#\/?/, '');
+        const hashParams = new URLSearchParams(hashStr.includes('?') ? hashStr.split('?')[1] : hashStr);
+        token = hashParams.get('token');
+      }
+      if (token) {
+        setActivationToken(token);
+        loadInvitationDetails(token);
+      }
+    }
   }, [checkAuth]);
+
+  // Load Invitation Details for Activation
+  const loadInvitationDetails = async (token: string) => {
+    try {
+      const res = await fetch(`/api/auth/invitation_details?token=${encodeURIComponent(token)}`);
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setActivationDetails(data);
+        if (data.full_name) setActivationFullName(data.full_name);
+        setShowActivationModal(true);
+      } else {
+        setActivationError(data.message || 'Invitation is invalid or has expired.');
+        setShowActivationModal(true);
+      }
+    } catch {
+      setActivationError('Could not verify invitation token with server.');
+      setShowActivationModal(true);
+    }
+  };
+
+  // Dedicated Activation Form Handler
+  const handleActivationSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (activationPassword !== activationConfirmPassword) {
+      setActivationError('Passwords do not match');
+      return;
+    }
+    if (activationPassword.length < 5) {
+      setActivationError('Password must be at least 5 characters');
+      return;
+    }
+    setActivationLoading(true);
+    setActivationError('');
+    try {
+      const res = await fetch('/api/auth/activate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: activationToken,
+          password: activationPassword,
+          full_name: activationFullName
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setUser(data.user);
+        setShowActivationModal(false);
+        showToast(`Welcome ${data.user.full_name}! Seat activated successfully.`);
+        if (typeof window !== 'undefined' && window.history.replaceState) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+      } else {
+        setActivationError(data.message || 'Failed to activate invitation token');
+      }
+    } catch {
+      setActivationError('Error connecting to activation server');
+    } finally {
+      setActivationLoading(false);
+    }
+  };
+
+  // Load Organization & Team Management Data
+  const loadOrgData = async () => {
+    setOrgDataLoading(true);
+    try {
+      const [resOverview, resMembers, resInv] = await Promise.all([
+        fetch('/api/org/overview'),
+        fetch('/api/org/members'),
+        fetch('/api/org/invitations')
+      ]);
+
+      if (resOverview.ok) {
+        const data = await resOverview.json();
+        if (data.company) {
+          setUser(prev => prev ? { ...prev, company: data.company } : prev);
+        }
+      }
+
+      if (resMembers.ok) {
+        const data = await resMembers.json();
+        setOrgMembers(data.members || []);
+      }
+
+      if (resInv.ok) {
+        const data = await resInv.json();
+        setOrgInvitations(data.invitations || []);
+      }
+    } catch (e) {
+      console.warn('Failed to load organization data:', e);
+    } finally {
+      setOrgDataLoading(false);
+    }
+  };
+
+  // Promote / Demote Member Role
+  const handleUpdateMemberRole = async (userId: string, newRole: 'company_admin' | 'member') => {
+    setOrgActionLoading(true);
+    try {
+      const res = await fetch('/api/org/members/update_role', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId, role: newRole })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(data.message || 'Role updated successfully');
+        loadOrgData();
+      } else {
+        showToast(data.message || 'Failed to update role');
+      }
+    } catch {
+      showToast('Network error updating member role');
+    } finally {
+      setOrgActionLoading(false);
+    }
+  };
+
+  // Remove Member from Organization
+  const handleRemoveMember = async (userId: string, email: string) => {
+    if (!confirm(`Are you sure you want to remove ${email} from this organization? Their seat will be freed immediately.`)) return;
+    setOrgActionLoading(true);
+    try {
+      const res = await fetch('/api/org/members/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`User ${email} removed from organization.`);
+        loadOrgData();
+      } else {
+        showToast(data.message || 'Failed to remove user');
+      }
+    } catch {
+      showToast('Error removing member from organization');
+    } finally {
+      setOrgActionLoading(false);
+    }
+  };
+
+  // Send Organization Member Invitation
+  const handleCreateOrgInvitation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setOrgActionLoading(true);
+    try {
+      const res = await fetch('/api/org/invitations/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          full_name: inviteName.trim(),
+          role: inviteRole
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        const fullActivationUrl = window.location.origin + data.activation_url;
+        setInviteLink(fullActivationUrl);
+        showToast(`Invitation created for ${inviteEmail.trim()}!`);
+        setInviteEmail('');
+        setInviteName('');
+        setOrgHubTab('invitations');
+        loadOrgData();
+      } else {
+        showToast(data.message || 'Invitation failed');
+      }
+    } catch {
+      showToast('Error creating invitation');
+    } finally {
+      setOrgActionLoading(false);
+    }
+  };
+
+  // Revoke Organization Invitation
+  const handleRevokeInvitation = async (invitationId: string) => {
+    if (!confirm('Revoke this invitation? The token will become invalid and the reserved seat will be restored immediately.')) return;
+    setOrgActionLoading(true);
+    try {
+      const res = await fetch('/api/org/invitations/revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invitation_id: invitationId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast('Invitation revoked. Seat restored.');
+        loadOrgData();
+      } else {
+        showToast(data.message || 'Failed to revoke invitation');
+      }
+    } catch {
+      showToast('Error revoking invitation');
+    } finally {
+      setOrgActionLoading(false);
+    }
+  };
+
+  // Resend / Refresh Invitation
+  const handleResendInvitation = async (invitationId: string) => {
+    setOrgActionLoading(true);
+    try {
+      const res = await fetch('/api/org/invitations/resend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ invitation_id: invitationId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        const fullLink = window.location.origin + data.activation_url;
+        try {
+          await navigator.clipboard.writeText(fullLink);
+          showToast('Invitation renewed and activation link copied to clipboard!');
+        } catch {
+          showToast('Invitation renewed! Link: ' + fullLink);
+        }
+        loadOrgData();
+      } else {
+        showToast(data.message || 'Failed to refresh invitation');
+      }
+    } catch {
+      showToast('Error refreshing invitation');
+    } finally {
+      setOrgActionLoading(false);
+    }
+  };
+
+  // Quick Role Switching for Instant QA/Testing
+  const handleQuickSwitchRole = async (targetEmail: string) => {
+    setLoadingOverlay(`Switching account to ${targetEmail}...`);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: targetEmail, password: 'admin' })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        setUser(data.user);
+        setShowRoleSwitcher(false);
+        showToast(`Logged in as ${data.user.full_name} (${data.user.role})`);
+        if (data.user.is_superadmin) {
+          loadSuperAdminData();
+        }
+      } else {
+        showToast(data.message || 'Quick switch failed');
+      }
+    } catch {
+      showToast('Error switching account');
+    } finally {
+      setLoadingOverlay(null);
+    }
+  };
 
   // Load Suggested Folders
   const loadSuggestedFolders = async () => {
@@ -302,6 +630,7 @@ export default function StudioApp() {
       console.warn('Could not load suggested folders:', e);
     }
   };
+
 
   // Load SuperAdmin Fleet Data
   const loadSuperAdminData = async () => {
@@ -1739,39 +2068,122 @@ export default function StudioApp() {
             </div>
           )}
 
-          {/* SuperAdmin Tag */}
-          {user.is_superadmin && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 9px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 'var(--radius-full)' }}>
+          {/* RBAC Role Badges */}
+          {user.role === 'superadmin' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: 'var(--radius-full)' }}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#8b5cf6' }} />
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7c3aed' }}>SuperAdmin Scope</span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#7c3aed' }}>👑 Platform SuperAdmin</span>
+            </div>
+          ) : user.role === 'company_admin' ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#ecfdf5', border: '1px solid #a7f3d0', borderRadius: 'var(--radius-full)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#059669' }} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#047857' }}>🛡️ Org Administrator</span>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 'var(--radius-full)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#64748b' }} />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#475569' }}>👤 Team Member</span>
             </div>
           )}
         </div>
 
         {/* Right: Unified Action Controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* SuperAdmin Hub (Platform Root Only) */}
           {user.is_superadmin && (
             <button
               className="btn-ui btn-secondary"
-              style={{ fontSize: '0.75rem', padding: '6px 12px', border: '1px solid #cbd5e1' }}
+              style={{ fontSize: '0.75rem', padding: '6px 12px', border: '1px solid #ddd6fe', background: '#faf5ff', color: '#6d28d9' }}
               onClick={() => {
                 loadSuperAdminData();
                 setShowPlatformDashboard(true);
               }}
             >
-              <Building size={14} color="#2563eb" />
+              <Building size={14} color="#7c3aed" />
               <span style={{ fontWeight: 700 }}>SuperAdmin Hub</span>
             </button>
           )}
 
-          <button
-            className="btn-ui btn-secondary"
-            style={{ fontSize: '0.75rem', padding: '6px 12px' }}
-            onClick={() => setShowTeamModal(true)}
-          >
-            <Users size={14} />
-            <span>Team Seats</span>
-          </button>
+          {/* Organization & Team Management (Company Admin & SuperAdmin) */}
+          {(user.is_superadmin || user.is_company_admin || user.can_manage_team) && (
+            <button
+              className="btn-ui btn-secondary"
+              style={{ fontSize: '0.75rem', padding: '6px 12px', border: '1px solid #bbf7d0', background: '#f0fdf4', color: '#15803d' }}
+              onClick={() => {
+                loadOrgData();
+                setShowOrgHub(true);
+              }}
+            >
+              <Users size={14} color="#16a34a" />
+              <span style={{ fontWeight: 700 }}>Team & Organization</span>
+            </button>
+          )}
+
+          {/* Quick Role Switcher for QA / Live Testing */}
+          <div style={{ position: 'relative' }}>
+            <button
+              className="btn-ui btn-secondary"
+              style={{ fontSize: '0.75rem', padding: '6px 11px', border: '1px solid #e2e8f0', background: '#ffffff' }}
+              onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}
+              title="Quickly switch between seeded roles to test RBAC workflows"
+            >
+              <Zap size={13} color="#f59e0b" />
+              <span style={{ fontWeight: 600 }}>Test Roles</span>
+            </button>
+
+            {showRoleSwitcher && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '115%',
+                  right: 0,
+                  width: 270,
+                  background: '#ffffff',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 10,
+                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
+                  padding: 8,
+                  zIndex: 200
+                }}
+              >
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', padding: '4px 8px 6px', borderBottom: '1px solid #f1f5f9', textTransform: 'uppercase' }}>
+                  RBAC Impersonation Suite
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                  <button
+                    className="btn-ui btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleQuickSwitchRole('enterprise@ecstaticloud.com')}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <span style={{ fontWeight: 700, color: '#7c3aed' }}>👑 SuperAdmin</span>
+                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>enterprise@ecstaticloud.com</span>
+                    </div>
+                  </button>
+                  <button
+                    className="btn-ui btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleQuickSwitchRole('admin@test.in')}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <span style={{ fontWeight: 700, color: '#059669' }}>🛡️ Org Admin</span>
+                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>admin@test.in (Test 1)</span>
+                    </div>
+                  </button>
+                  <button
+                    className="btn-ui btn-ghost"
+                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
+                    onClick={() => handleQuickSwitchRole('photographer@test.in')}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <span style={{ fontWeight: 700, color: '#475569' }}>👤 Team Member</span>
+                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>photographer@test.in (Test 1)</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           <button
             className="btn-ui btn-danger"
@@ -3485,92 +3897,556 @@ export default function StudioApp() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: Team Seats & Member Invitations */}
+      {/* MODAL: ORGANIZATION & TEAM MANAGEMENT HUB (RBAC) */}
       {/* ========================================================= */}
-      {showTeamModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.25)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div className="card-clean" style={{ maxWidth: 460, width: '100%', padding: 28 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Users size={20} color="#2563eb" />
-                <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a' }}>Team Seats & Invitations</h2>
-              </div>
-              <button className="btn-ui btn-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowTeamModal(false)}>Close</button>
-            </div>
-
-            <div style={{ padding: 12, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: 18 }}>
-              <div style={{ fontSize: '0.78125rem', color: '#1d4ed8' }}>
-                Remaining Quota: <strong>{user.company ? user.company.remaining_seats : 24} available seats</strong>
-              </div>
-            </div>
-
-            <form
-              onSubmit={async e => {
-                e.preventDefault();
-                try {
-                  const res = await fetch('/api/company/users/invite', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ email: inviteEmail, full_name: inviteName, role: inviteRole })
-                  });
-                  const data = await res.json();
-                  if (res.ok && data.status === 'ok') {
-                    setInviteLink(window.location.origin + data.activation_url);
-                    showToast('Invitation generated!');
-                  } else {
-                    showToast(data.message || 'Invitation failed');
-                  }
-                } catch {
-                  showToast('Error sending invitation');
-                }
-              }}
-              style={{ display: 'flex', flexDirection: 'column', gap: 13 }}
-            >
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Colleague Email</label>
-                <input
-                  type="email"
-                  className="input-ui"
-                  placeholder="editor@company.com"
-                  value={inviteEmail}
-                  onChange={e => setInviteEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Full Name</label>
-                <input
-                  type="text"
-                  className="input-ui"
-                  placeholder="Taylor Swift"
-                  value={inviteName}
-                  onChange={e => setInviteName(e.target.value)}
-                  required
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Role</label>
-                <select
-                  className="input-ui"
-                  value={inviteRole}
-                  onChange={e => setInviteRole(e.target.value as 'member' | 'company_admin')}
-                >
-                  <option value="member">Standard Member</option>
-                  <option value="company_admin">Team Administrator</option>
-                </select>
-              </div>
-
-              <button type="submit" className="btn-ui btn-primary" style={{ padding: '10px 0', marginTop: 4, height: 40 }}>
-                Generate Seat Invite Token
-              </button>
-            </form>
-
-            {inviteLink && (
-              <div style={{ marginTop: 16, padding: 12, borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
-                <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d', marginBottom: 4 }}>Activation Link:</div>
-                <div style={{ fontSize: '0.72rem', fontFamily: 'var(--font-mono)', color: '#166534', wordBreak: 'break-all' }}>
-                  {inviteLink}
+      {showOrgHub && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.35)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 760, width: '100%', maxHeight: '88vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+            {/* Modal Header */}
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 38, height: 38, borderRadius: 10, background: '#ecfdf5', border: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Users size={20} color="#059669" />
                 </div>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>
+                      {user.company?.name || 'Organization'}
+                    </h2>
+                    <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', textTransform: 'uppercase' }}>
+                      {user.company?.plan || 'Free'} Tier
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>
+                    Team staff roster, role-based permissions, and seat allocation
+                  </div>
+                </div>
+              </div>
+              <button
+                className="btn-ui btn-secondary"
+                style={{ padding: '6px 12px', fontSize: '0.75rem' }}
+                onClick={() => setShowOrgHub(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            {/* Quota Progress Banner */}
+            <div style={{ padding: '16px 24px', background: '#ffffff', borderBottom: '1px solid #f1f5f9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, fontSize: '0.75rem' }}>
+                <span style={{ fontWeight: 600, color: '#334155' }}>
+                  Seat Capacity: <strong>{user.company?.used_seats || 0} Active</strong> &bull; <strong>{user.company?.pending_invitations || 0} Pending</strong> of <strong>{user.company?.max_seats || 0} Total</strong>
+                </span>
+                <span style={{ fontWeight: 700, color: (user.company?.remaining_seats || 0) > 0 ? '#16a34a' : '#dc2626' }}>
+                  {(user.company?.remaining_seats || 0) > 0 ? `${user.company?.remaining_seats} Seats Available` : 'Capacity Reached'}
+                </span>
+              </div>
+              <div style={{ width: '100%', height: 8, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${Math.min(100, (((user.company?.used_seats || 0) + (user.company?.pending_invitations || 0)) / Math.max(1, (user.company?.max_seats || 1))) * 100)}%`,
+                    background: ((user.company?.remaining_seats || 0) > 0) ? 'linear-gradient(90deg, #10b981, #059669)' : '#ef4444',
+                    borderRadius: 4,
+                    transition: 'width 0.3s ease'
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Tabs Header */}
+            <div style={{ display: 'flex', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', padding: '0 24px' }}>
+              <button
+                style={{
+                  padding: '12px 16px',
+                  fontSize: '0.8125rem',
+                  fontWeight: orgHubTab === 'members' ? 700 : 500,
+                  color: orgHubTab === 'members' ? '#2563eb' : '#64748b',
+                  borderBottom: orgHubTab === 'members' ? '2px solid #2563eb' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setOrgHubTab('members')}
+              >
+                Team Members ({orgMembers.length})
+              </button>
+              <button
+                style={{
+                  padding: '12px 16px',
+                  fontSize: '0.8125rem',
+                  fontWeight: orgHubTab === 'invitations' ? 700 : 500,
+                  color: orgHubTab === 'invitations' ? '#2563eb' : '#64748b',
+                  borderBottom: orgHubTab === 'invitations' ? '2px solid #2563eb' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setOrgHubTab('invitations')}
+              >
+                Pending Invitations ({orgInvitations.length})
+              </button>
+              <button
+                style={{
+                  padding: '12px 16px',
+                  fontSize: '0.8125rem',
+                  fontWeight: orgHubTab === 'invite' ? 700 : 500,
+                  color: orgHubTab === 'invite' ? '#2563eb' : '#64748b',
+                  borderBottom: orgHubTab === 'invite' ? '2px solid #2563eb' : '2px solid transparent',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setOrgHubTab('invite')}
+              >
+                ➕ Invite Staff Member
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+              {orgDataLoading ? (
+                <div style={{ display: 'flex', justifyContent: 'center', padding: '40px 0' }}>
+                  <RefreshCw className="animate-spin" size={24} color="#64748b" />
+                </div>
+              ) : (
+                <>
+                  {/* TAB 1: MEMBERS */}
+                  {orgHubTab === 'members' && (
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                        <div style={{ position: 'relative', width: 280 }}>
+                          <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: 10, top: 10 }} />
+                          <input
+                            type="text"
+                            className="input-ui"
+                            style={{ paddingLeft: 30, fontSize: '0.75rem', height: 34 }}
+                            placeholder="Filter members by name or email..."
+                            value={orgMemberSearch}
+                            onChange={e => setOrgMemberSearch(e.target.value)}
+                          />
+                        </div>
+                        <button
+                          className="btn-ui btn-primary"
+                          style={{ fontSize: '0.75rem', padding: '6px 14px' }}
+                          onClick={() => setOrgHubTab('invite')}
+                        >
+                          <Plus size={14} />
+                          <span>Invite Member</span>
+                        </button>
+                      </div>
+
+                      <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78125rem' }}>
+                          <thead>
+                            <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
+                              <th style={{ padding: '10px 14px', fontWeight: 600 }}>Member</th>
+                              <th style={{ padding: '10px 14px', fontWeight: 600 }}>Role</th>
+                              <th style={{ padding: '10px 14px', fontWeight: 600 }}>Joined</th>
+                              <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {orgMembers
+                              .filter(m => !orgMemberSearch || m.full_name.toLowerCase().includes(orgMemberSearch.toLowerCase()) || m.email.toLowerCase().includes(orgMemberSearch.toLowerCase()))
+                              .map(m => (
+                                <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '10px 14px' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                      <div style={{ width: 30, height: 30, borderRadius: '50%', background: m.is_self ? '#eff6ff' : '#f1f5f9', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: m.is_self ? '#2563eb' : '#475569' }}>
+                                        {m.full_name ? m.full_name.slice(0, 2).toUpperCase() : m.email.slice(0, 2).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                                          {m.full_name} {m.is_self && <span style={{ fontSize: '0.6875rem', color: '#2563eb', fontWeight: 700 }}>(You)</span>}
+                                        </div>
+                                        <div style={{ fontSize: '0.71875rem', color: '#64748b' }}>{m.email}</div>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '10px 14px' }}>
+                                    {m.role === 'superadmin' ? (
+                                      <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe' }}>
+                                        SuperAdmin
+                                      </span>
+                                    ) : m.role === 'company_admin' ? (
+                                      <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#ecfdf5', color: '#059669', border: '1px solid #a7f3d0' }}>
+                                        Org Admin
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: '0.6875rem', fontWeight: 600, padding: '2px 8px', borderRadius: 4, background: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0' }}>
+                                        Team Member
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', color: '#64748b', fontSize: '0.72rem' }}>
+                                    {new Date(m.date_joined).toLocaleDateString()}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                      {!m.is_self && !m.is_superadmin && (
+                                        <>
+                                          {m.role === 'member' ? (
+                                            <button
+                                              className="btn-ui btn-secondary"
+                                              style={{ fontSize: '0.6875rem', padding: '4px 8px' }}
+                                              disabled={orgActionLoading}
+                                              onClick={() => handleUpdateMemberRole(m.id, 'company_admin')}
+                                              title="Promote to Organization Administrator"
+                                            >
+                                              Promote Admin
+                                            </button>
+                                          ) : (
+                                            <button
+                                              className="btn-ui btn-secondary"
+                                              style={{ fontSize: '0.6875rem', padding: '4px 8px' }}
+                                              disabled={orgActionLoading}
+                                              onClick={() => handleUpdateMemberRole(m.id, 'member')}
+                                              title="Demote to Standard Member"
+                                            >
+                                              Set Member
+                                            </button>
+                                          )}
+                                          <button
+                                            className="btn-ui btn-ghost"
+                                            style={{ color: '#ef4444', padding: '4px 6px' }}
+                                            disabled={orgActionLoading}
+                                            onClick={() => handleRemoveMember(m.id, m.email)}
+                                            title="Remove member and release seat"
+                                          >
+                                            <Trash2 size={14} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* TAB 2: PENDING INVITATIONS */}
+                  {orgHubTab === 'invitations' && (
+                    <div>
+                      {orgInvitations.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '36px 0', color: '#64748b' }}>
+                          <Users size={32} color="#cbd5e1" style={{ margin: '0 auto 10px' }} />
+                          <div style={{ fontSize: '0.875rem', fontWeight: 600, color: '#334155' }}>No active invitations</div>
+                          <div style={{ fontSize: '0.75rem', marginTop: 4 }}>
+                            All invited colleagues have accepted their seats or invitations expired.
+                          </div>
+                          <button
+                            className="btn-ui btn-primary"
+                            style={{ marginTop: 14, fontSize: '0.75rem', padding: '6px 14px' }}
+                            onClick={() => setOrgHubTab('invite')}
+                          >
+                            Send New Invite
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78125rem' }}>
+                            <thead>
+                              <tr style={{ background: '#f8fafc', borderBottom: '1px solid #e2e8f0', textAlign: 'left', color: '#64748b' }}>
+                                <th style={{ padding: '10px 14px', fontWeight: 600 }}>Invited Colleague</th>
+                                <th style={{ padding: '10px 14px', fontWeight: 600 }}>Target Role</th>
+                                <th style={{ padding: '10px 14px', fontWeight: 600 }}>Status / Expiry</th>
+                                <th style={{ padding: '10px 14px', fontWeight: 600, textAlign: 'right' }}>Actions</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {orgInvitations.map(inv => (
+                                <tr key={inv.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                                  <td style={{ padding: '10px 14px' }}>
+                                    <div style={{ fontWeight: 600, color: '#0f172a' }}>{inv.email}</div>
+                                    <div style={{ fontSize: '0.71875rem', color: '#64748b' }}>
+                                      {inv.full_name ? `Name: ${inv.full_name}` : 'Pending Name'} &bull; Invited by: {inv.invited_by || 'Admin'}
+                                    </div>
+                                  </td>
+                                  <td style={{ padding: '10px 14px' }}>
+                                    <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: inv.role === 'company_admin' ? '#ecfdf5' : '#f1f5f9', color: inv.role === 'company_admin' ? '#059669' : '#475569' }}>
+                                      {inv.role === 'company_admin' ? 'Org Admin' : 'Team Member'}
+                                    </span>
+                                  </td>
+                                  <td style={{ padding: '10px 14px', fontSize: '0.72rem' }}>
+                                    {inv.is_expired ? (
+                                      <span style={{ color: '#ef4444', fontWeight: 600 }}>Expired</span>
+                                    ) : (
+                                      <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                                        Active &bull; {inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : '7 days'}
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                                      <button
+                                        className="btn-ui btn-secondary"
+                                        style={{ fontSize: '0.6875rem', padding: '4px 8px' }}
+                                        onClick={async () => {
+                                          const link = window.location.origin + inv.activation_url;
+                                          try {
+                                            await navigator.clipboard.writeText(link);
+                                            showToast('Activation link copied to clipboard!');
+                                          } catch {
+                                            showToast('Link: ' + link);
+                                          }
+                                        }}
+                                        title="Copy one-click activation URL"
+                                      >
+                                        <Copy size={12} />
+                                        <span>Copy Link</span>
+                                      </button>
+                                      <button
+                                        className="btn-ui btn-secondary"
+                                        style={{ fontSize: '0.6875rem', padding: '4px 8px' }}
+                                        disabled={orgActionLoading}
+                                        onClick={() => handleResendInvitation(inv.id)}
+                                        title="Renew expiration by 7 days"
+                                      >
+                                        <RefreshCw size={12} />
+                                        <span>Renew</span>
+                                      </button>
+                                      <button
+                                        className="btn-ui btn-ghost"
+                                        style={{ color: '#ef4444', padding: '4px 6px' }}
+                                        disabled={orgActionLoading}
+                                        onClick={() => handleRevokeInvitation(inv.id)}
+                                        title="Revoke invitation and free seat"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 3: INVITE FORM */}
+                  {orgHubTab === 'invite' && (
+                    <div style={{ maxWidth: 500, margin: '0 auto' }}>
+                      <div style={{ marginBottom: 18, textAlign: 'center' }}>
+                        <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+                          Invite Staff to {user.company?.name}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 4 }}>
+                          Invited staff receive a secure token to activate their account and set their password.
+                        </div>
+                      </div>
+
+                      {/* Quota Check Alert */}
+                      {(user.company?.remaining_seats || 0) <= 0 ? (
+                        <div style={{ padding: 14, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', marginBottom: 18, color: '#991b1b', fontSize: '0.75rem' }}>
+                          <strong>Seat Quota Exhausted:</strong> All {user.company?.max_seats} seats are currently assigned or reserved. Please revoke an unused invitation or upgrade your organization tier.
+                        </div>
+                      ) : (
+                        <div style={{ padding: 12, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: 18, color: '#1e40af', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Check size={16} color="#2563eb" />
+                          <span>
+                            <strong>{user.company?.remaining_seats} seats remaining.</strong> Inviting a colleague will reserve 1 seat until accepted or revoked.
+                          </span>
+                        </div>
+                      )}
+
+                      <form onSubmit={handleCreateOrgInvitation} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>
+                            Colleague Work Email *
+                          </label>
+                          <input
+                            type="email"
+                            className="input-ui"
+                            placeholder="photographer@school.edu"
+                            value={inviteEmail}
+                            onChange={e => setInviteEmail(e.target.value)}
+                            required
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>
+                            Full Name (Optional)
+                          </label>
+                          <input
+                            type="text"
+                            className="input-ui"
+                            placeholder="e.g. Jordan Miller"
+                            value={inviteName}
+                            onChange={e => setInviteName(e.target.value)}
+                          />
+                        </div>
+
+                        <div>
+                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>
+                            Role & Permissions *
+                          </label>
+                          <select
+                            className="input-ui"
+                            value={inviteRole}
+                            onChange={e => setInviteRole(e.target.value as 'member' | 'company_admin')}
+                          >
+                            <option value="member">Standard Member (Studio Photo Editor & Roster Ingestion)</option>
+                            <option value="company_admin">Organization Administrator (Full Team & Seat Control)</option>
+                          </select>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="btn-ui btn-primary"
+                          style={{ height: 42, marginTop: 6 }}
+                          disabled={orgActionLoading || (user.company?.remaining_seats || 0) <= 0}
+                        >
+                          {orgActionLoading ? <RefreshCw className="animate-spin" size={16} /> : <UserPlus size={16} />}
+                          <span>Issue Invitation & Reserve Seat</span>
+                        </button>
+                      </form>
+
+                      {inviteLink && (
+                        <div style={{ marginTop: 20, padding: 14, borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#166534' }}>Activation Link Ready</span>
+                            <button
+                              className="btn-ui btn-secondary"
+                              style={{ fontSize: '0.6875rem', padding: '3px 8px' }}
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(inviteLink);
+                                  showToast('Link copied to clipboard!');
+                                } catch {
+                                  showToast('Link: ' + inviteLink);
+                                }
+                              }}
+                            >
+                              Copy Link
+                            </button>
+                          </div>
+                          <div style={{ fontSize: '0.71875rem', fontFamily: 'var(--font-mono)', color: '#15803d', wordBreak: 'break-all' }}>
+                            {inviteLink}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: DEDICATED SEAT ACTIVATION WORKFLOW (INVITEE FLOW) */}
+      {/* ========================================================= */}
+      {showActivationModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(8px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 460, width: '100%', padding: 28 }}>
+            <div style={{ textAlign: 'center', marginBottom: 20 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+                <Shield size={24} color="#2563eb" />
+              </div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                Activate Organization Seat
+              </h2>
+              <p style={{ fontSize: '0.78125rem', color: '#64748b', marginTop: 4 }}>
+                Welcome to VeloRoster Pro. Set your password to activate your seat.
+              </p>
+            </div>
+
+            {activationDetails && activationDetails.valid ? (
+              <div>
+                <div style={{ padding: 12, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0', marginBottom: 18 }}>
+                  <div style={{ fontSize: '0.71875rem', color: '#64748b' }}>Organization:</div>
+                  <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0f172a' }}>{activationDetails.company_name}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                    <span style={{ fontSize: '0.71875rem', color: '#64748b' }}>Assigned Role:</span>
+                    <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4, background: activationDetails.role === 'company_admin' ? '#ecfdf5' : '#eff6ff', color: activationDetails.role === 'company_admin' ? '#059669' : '#2563eb' }}>
+                      {activationDetails.role === 'company_admin' ? 'Organization Administrator' : 'Team Member'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.71875rem', color: '#64748b', marginTop: 4 }}>
+                    Email: <strong>{activationDetails.email}</strong>
+                  </div>
+                </div>
+
+                {activationError && (
+                  <div style={{ padding: 10, borderRadius: 6, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '0.75rem', marginBottom: 14 }}>
+                    {activationError}
+                  </div>
+                )}
+
+                <form onSubmit={handleActivationSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Your Full Name</label>
+                    <input
+                      type="text"
+                      className="input-ui"
+                      placeholder="e.g. Jordan Miller"
+                      value={activationFullName}
+                      onChange={e => setActivationFullName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Choose Password (min 5 chars)</label>
+                    <input
+                      type="password"
+                      className="input-ui"
+                      placeholder="Enter new password"
+                      value={activationPassword}
+                      onChange={e => setActivationPassword(e.target.value)}
+                      required
+                      minLength={5}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Confirm Password</label>
+                    <input
+                      type="password"
+                      className="input-ui"
+                      placeholder="Repeat password"
+                      value={activationConfirmPassword}
+                      onChange={e => setActivationConfirmPassword(e.target.value)}
+                      required
+                      minLength={5}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="btn-ui btn-primary"
+                    style={{ height: 42, marginTop: 4 }}
+                    disabled={activationLoading}
+                  >
+                    {activationLoading ? <RefreshCw className="animate-spin" size={16} /> : <Check size={16} />}
+                    <span>Activate Seat & Open Studio</span>
+                  </button>
+                </form>
+              </div>
+            ) : (
+              <div>
+                <div style={{ padding: 14, borderRadius: 8, background: '#fef2f2', border: '1px solid #fecaca', color: '#991b1b', fontSize: '0.78125rem', marginBottom: 18, lineHeight: 1.5 }}>
+                  <strong>Invalid or Expired Invitation:</strong>
+                  <div style={{ marginTop: 4 }}>
+                    {activationError || 'This invitation token is not valid, was already accepted, or was revoked by the administrator.'}
+                  </div>
+                </div>
+
+                <button
+                  className="btn-ui btn-secondary"
+                  style={{ width: '100%', height: 38 }}
+                  onClick={() => setShowActivationModal(false)}
+                >
+                  Close & Go to Login
+                </button>
               </div>
             )}
           </div>
@@ -3579,3 +4455,4 @@ export default function StudioApp() {
     </div>
   );
 }
+

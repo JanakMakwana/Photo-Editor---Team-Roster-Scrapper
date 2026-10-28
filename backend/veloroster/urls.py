@@ -17,8 +17,19 @@ urlpatterns = [
     path('api/auth/login', auth_views.api_login),
     path('api/auth/logout', auth_views.api_logout),
     path('api/auth/activate', auth_views.api_activate_invite),
+    path('api/auth/invitation_details', auth_views.api_invitation_details),
     path('api/admin/dashboard_stats', auth_views.api_dashboard_stats),
     path('api/company/users/invite', auth_views.api_invite_user),
+
+    # Tenant Organization & Team Management (Company Admin & SuperAdmin)
+    path('api/org/overview', auth_views.api_org_overview),
+    path('api/org/members', auth_views.api_org_members),
+    path('api/org/members/update_role', auth_views.api_org_update_member_role),
+    path('api/org/members/remove', auth_views.api_org_remove_member),
+    path('api/org/invitations', auth_views.api_org_invitations),
+    path('api/org/invitations/create', auth_views.api_org_create_invitation),
+    path('api/org/invitations/revoke', auth_views.api_org_revoke_invitation),
+    path('api/org/invitations/resend', auth_views.api_org_resend_invitation),
 
     # SuperUser Organization & Plan Provisions
     path('api/plans', auth_views.api_plans),

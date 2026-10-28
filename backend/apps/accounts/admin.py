@@ -42,6 +42,7 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(Invitation)
 class InvitationAdmin(admin.ModelAdmin):
-    list_display = ('email', 'full_name', 'company', 'role', 'is_accepted', 'created_at')
+    list_display = ('email', 'full_name', 'company', 'role', 'is_accepted', 'is_revoked', 'expires_at', 'invited_by', 'created_at')
     search_fields = ('email', 'full_name')
-    list_filter = ('is_accepted', 'company')
+    list_filter = ('is_accepted', 'is_revoked', 'role', 'company')
+    ordering = ('-created_at',)
