@@ -15078,4 +15078,36 @@ def launch_studio(port: int = None):
 
 
 if __name__ == "__main__":
-    launch_studio()
+    if os.environ.get("USE_LEGACY_STUDIO", "false").lower() in ("true", "1"):
+        launch_studio()
+    else:
+        # Seamlessly boot production Django Backend (VeloRoster Pro)
+        import subprocess
+        port = os.environ.get("PORT", "8000")
+        print(f"[VeloRoster Pro] Initializing Django application on port {port}...")
+        try:
+            subprocess.run([sys.executable, "backend/manage.py", "collectstatic", "--noinput"], check=False)
+            subprocess.run([sys.executable, "backend/manage.py", "migrate", "--noinput"], check=False)
+            subprocess.run([sys.executable, "backend/manage.py", "seed_demo_data"], check=False)
+        except Exception as err:
+            print(f"[VeloRoster Pro] Migration/setup warning: {err}")
+
+        gunicorn_path = shutil.which("gunicorn")
+        if gunicorn_path:
+            print(f"[VeloRoster Pro] Launching Gunicorn WSGI server on 0.0.0.0:{port}...")
+            os.execvp(gunicorn_path, [
+                gunicorn_path,
+                "--chdir", "backend",
+                "veloroster.wsgi:application",
+                "--bind", f"0.0.0.0:{port}",
+                "--workers", "2",
+                "--timeout", "120"
+            ])
+        else:
+            print(f"[VeloRoster Pro] Launching Django runserver on 0.0.0.0:{port}...")
+            os.execvp(sys.executable, [
+                sys.executable,
+                "backend/manage.py",
+                "runserver",
+                f"0.0.0.0:{port}"
+            ])
