@@ -28,5 +28,8 @@ Thumbs.db
 .next/
 .venv
 scratch/
+staticfiles/
+backend/staticfiles/
 input_photos/*
 !input_photos/.gitkeep
+

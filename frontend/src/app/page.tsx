@@ -197,7 +197,6 @@ export default function StudioApp() {
   const [orgDataLoading, setOrgDataLoading] = useState(false);
   const [orgActionLoading, setOrgActionLoading] = useState(false);
   const [orgMemberSearch, setOrgMemberSearch] = useState('');
-  const [showRoleSwitcher, setShowRoleSwitcher] = useState(false);
 
   // Dedicated Activation Modal State
   const [showActivationModal, setShowActivationModal] = useState(false);
@@ -588,33 +587,6 @@ export default function StudioApp() {
       showToast('Error refreshing invitation');
     } finally {
       setOrgActionLoading(false);
-    }
-  };
-
-  // Quick Role Switching for Instant QA/Testing
-  const handleQuickSwitchRole = async (targetEmail: string) => {
-    setLoadingOverlay(`Switching account to ${targetEmail}...`);
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: targetEmail, password: 'admin' })
-      });
-      const data = await res.json();
-      if (res.ok && data.status === 'ok') {
-        setUser(data.user);
-        setShowRoleSwitcher(false);
-        showToast(`Logged in as ${data.user.full_name} (${data.user.role})`);
-        if (data.user.is_superadmin) {
-          loadSuperAdminData();
-        }
-      } else {
-        showToast(data.message || 'Quick switch failed');
-      }
-    } catch {
-      showToast('Error switching account');
-    } finally {
-      setLoadingOverlay(null);
     }
   };
 
@@ -2119,71 +2091,6 @@ export default function StudioApp() {
             </button>
           )}
 
-          {/* Quick Role Switcher for QA / Live Testing */}
-          <div style={{ position: 'relative' }}>
-            <button
-              className="btn-ui btn-secondary"
-              style={{ fontSize: '0.75rem', padding: '6px 11px', border: '1px solid #e2e8f0', background: '#ffffff' }}
-              onClick={() => setShowRoleSwitcher(!showRoleSwitcher)}
-              title="Quickly switch between seeded roles to test RBAC workflows"
-            >
-              <Zap size={13} color="#f59e0b" />
-              <span style={{ fontWeight: 600 }}>Test Roles</span>
-            </button>
-
-            {showRoleSwitcher && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '115%',
-                  right: 0,
-                  width: 270,
-                  background: '#ffffff',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: 10,
-                  boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05)',
-                  padding: 8,
-                  zIndex: 200
-                }}
-              >
-                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#64748b', padding: '4px 8px 6px', borderBottom: '1px solid #f1f5f9', textTransform: 'uppercase' }}>
-                  RBAC Impersonation Suite
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
-                  <button
-                    className="btn-ui btn-ghost"
-                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
-                    onClick={() => handleQuickSwitchRole('enterprise@ecstaticloud.com')}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <span style={{ fontWeight: 700, color: '#7c3aed' }}>👑 SuperAdmin</span>
-                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>enterprise@ecstaticloud.com</span>
-                    </div>
-                  </button>
-                  <button
-                    className="btn-ui btn-ghost"
-                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
-                    onClick={() => handleQuickSwitchRole('admin@test.in')}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <span style={{ fontWeight: 700, color: '#059669' }}>🛡️ Org Admin</span>
-                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>admin@test.in (Test 1)</span>
-                    </div>
-                  </button>
-                  <button
-                    className="btn-ui btn-ghost"
-                    style={{ justifyContent: 'flex-start', padding: '7px 8px', fontSize: '0.75rem', textAlign: 'left', borderRadius: 6 }}
-                    onClick={() => handleQuickSwitchRole('photographer@test.in')}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-                      <span style={{ fontWeight: 700, color: '#475569' }}>👤 Team Member</span>
-                      <span style={{ fontSize: '0.6875rem', color: '#64748b' }}>photographer@test.in (Test 1)</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
 
           <button
             className="btn-ui btn-danger"

@@ -1,8 +1,11 @@
 services:
+  # --------------------------------------------------------------------------
+  # 1. Django API & Studio AI Backend
+  # --------------------------------------------------------------------------
   - type: web
     name: veloroster-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt && python backend/manage.py migrate && python backend/manage.py seed_demo_data
+    buildCommand: pip install -r requirements.txt && python backend/manage.py collectstatic --noinput && python backend/manage.py migrate && python backend/manage.py seed_demo_data
     startCommand: gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
     healthCheckPath: /healthz
     envVars:
@@ -14,8 +17,27 @@ services:
         value: "False"
       - key: DJANGO_SECRET_KEY
         generateValue: true
-      # Connect Render PostgreSQL database:
-      # - key: DATABASE_URL
-      #   fromDatabase:
-      #     name: veloroster-db
-      #     property: connectionString
+      - key: DATABASE_SSL_REQUIRE
+        value: "True"
+      # To connect Supabase PostgreSQL:
+      # Add DATABASE_URL in Render Dashboard > Environment:
+      # postgresql://postgres.[REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:6543/postgres
+
+  # --------------------------------------------------------------------------
+  # 2. Next.js Production Web Client
+  # --------------------------------------------------------------------------
+  - type: web
+    name: veloroster-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.11.0
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: veloroster-backend
+          property: host
+

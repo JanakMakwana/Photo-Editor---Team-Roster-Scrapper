@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -78,13 +79,28 @@ AUTH_USER_MODEL = 'accounts.User'
 
 
 # Database
-# Supports DATABASE_URL (e.g. Postgres on Render/Railway) with local SQLite fallback
-DATABASES = {
-    'default': dj_database_url.config(
-        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
-        conn_max_age=600
-    )
-}
+# Production: Connects to Supabase PostgreSQL (or Render Postgres) via DATABASE_URL with SSL.
+# Development: Graceful fallback to SQLite when DATABASE_URL is not provided.
+database_url = os.environ.get('DATABASE_URL')
+if database_url:
+    # Supabase connection strings require SSL
+    is_supabase = ('supabase.co' in database_url) or ('supabase.com' in database_url)
+    ssl_require = is_supabase or ('onrender.com' in database_url) or (os.environ.get('DATABASE_SSL_REQUIRE', 'False').lower() in ('true', '1'))
+    
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=database_url,
+            conn_max_age=600,
+            ssl_require=ssl_require
+        )
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -114,6 +130,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 
 # Default primary key field type
@@ -144,9 +161,16 @@ CSRF_TRUSTED_ORIGINS = [
     'http://127.0.0.1:8080',
     'https://*.vercel.app',
     'https://*.onrender.com',
+    'https://*.supabase.co',
+    'https://*.supabase.com',
     'https://*.up.railway.app',
 ]
+
+extra_csrf = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+if extra_csrf:
+    CSRF_TRUSTED_ORIGINS.extend([origin.strip() for origin in extra_csrf.split(',') if origin.strip()])
 
 SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_AGE = 86400 * 30  # 30 days
+
