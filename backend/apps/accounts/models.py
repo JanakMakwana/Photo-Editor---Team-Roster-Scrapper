@@ -4,6 +4,23 @@ from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.utils import timezone
 
 
+class Plan(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True)
+    default_max_seats = models.IntegerField(default=10)
+    price_monthly = models.CharField(max_length=50, default='$0')
+    description = models.TextField(blank=True, default='')
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        ordering = ['default_max_seats']
+
+    def __str__(self):
+        return f"{self.name} ({self.default_max_seats} seats - {self.price_monthly}/mo)"
+
+
 class Company(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)

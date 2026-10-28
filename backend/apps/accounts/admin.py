@@ -1,6 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, Company, Invitation
+from .models import User, Company, Invitation, Plan
+
+
+@admin.register(Plan)
+class PlanAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'default_max_seats', 'price_monthly', 'is_active', 'created_at')
+    list_editable = ('default_max_seats', 'price_monthly', 'is_active')
+    search_fields = ('name', 'slug')
+    list_filter = ('is_active',)
+    prepopulated_fields = {'slug': ('name',)}
 
 
 @admin.register(Company)

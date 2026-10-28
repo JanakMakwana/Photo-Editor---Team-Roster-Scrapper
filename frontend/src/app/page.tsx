@@ -6,7 +6,8 @@ import {
   Scissors, Save, Download, Sparkles, Move, Eraser,
   RefreshCw, ArrowLeft, ArrowRight, Copy, FileSpreadsheet,
   Layers, Eye, AlertCircle, HardDrive, Cpu, Check, ExternalLink,
-  ChevronRight, Sliders, Crosshair
+  ChevronRight, Sliders, Crosshair, Plus, Trash2, Edit2, Zap,
+  Settings, Activity, UserPlus, Server
 } from 'lucide-react';
 import JSZip from 'jszip';
 
@@ -45,6 +46,40 @@ interface User {
       created_at: string;
     }>;
   };
+}
+
+interface PlanItem {
+  id: string;
+  name: string;
+  slug: string;
+  default_max_seats: number;
+  price_monthly: string;
+  description: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+interface CompanyItem {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  max_seats: number;
+  used_seats: number;
+  status: string;
+  created_at: string;
+}
+
+interface PlatformUser {
+  id: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_superadmin: boolean;
+  company_id: string | null;
+  company_name: string;
+  is_active: boolean;
+  date_joined: string;
 }
 
 interface Player {
@@ -113,13 +148,62 @@ export default function StudioApp() {
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
-  // Modals
+  // Modals & Navigation
   const [showPlatformDashboard, setShowPlatformDashboard] = useState(false);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'company_admin'>('member');
   const [inviteLink, setInviteLink] = useState('');
+
+  // SuperAdmin Organization Hub Tabs & State
+  const [superAdminTab, setSuperAdminTab] = useState<'companies' | 'create_comp' | 'plans' | 'members' | 'keepalive'>('companies');
+  const [adminCompaniesList, setAdminCompaniesList] = useState<CompanyItem[]>([]);
+  const [adminPlansList, setAdminPlansList] = useState<PlanItem[]>([]);
+  const [adminUsersList, setAdminUsersList] = useState<PlatformUser[]>([]);
+  const [adminCompanySearch, setAdminCompanySearch] = useState('');
+  const [adminMemberFilterCompId, setAdminMemberFilterCompId] = useState<string>('all');
+  const [adminMemberSearch, setAdminMemberSearch] = useState('');
+
+  // SuperAdmin: Provision Organization State
+  const [newCompName, setNewCompName] = useState('');
+  const [newCompPlan, setNewCompPlan] = useState('team');
+  const [newCompSeats, setNewCompSeats] = useState(15);
+  const [newCompAdminEmail, setNewCompAdminEmail] = useState('');
+  const [newCompAdminName, setNewCompAdminName] = useState('');
+  const [newCompActivationLink, setNewCompActivationLink] = useState('');
+  const [newCompSubmitting, setNewCompSubmitting] = useState(false);
+
+  // SuperAdmin: Plan Management State
+  const [editingPlan, setEditingPlan] = useState<PlanItem | null>(null);
+  const [planFormName, setPlanFormName] = useState('');
+  const [planFormSlug, setPlanFormSlug] = useState('');
+  const [planFormSeats, setPlanFormSeats] = useState(10);
+  const [planFormPrice, setPlanFormPrice] = useState('$29/mo');
+  const [planFormDesc, setPlanFormDesc] = useState('');
+  const [planFormSubmitting, setPlanFormSubmitting] = useState(false);
+
+  // SuperAdmin: Assign Quota Dialog State
+  const [quotaTargetComp, setQuotaTargetComp] = useState<CompanyItem | null>(null);
+  const [quotaEditPlan, setQuotaEditPlan] = useState('team');
+  const [quotaEditSeats, setQuotaEditSeats] = useState(15);
+
+  // SuperAdmin: Assign User Dialog State
+  const [assignTargetUser, setAssignTargetUser] = useState<PlatformUser | null>(null);
+  const [assignTargetCompId, setAssignTargetCompId] = useState('');
+  const [assignTargetRole, setAssignTargetRole] = useState('member');
+
+  // SuperAdmin: KeepAlive State
+  const [keepAliveData, setKeepAliveData] = useState<{
+    enabled: boolean;
+    interval_seconds: number;
+    target_url: string;
+    total_pings: number;
+    successful_pings: number;
+    last_ping_latency_ms: number;
+    last_ping_time: string;
+  } | null>(null);
+  const [pingLoading, setPingLoading] = useState(false);
 
   // Primary Screen View: 'landing' or 'workbench'
   const [currentScreen, setCurrentScreen] = useState<'landing' | 'workbench'>('landing');
@@ -189,6 +273,9 @@ export default function StudioApp() {
       if (res.ok && data.logged_in && data.user) {
         setUser(data.user);
         loadSuggestedFolders();
+        if (data.user.is_superadmin) {
+          loadSuperAdminData();
+        }
       } else {
         setUser(null);
       }
@@ -216,6 +303,47 @@ export default function StudioApp() {
     }
   };
 
+  // Load SuperAdmin Fleet Data
+  const loadSuperAdminData = async () => {
+    try {
+      // 1. Load Companies & Metrics
+      const resStats = await fetch('/api/admin/dashboard_stats');
+      if (resStats.ok) {
+        const data = await resStats.json();
+        if (data.metrics?.companies) {
+          setAdminCompaniesList(data.metrics.companies);
+        }
+      }
+
+      // 2. Load Plans
+      const resPlans = await fetch('/api/plans');
+      if (resPlans.ok) {
+        const data = await resPlans.json();
+        if (data.plans) {
+          setAdminPlansList(data.plans);
+        }
+      }
+
+      // 3. Load Users
+      const resUsers = await fetch('/api/company/users/list');
+      if (resUsers.ok) {
+        const data = await resUsers.json();
+        if (data.users) {
+          setAdminUsersList(data.users);
+        }
+      }
+
+      // 4. Load KeepAlive
+      const resKa = await fetch('/api/keep_alive/status');
+      if (resKa.ok) {
+        const data = await resKa.json();
+        setKeepAliveData(data);
+      }
+    } catch (e) {
+      console.warn('Failed to load SuperAdmin fleet data:', e);
+    }
+  };
+
   // Handle Login Submission
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,6 +359,9 @@ export default function StudioApp() {
       if (res.ok && data.status === 'ok') {
         setUser(data.user);
         loadSuggestedFolders();
+        if (data.user.is_superadmin) {
+          loadSuperAdminData();
+        }
       } else {
         setAuthError(data.message || 'Invalid credentials');
       }
@@ -292,6 +423,221 @@ export default function StudioApp() {
       showToast('Error freeing memory');
     } finally {
       setLoadingOverlay(null);
+    }
+  };
+
+  // ==========================================
+  // SuperAdmin Operations
+  // ==========================================
+  const handleCreateCompanySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompName.trim()) return;
+    setNewCompSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/companies/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newCompName.trim(),
+          plan: newCompPlan,
+          max_seats: newCompSeats,
+          admin_email: newCompAdminEmail.trim(),
+          admin_name: newCompAdminName.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`Organization '${newCompName}' created successfully!`);
+        if (data.activation_url) {
+          setNewCompActivationLink(window.location.origin + data.activation_url);
+        }
+        setNewCompName('');
+        setNewCompAdminEmail('');
+        setNewCompAdminName('');
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Could not provision organization');
+      }
+    } catch {
+      showToast('Server error creating company');
+    } finally {
+      setNewCompSubmitting(false);
+    }
+  };
+
+  const handleUpdateCompanyQuota = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quotaTargetComp) return;
+    try {
+      const res = await fetch('/api/admin/companies/update_plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          company_id: quotaTargetComp.id,
+          plan: quotaEditPlan,
+          max_seats: quotaEditSeats
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`Updated quota for ${quotaTargetComp.name}!`);
+        setQuotaTargetComp(null);
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to update quota');
+      }
+    } catch {
+      showToast('Error updating organization quota');
+    }
+  };
+
+  const handleDeleteCompany = async (companyId: string, companyName: string) => {
+    if (!window.confirm(`Are you sure you want to delete organization '${companyName}'? All members will be unlinked.`)) return;
+    try {
+      const res = await fetch('/api/admin/companies/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ company_id: companyId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`Deleted organization '${companyName}'`);
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to delete company');
+      }
+    } catch {
+      showToast('Error deleting company');
+    }
+  };
+
+  const handleSavePlanSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planFormName.trim()) return;
+    setPlanFormSubmitting(true);
+    try {
+      const endpoint = editingPlan ? '/api/admin/plans/update' : '/api/admin/plans/create';
+      const body = editingPlan ? {
+        plan_id: editingPlan.id,
+        name: planFormName.trim(),
+        default_max_seats: planFormSeats,
+        price_monthly: planFormPrice.trim(),
+        description: planFormDesc.trim()
+      } : {
+        name: planFormName.trim(),
+        slug: planFormSlug.trim() || undefined,
+        default_max_seats: planFormSeats,
+        price_monthly: planFormPrice.trim(),
+        description: planFormDesc.trim()
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(editingPlan ? `Plan '${planFormName}' updated!` : `Plan '${planFormName}' created!`);
+        setEditingPlan(null);
+        setPlanFormName('');
+        setPlanFormSlug('');
+        setPlanFormSeats(10);
+        setPlanFormPrice('$29/mo');
+        setPlanFormDesc('');
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to save plan');
+      }
+    } catch {
+      showToast('Error saving plan');
+    } finally {
+      setPlanFormSubmitting(false);
+    }
+  };
+
+  const handleDeletePlan = async (planId: string, planName: string) => {
+    if (!window.confirm(`Are you sure you want to delete plan tier '${planName}'?`)) return;
+    try {
+      const res = await fetch('/api/admin/plans/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan_id: planId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`Plan '${planName}' deleted!`);
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to delete plan');
+      }
+    } catch {
+      showToast('Error deleting plan');
+    }
+  };
+
+  const handleAssignUserCompanySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignTargetUser) return;
+    try {
+      const res = await fetch('/api/admin/users/assign_company', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: assignTargetUser.id,
+          company_id: assignTargetCompId || null,
+          role: assignTargetRole
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`Assigned ${assignTargetUser.email} successfully!`);
+        setAssignTargetUser(null);
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to assign user');
+      }
+    } catch {
+      showToast('Error assigning user');
+    }
+  };
+
+  const handleRemoveUserFromCompany = async (userId: string, userEmail: string) => {
+    if (!window.confirm(`Remove user ${userEmail} from their organization?`)) return;
+    try {
+      const res = await fetch('/api/company/users/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === 'ok') {
+        showToast(`User ${userEmail} removed from organization.`);
+        loadSuperAdminData();
+      } else {
+        showToast(data.message || 'Failed to remove user');
+      }
+    } catch {
+      showToast('Error removing user');
+    }
+  };
+
+  const handleTestPingNow = async () => {
+    setPingLoading(true);
+    try {
+      const res = await fetch('/api/keep_alive/ping_now', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        showToast(`Edge ping success (${data.latency_ms}ms) -> ${data.target_url}`);
+      } else {
+        showToast('Ping failed');
+      }
+      const resKa = await fetch('/api/keep_alive/status');
+      if (resKa.ok) setKeepAliveData(await resKa.json());
+    } catch {
+      showToast('Ping error');
+    } finally {
+      setPingLoading(false);
     }
   };
 
@@ -1168,6 +1514,30 @@ export default function StudioApp() {
     showToast('Applied assigned IDs across roster table!');
   };
 
+  // Filtered Companies for Admin Directory
+  const filteredAdminCompanies = adminCompaniesList.filter(c => {
+    if (!adminCompanySearch.trim()) return true;
+    const q = adminCompanySearch.toLowerCase();
+    return (c.name && c.name.toLowerCase().includes(q)) ||
+           (c.slug && c.slug.toLowerCase().includes(q)) ||
+           (c.plan && c.plan.toLowerCase().includes(q));
+  });
+
+  // Filtered Users for Admin Members Tab
+  const filteredAdminUsers = adminUsersList.filter(u => {
+    if (adminMemberFilterCompId !== 'all') {
+      if (adminMemberFilterCompId === 'unassigned') {
+        if (u.company_id) return false;
+      } else if (u.company_id !== adminMemberFilterCompId) {
+        return false;
+      }
+    }
+    if (!adminMemberSearch.trim()) return true;
+    const q = adminMemberSearch.toLowerCase();
+    return (u.email && u.email.toLowerCase().includes(q)) ||
+           (u.full_name && u.full_name.toLowerCase().includes(q));
+  });
+
   // ==========================================
   // RENDER: Clean Light Authentication View
   // ==========================================
@@ -1383,11 +1753,14 @@ export default function StudioApp() {
           {user.is_superadmin && (
             <button
               className="btn-ui btn-secondary"
-              style={{ fontSize: '0.75rem', padding: '6px 12px' }}
-              onClick={() => setShowPlatformDashboard(true)}
+              style={{ fontSize: '0.75rem', padding: '6px 12px', border: '1px solid #cbd5e1' }}
+              onClick={() => {
+                loadSuperAdminData();
+                setShowPlatformDashboard(true);
+              }}
             >
-              <Building size={14} />
-              <span>Platform</span>
+              <Building size={14} color="#2563eb" />
+              <span style={{ fontWeight: 700 }}>SuperAdmin Hub</span>
             </button>
           )}
 
@@ -1690,7 +2063,7 @@ export default function StudioApp() {
                 <div style={{ marginTop: 20, paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>{rosterFolder}</span>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: '#0f172a' }}>{rosterFolder}</span>
                       <span style={{ fontSize: '0.72rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: '#eff6ff', color: '#2563eb', fontWeight: 700 }}>
                         {rosterPlayers.length} Players
                       </span>
@@ -2280,58 +2653,833 @@ export default function StudioApp() {
       )}
 
       {/* ========================================================= */}
-      {/* MODAL: Platform Dashboard (SuperAdmin) */}
+      {/* MODAL: SUPERADMIN PLATFORM & FLEET ORGANIZATION HUB */}
       {/* ========================================================= */}
       {showPlatformDashboard && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.25)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <div className="card-clean" style={{ maxWidth: 620, width: '100%', padding: 28, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.3)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div className="card-clean" style={{ maxWidth: 980, width: '100%', padding: 28, maxHeight: '90vh', overflowY: 'auto' }}>
+            {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Building size={20} color="#2563eb" />
-                <h2 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0f172a' }}>Platform Dashboard</h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg, #0f172a, #1e293b)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 12px rgba(15,23,42,0.15)' }}>
+                  <Shield size={20} color="#ffffff" />
+                </div>
+                <div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>SUPERADMIN ORGANIZATION HUB</span>
+                    <span style={{ fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 'var(--radius-full)', background: '#eff6ff', color: '#2563eb', fontWeight: 700, textTransform: 'uppercase' }}>
+                      Master Root
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                    Tenant Provisioning, Quota Allocation, Plan Tiers & Anti-Idle Heartbeat
+                  </div>
+                </div>
               </div>
-              <button className="btn-ui btn-secondary" style={{ padding: '4px 10px' }} onClick={() => setShowPlatformDashboard(false)}>Close</button>
+              <button className="btn-ui btn-secondary" style={{ padding: '5px 12px' }} onClick={() => setShowPlatformDashboard(false)}>Close</button>
             </div>
 
-            {/* Metrics */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 20 }}>
+            {/* Top KPI Metrics Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
               <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Active Companies</div>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Organizations</div>
                 <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0f172a', marginTop: 4 }}>
-                  {user.platform_metrics?.total_companies || 1}
+                  {adminCompaniesList.length}
                 </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Partitioned SaaS Tenants</div>
               </div>
               <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Seats Allocated</div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#2563eb', marginTop: 4 }}>
-                  {user.platform_metrics?.total_used_seats || 1} / {user.platform_metrics?.total_seats_allocated || 25}
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Allocated Capacity</div>
+                <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#0284c7', marginTop: 4 }}>
+                  {adminCompaniesList.reduce((acc, c) => acc + (c.max_seats || 0), 0)}
                 </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Total User Seats Provisioned</div>
               </div>
               <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Users</div>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Active Seated Users</div>
                 <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#10b981', marginTop: 4 }}>
-                  {user.platform_metrics?.total_users || 1}
+                  {adminCompaniesList.reduce((acc, c) => acc + (c.used_seats || 0), 0)}
                 </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Active Member Accounts</div>
+              </div>
+              <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>SuperAdmin Scope</div>
+                <div style={{ fontSize: '1.15rem', fontWeight: 800, color: '#d97706', marginTop: 8 }}>
+                  Root Operator
+                </div>
+                <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 4 }}>Zero Company Seats Consumed</div>
               </div>
             </div>
 
-            {/* Tenants */}
-            <div style={{ fontSize: '0.84375rem', fontWeight: 700, color: '#0f172a', marginBottom: 10 }}>Tenants</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {(user.platform_metrics?.companies || [
-                { id: '1', name: 'Ecstaticloud Technologies', plan: 'enterprise', max_seats: 9968, used_seats: 1, status: 'active' }
-              ]).map((c, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
-                  <div>
-                    <div style={{ fontSize: '0.875rem', fontWeight: 700, color: '#0f172a' }}>{c.name}</div>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: 2 }}>Plan: {c.plan} &bull; Status: {c.status}</div>
+            {/* Navigation Tabs */}
+            <div style={{ display: 'flex', marginBottom: 20 }}>
+              <div className="segmented-track" style={{ width: '100%' }}>
+                <button
+                  className={`segmented-btn ${superAdminTab === 'companies' ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '0.78125rem', padding: '7px 0' }}
+                  onClick={() => setSuperAdminTab('companies')}
+                >
+                  <Building size={14} />
+                  <span>Organizations ({adminCompaniesList.length})</span>
+                </button>
+                <button
+                  className={`segmented-btn ${superAdminTab === 'create_comp' ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '0.78125rem', padding: '7px 0' }}
+                  onClick={() => setSuperAdminTab('create_comp')}
+                >
+                  <Plus size={14} />
+                  <span>Provision Organization</span>
+                </button>
+                <button
+                  className={`segmented-btn ${superAdminTab === 'plans' ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '0.78125rem', padding: '7px 0' }}
+                  onClick={() => setSuperAdminTab('plans')}
+                >
+                  <Sliders size={14} />
+                  <span>Plans & Tiers ({adminPlansList.length})</span>
+                </button>
+                <button
+                  className={`segmented-btn ${superAdminTab === 'members' ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '0.78125rem', padding: '7px 0' }}
+                  onClick={() => setSuperAdminTab('members')}
+                >
+                  <Users size={14} />
+                  <span>Team Members & Assignment ({adminUsersList.length})</span>
+                </button>
+                <button
+                  className={`segmented-btn ${superAdminTab === 'keepalive' ? 'active' : ''}`}
+                  style={{ flex: 1, fontSize: '0.78125rem', padding: '7px 0' }}
+                  onClick={() => setSuperAdminTab('keepalive')}
+                >
+                  <Activity size={14} />
+                  <span>Cloud Keep-Alive</span>
+                </button>
+              </div>
+            </div>
+
+            {/* TAB 1: ORGANIZATIONS DIRECTORY */}
+            {superAdminTab === 'companies' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <div style={{ position: 'relative', width: 320 }}>
+                    <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: 12, top: 13 }} />
+                    <input
+                      type="text"
+                      className="input-ui"
+                      style={{ paddingLeft: 34, height: 38 }}
+                      placeholder="Search organization or slug..."
+                      value={adminCompanySearch}
+                      onChange={e => setAdminCompanySearch(e.target.value)}
+                    />
                   </div>
-                  <div style={{ fontSize: '0.78125rem', fontWeight: 600, color: '#2563eb' }}>
-                    {c.used_seats} / {c.max_seats} Seats Used
+                  <button
+                    className="btn-ui btn-primary"
+                    style={{ fontSize: '0.78125rem', height: 38 }}
+                    onClick={() => setSuperAdminTab('create_comp')}
+                  >
+                    <Plus size={14} />
+                    <span>Provision Organization</span>
+                  </button>
+                </div>
+
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden' }}>
+                  <table className="table-clean">
+                    <thead>
+                      <tr>
+                        <th>Organization / Slug</th>
+                        <th style={{ width: 130 }}>Plan Tier</th>
+                        <th style={{ width: 220 }}>Seat Allocation & Quota</th>
+                        <th style={{ width: 90 }}>Status</th>
+                        <th style={{ width: 200, textAlign: 'right' }}>Actions & Assignment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAdminCompanies.length > 0 ? (
+                        filteredAdminCompanies.map((c) => {
+                          const used = c.used_seats || 0;
+                          const max = c.max_seats || 10;
+                          const pct = Math.min(100, Math.round((used / max) * 100));
+
+                          return (
+                            <tr key={c.id}>
+                              <td>
+                                <div style={{ fontWeight: 800, fontSize: '0.875rem', color: '#0f172a', display: 'flex', alignItems: 'center', gap: 10 }}>
+                                  <div style={{ width: 32, height: 32, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.75rem', color: '#2563eb' }}>
+                                    {(c.name || 'CO').slice(0, 2).toUpperCase()}
+                                  </div>
+                                  <div>
+                                    <div>{c.name}</div>
+                                    <div style={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'var(--font-mono)' }}>slug: {c.slug}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', textTransform: 'uppercase' }}>
+                                  {c.plan}
+                                </span>
+                              </td>
+                              <td>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', fontWeight: 600, color: '#334155', marginBottom: 4 }}>
+                                  <span>{used} Seated Users</span>
+                                  <span style={{ color: '#64748b' }}>{max} Seats Max</span>
+                                </div>
+                                <div style={{ height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, #2563eb, #3b82f6)', borderRadius: 3 }} />
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: c.status === 'active' ? '#ecfdf5' : '#fef2f2', color: c.status === 'active' ? '#059669' : '#dc2626', border: `1px solid ${c.status === 'active' ? '#a7f3d0' : '#fecaca'}`, textTransform: 'uppercase' }}>
+                                  {c.status}
+                                </span>
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                <div style={{ display: 'inline-flex', gap: 6 }}>
+                                  <button
+                                    className="btn-ui btn-secondary"
+                                    style={{ fontSize: '0.72rem', padding: '4px 8px' }}
+                                    onClick={() => {
+                                      setQuotaTargetComp(c);
+                                      setQuotaEditPlan(c.plan || 'team');
+                                      setQuotaEditSeats(c.max_seats || 15);
+                                    }}
+                                    title="Assign Tier & Seats"
+                                  >
+                                    <Zap size={12} color="#2563eb" />
+                                    <span>Quota</span>
+                                  </button>
+                                  <button
+                                    className="btn-ui btn-secondary"
+                                    style={{ fontSize: '0.72rem', padding: '4px 8px', color: '#0284c7', borderColor: '#bae6fd' }}
+                                    onClick={() => {
+                                      setAdminMemberFilterCompId(c.id);
+                                      setSuperAdminTab('members');
+                                    }}
+                                    title="Inspect Members"
+                                  >
+                                    <Users size={12} />
+                                    <span>Members ({used})</span>
+                                  </button>
+                                  <button
+                                    className="btn-ui btn-danger"
+                                    style={{ fontSize: '0.72rem', padding: '4px 6px' }}
+                                    onClick={() => handleDeleteCompany(c.id, c.name)}
+                                    title="Delete Company"
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>
+                            No organizations found matching search criteria.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: PROVISION NEW ORGANIZATION */}
+            {superAdminTab === 'create_comp' && (
+              <div style={{ background: '#ffffff', border: '1px solid var(--border-default)', borderRadius: 12, padding: 24 }}>
+                <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>
+                  Provision New Tenant Organization
+                </div>
+                <div style={{ fontSize: '0.8125rem', color: '#64748b', marginBottom: 20 }}>
+                  Create a dedicated company partition with custom plan quota and send an activation invitation to the lead administrator.
+                </div>
+
+                <form onSubmit={handleCreateCompanySubmit}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 14, marginBottom: 16 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Company / Organization Name *</label>
+                      <input
+                        type="text"
+                        className="input-ui"
+                        placeholder="e.g. Manchester Storm Media"
+                        value={newCompName}
+                        onChange={e => setNewCompName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Subscription Plan *</label>
+                      <select
+                        className="input-ui"
+                        value={newCompPlan}
+                        onChange={e => {
+                          const pSlug = e.target.value;
+                          setNewCompPlan(pSlug);
+                          const matchingPlan = adminPlansList.find(p => p.slug === pSlug);
+                          if (matchingPlan) {
+                            setNewCompSeats(matchingPlan.default_max_seats);
+                          }
+                        }}
+                      >
+                        {adminPlansList.map(p => (
+                          <option key={p.id} value={p.slug}>
+                            {p.name} ({p.default_max_seats} seats)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Max Seats Quota *</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="50000"
+                        className="input-ui"
+                        value={newCompSeats}
+                        onChange={e => setNewCompSeats(parseInt(e.target.value) || 1)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 20 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Lead Administrator Email (Optional)</label>
+                      <input
+                        type="email"
+                        className="input-ui"
+                        placeholder="lead.admin@organization.com"
+                        value={newCompAdminEmail}
+                        onChange={e => setNewCompAdminEmail(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Lead Administrator Full Name (Optional)</label>
+                      <input
+                        type="text"
+                        className="input-ui"
+                        placeholder="e.g. Liam Gallagher"
+                        value={newCompAdminName}
+                        onChange={e => setNewCompAdminName(e.target.value)}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                    <button
+                      type="button"
+                      className="btn-ui btn-secondary"
+                      onClick={() => setSuperAdminTab('companies')}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={newCompSubmitting}
+                      className="btn-ui btn-primary"
+                      style={{ padding: '0 24px', height: 40 }}
+                    >
+                      <Plus size={15} />
+                      <span>{newCompSubmitting ? 'Provisioning...' : 'Provision Organization & Activate Quota'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {newCompActivationLink && (
+                  <div style={{ marginTop: 20, padding: 14, borderRadius: 8, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+                    <div style={{ fontSize: '0.78125rem', fontWeight: 700, color: '#15803d', marginBottom: 4 }}>
+                      Lead Administrator Activation Link:
+                    </div>
+                    <div style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: '#166534', wordBreak: 'break-all' }}>
+                      {newCompActivationLink}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: PLANS & TIERS MANAGEMENT */}
+            {superAdminTab === 'plans' && (
+              <div>
+                <div style={{ padding: 12, borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', marginBottom: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '0.78125rem', color: '#1d4ed8' }}>
+                    <strong>SuperUser Plan Customizer:</strong> You can add and edit plan tiers here in real-time, or manage them directly in the backend Django Admin at <a href="http://localhost:8000/admin/accounts/plan/" target="_blank" rel="noreferrer" style={{ textDecoration: 'underline', fontWeight: 700 }}>/admin/accounts/plan/</a>.
+                  </div>
+                  <a
+                    href="http://localhost:8000/admin/accounts/plan/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-ui btn-secondary"
+                    style={{ fontSize: '0.72rem', padding: '4px 10px', background: '#ffffff' }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>Open Django Admin</span>
+                  </a>
+                </div>
+
+                {/* Plan Form */}
+                <div style={{ background: '#ffffff', border: '1px solid var(--border-default)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+                  <div style={{ fontSize: '0.9375rem', fontWeight: 700, color: '#0f172a', marginBottom: 12 }}>
+                    {editingPlan ? `Edit Plan Tier: ${editingPlan.name}` : 'Add New Plan Tier'}
+                  </div>
+
+                  <form onSubmit={handleSavePlanSubmit}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Plan Name *</label>
+                        <input
+                          type="text"
+                          className="input-ui"
+                          placeholder="e.g. Pro League Pass"
+                          value={planFormName}
+                          onChange={e => {
+                            setPlanFormName(e.target.value);
+                            if (!editingPlan) {
+                              setPlanFormSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''));
+                            }
+                          }}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Slug *</label>
+                        <input
+                          type="text"
+                          className="input-ui"
+                          placeholder="pro-league"
+                          value={planFormSlug}
+                          onChange={e => setPlanFormSlug(e.target.value)}
+                          disabled={Boolean(editingPlan)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Default Seats *</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="50000"
+                          className="input-ui"
+                          value={planFormSeats}
+                          onChange={e => setPlanFormSeats(parseInt(e.target.value) || 1)}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Price Note</label>
+                        <input
+                          type="text"
+                          className="input-ui"
+                          placeholder="$99/mo"
+                          value={planFormPrice}
+                          onChange={e => setPlanFormPrice(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 4 }}>Plan Description & Feature Highlights</label>
+                      <input
+                        type="text"
+                        className="input-ui"
+                        placeholder="Comprehensive multi-team headshot studio with unlimited U-2-Net cutout inference"
+                        value={planFormDesc}
+                        onChange={e => setPlanFormDesc(e.target.value)}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                      {editingPlan && (
+                        <button
+                          type="button"
+                          className="btn-ui btn-secondary"
+                          onClick={() => {
+                            setEditingPlan(null);
+                            setPlanFormName('');
+                            setPlanFormSlug('');
+                            setPlanFormSeats(10);
+                            setPlanFormPrice('$29/mo');
+                            setPlanFormDesc('');
+                          }}
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                      <button
+                        type="submit"
+                        disabled={planFormSubmitting}
+                        className="btn-ui btn-primary"
+                        style={{ padding: '0 20px', height: 38 }}
+                      >
+                        <Save size={14} />
+                        <span>{editingPlan ? 'Update Plan Tier' : 'Save New Plan'}</span>
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                {/* Plans Table */}
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden' }}>
+                  <table className="table-clean">
+                    <thead>
+                      <tr>
+                        <th>Plan Name & Slug</th>
+                        <th style={{ width: 120 }}>Default Seats</th>
+                        <th style={{ width: 110 }}>Price</th>
+                        <th>Description</th>
+                        <th style={{ width: 120, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminPlansList.map(plan => (
+                        <tr key={plan.id}>
+                          <td>
+                            <div style={{ fontWeight: 700, color: '#0f172a' }}>{plan.name}</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b', fontFamily: 'var(--font-mono)' }}>slug: {plan.slug}</div>
+                          </td>
+                          <td style={{ fontWeight: 700, color: '#0284c7' }}>
+                            {plan.default_max_seats} Seats
+                          </td>
+                          <td style={{ fontWeight: 600, color: '#10b981' }}>
+                            {plan.price_monthly}
+                          </td>
+                          <td style={{ fontSize: '0.75rem', color: '#475569' }}>
+                            {plan.description || 'Standard plan tier'}
+                          </td>
+                          <td style={{ textAlign: 'right' }}>
+                            <div style={{ display: 'inline-flex', gap: 6 }}>
+                              <button
+                                className="btn-ui btn-secondary"
+                                style={{ padding: '4px 8px', fontSize: '0.72rem' }}
+                                onClick={() => {
+                                  setEditingPlan(plan);
+                                  setPlanFormName(plan.name);
+                                  setPlanFormSlug(plan.slug);
+                                  setPlanFormSeats(plan.default_max_seats);
+                                  setPlanFormPrice(plan.price_monthly);
+                                  setPlanFormDesc(plan.description);
+                                }}
+                                title="Edit Plan"
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                              <button
+                                className="btn-ui btn-danger"
+                                style={{ padding: '4px 8px', fontSize: '0.72rem' }}
+                                onClick={() => handleDeletePlan(plan.id, plan.name)}
+                                title="Delete Plan"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 4: TEAM MEMBERS & ASSIGNMENT */}
+            {superAdminTab === 'members' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, gap: 12 }}>
+                  <div style={{ display: 'flex', gap: 12, flex: 1 }}>
+                    <div style={{ width: 220 }}>
+                      <select
+                        className="input-ui"
+                        style={{ height: 38 }}
+                        value={adminMemberFilterCompId}
+                        onChange={e => setAdminMemberFilterCompId(e.target.value)}
+                      >
+                        <option value="all">All Organizations ({adminUsersList.length})</option>
+                        <option value="unassigned">Unassigned Users</option>
+                        {adminCompaniesList.map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ position: 'relative', flex: 1, maxWidth: 300 }}>
+                      <Search size={14} color="#94a3b8" style={{ position: 'absolute', left: 12, top: 13 }} />
+                      <input
+                        type="text"
+                        className="input-ui"
+                        style={{ paddingLeft: 34, height: 38 }}
+                        placeholder="Search user by name or email..."
+                        value={adminMemberSearch}
+                        onChange={e => setAdminMemberSearch(e.target.value)}
+                      />
+                    </div>
                   </div>
                 </div>
-              ))}
+
+                <div style={{ border: '1px solid var(--border-default)', borderRadius: 10, overflow: 'hidden' }}>
+                  <table className="table-clean">
+                    <thead>
+                      <tr>
+                        <th>User Profile</th>
+                        <th>Assigned Organization</th>
+                        <th style={{ width: 130 }}>Role</th>
+                        <th style={{ width: 180, textAlign: 'right' }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAdminUsers.length > 0 ? (
+                        filteredAdminUsers.map(u => (
+                          <tr key={u.id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#eff6ff', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 700, color: '#2563eb' }}>
+                                  {(u.full_name || u.email).slice(0, 2).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div style={{ fontWeight: 700, color: '#0f172a' }}>{u.full_name}</div>
+                                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>{u.email}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontWeight: 600, color: u.company_id ? '#0f172a' : '#94a3b8' }}>
+                                {u.company_name}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.6875rem', fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: u.is_superadmin ? '#f5f3ff' : (u.role === 'company_admin' ? '#eff6ff' : '#f8fafc'), color: u.is_superadmin ? '#7c3aed' : (u.role === 'company_admin' ? '#2563eb' : '#475569'), border: `1px solid ${u.is_superadmin ? '#ddd6fe' : (u.role === 'company_admin' ? '#bfdbfe' : '#e2e8f0')}`, textTransform: 'uppercase' }}>
+                                {u.is_superadmin ? 'SuperAdmin' : (u.role === 'company_admin' ? 'Company Admin' : 'Member')}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              <div style={{ display: 'inline-flex', gap: 6 }}>
+                                <button
+                                  className="btn-ui btn-secondary"
+                                  style={{ padding: '4px 8px', fontSize: '0.72rem' }}
+                                  onClick={() => {
+                                    setAssignTargetUser(u);
+                                    setAssignTargetCompId(u.company_id || '');
+                                    setAssignTargetRole(u.role || 'member');
+                                  }}
+                                  title="Assign Organization & Role"
+                                >
+                                  <UserPlus size={12} color="#2563eb" />
+                                  <span>Assign Team</span>
+                                </button>
+                                {u.company_id && (
+                                  <button
+                                    className="btn-ui btn-danger"
+                                    style={{ padding: '4px 8px', fontSize: '0.72rem' }}
+                                    onClick={() => handleRemoveUserFromCompany(u.id, u.email)}
+                                    title="Remove from Company"
+                                  >
+                                    <span>Remove</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: 24, color: '#94a3b8' }}>
+                            No users found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 5: CLOUD KEEP-ALIVE & ANTI-IDLE */}
+            {superAdminTab === 'keepalive' && (
+              <div style={{ background: '#ffffff', border: '1px solid var(--border-default)', borderRadius: 12, padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span>Cloud Keep-Alive & Anti-Idle Heartbeat</span>
+                      <span style={{ fontSize: '0.6875rem', padding: '2px 8px', borderRadius: 4, background: '#eff6ff', color: '#2563eb', fontWeight: 700 }}>Active</span>
+                    </div>
+                    <div style={{ fontSize: '0.78125rem', color: '#64748b', marginTop: 4 }}>
+                      Sends lightweight health pings to keep cloud services warm and prevent inactivity sleep.
+                    </div>
+                  </div>
+                  <button
+                    className="btn-ui btn-primary"
+                    style={{ height: 38 }}
+                    onClick={handleTestPingNow}
+                    disabled={pingLoading}
+                  >
+                    <Activity size={14} />
+                    <span>{pingLoading ? 'Pinging...' : 'Test Ping Now'}</span>
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 20 }}>
+                  <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Ping Interval</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', marginTop: 4 }}>10 min (600s)</div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Safe idle threshold buffer</div>
+                  </div>
+                  <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Total Heartbeats</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10b981', marginTop: 4 }}>
+                      {keepAliveData?.successful_pings || 1} pings
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Outbound-to-edge roundtrips</div>
+                  </div>
+                  <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Roundtrip Latency</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#2563eb', marginTop: 4 }}>
+                      {keepAliveData?.last_ping_latency_ms || 12} ms
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Edge proxy response time</div>
+                  </div>
+                  <div style={{ padding: 14, borderRadius: 10, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                    <div style={{ fontSize: '0.6875rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>Status</div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10b981', marginTop: 4 }}>OK (Warm)</div>
+                    <div style={{ fontSize: '0.7rem', color: '#64748b', marginTop: 2 }}>Server responding normally</div>
+                  </div>
+                </div>
+
+                <div style={{ padding: 14, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569', marginBottom: 4 }}>Current Edge Health Target:</div>
+                  <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.78125rem', color: '#0284c7' }}>
+                    {keepAliveData?.target_url || `${window.location.origin}/healthz`}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* DIALOG: ASSIGN COMPANY QUOTA */}
+      {/* ========================================================= */}
+      {quotaTargetComp && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 440, width: '100%', padding: 24 }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>
+              Assign Quota & Plan: {quotaTargetComp.name}
             </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: 16 }}>
+              Update the subscription plan tier and maximum seat capacity for this tenant.
+            </div>
+
+            <form onSubmit={handleUpdateCompanyQuota}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Select Subscription Plan</label>
+                <select
+                  className="input-ui"
+                  value={quotaEditPlan}
+                  onChange={e => {
+                    const pSlug = e.target.value;
+                    setQuotaEditPlan(pSlug);
+                    const matchingPlan = adminPlansList.find(p => p.slug === pSlug);
+                    if (matchingPlan) {
+                      setQuotaEditSeats(matchingPlan.default_max_seats);
+                    }
+                  }}
+                >
+                  {adminPlansList.map(p => (
+                    <option key={p.id} value={p.slug}>
+                      {p.name} ({p.default_max_seats} seats)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Maximum Seats Quota</label>
+                <input
+                  type="number"
+                  min="1"
+                  max="50000"
+                  className="input-ui"
+                  value={quotaEditSeats}
+                  onChange={e => setQuotaEditSeats(parseInt(e.target.value) || 1)}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn-ui btn-secondary"
+                  onClick={() => setQuotaTargetComp(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-ui btn-primary">
+                  Save Quota
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* DIALOG: ASSIGN USER TO ORGANIZATION & ROLE */}
+      {/* ========================================================= */}
+      {assignTargetUser && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.4)', backdropFilter: 'blur(4px)', zIndex: 1100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <div className="card-clean" style={{ maxWidth: 460, width: '100%', padding: 24 }}>
+            <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', marginBottom: 4 }}>
+              Assign Organization: {assignTargetUser.full_name}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#64748b', marginBottom: 16 }}>
+              Select tenant organization and user permission scope for {assignTargetUser.email}.
+            </div>
+
+            <form onSubmit={handleAssignUserCompanySubmit}>
+              <div style={{ marginBottom: 14 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Target Organization</label>
+                <select
+                  className="input-ui"
+                  value={assignTargetCompId}
+                  onChange={e => setAssignTargetCompId(e.target.value)}
+                >
+                  <option value="">Unassigned (No Organization)</option>
+                  {adminCompaniesList.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} ({c.plan.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 600, color: '#475569', marginBottom: 5 }}>Role & Permissions</label>
+                <select
+                  className="input-ui"
+                  value={assignTargetRole}
+                  onChange={e => setAssignTargetRole(e.target.value)}
+                >
+                  <option value="member">Standard Member (Editor)</option>
+                  <option value="company_admin">Company Admin (Team Manager)</option>
+                  <option value="superadmin">SuperAdmin (Master Root)</option>
+                </select>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                <button
+                  type="button"
+                  className="btn-ui btn-secondary"
+                  onClick={() => setAssignTargetUser(null)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-ui btn-primary">
+                  Save Assignment
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -20,6 +20,20 @@ urlpatterns = [
     path('api/admin/dashboard_stats', auth_views.api_dashboard_stats),
     path('api/company/users/invite', auth_views.api_invite_user),
 
+    # SuperUser Organization & Plan Provisions
+    path('api/plans', auth_views.api_plans),
+    path('api/admin/plans/create', auth_views.api_admin_create_plan),
+    path('api/admin/plans/update', auth_views.api_admin_update_plan),
+    path('api/admin/plans/delete', auth_views.api_admin_delete_plan),
+    path('api/admin/companies/create', auth_views.api_admin_create_company),
+    path('api/admin/companies/update_plan', auth_views.api_admin_update_company_plan),
+    path('api/admin/companies/delete', auth_views.api_admin_delete_company),
+    path('api/company/users/list', auth_views.api_company_users_list),
+    path('api/admin/users/assign_company', auth_views.api_admin_assign_user_company),
+    path('api/company/users/remove', auth_views.api_company_remove_user),
+    path('api/keep_alive/status', auth_views.api_keep_alive_status),
+    path('api/keep_alive/ping_now', auth_views.api_keep_alive_ping_now),
+
     # Studio & Portrait Tools
     path('api/auto_align', studio_views.api_auto_align),
     path('api/cutout', studio_views.api_cutout),
