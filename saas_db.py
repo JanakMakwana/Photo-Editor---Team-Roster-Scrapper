@@ -12,12 +12,47 @@ import urllib.parse
 from typing import Optional, List, Dict, Any
 
 # Detect database configuration
-DATABASE_URL = os.environ.get("DATABASE_URL")
-IS_POSTGRES = bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")))
+def clean_database_url(url: str) -> str:
+    """Sanitizes connection URLs, stripping accidental brackets like [PASSWORD] and URL-encoding credentials."""
+    if not url:
+        return url
+    url = url.strip().strip('"').strip("'")
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
 
-if IS_POSTGRES and DATABASE_URL.startswith("postgres://"):
-    # Fix Render/Heroku legacy postgres:// to postgresql://
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    if ('[' not in url) and (']' not in url) and (url.count('@') <= 1):
+        return url
+
+    import re
+    m = re.match(r'^([a-zA-Z0-9+_-]+://)(.*)$', url)
+    if not m:
+        return url
+    scheme, body = m.groups()
+    if '@' not in body:
+        return url
+
+    user_pass, host_part = body.rsplit('@', 1)
+    if ':' in user_pass:
+        user, password = user_pass.split(':', 1)
+    else:
+        user, password = user_pass, ''
+
+    user = user.strip('[]').replace('[', '').replace(']', '')
+    password = password.strip('[]').replace('[', '').replace(']', '')
+    host_part = host_part.replace('[', '').replace(']', '')
+
+    raw_pass = urllib.parse.unquote(password)
+    clean_pass = urllib.parse.quote(raw_pass, safe='')
+
+    raw_user = urllib.parse.unquote(user)
+    clean_user = urllib.parse.quote(raw_user, safe='.')
+
+    return f'{scheme}{clean_user}:{clean_pass}@{host_part}'
+
+
+RAW_DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = clean_database_url(RAW_DATABASE_URL)
+IS_POSTGRES = bool(DATABASE_URL and DATABASE_URL.startswith(("postgres://", "postgresql://")))
 
 
 def get_sqlite_path() -> str:

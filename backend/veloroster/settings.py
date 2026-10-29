@@ -81,20 +81,75 @@ AUTH_USER_MODEL = 'accounts.User'
 # Database
 # Production: Connects to Supabase PostgreSQL (or Render Postgres) via DATABASE_URL with SSL.
 # Development: Graceful fallback to SQLite when DATABASE_URL is not provided.
+def clean_database_url(url: str) -> str:
+    """Sanitizes connection URLs, stripping accidental brackets like [PASSWORD] and URL-encoding credentials."""
+    if not url:
+        return url
+    url = url.strip().strip('"').strip("'")
+    if url.startswith('postgres://'):
+        url = url.replace('postgres://', 'postgresql://', 1)
+
+    needs_sanitizing = ('[' in url) or (']' in url) or (url.count('@') > 1)
+    if not needs_sanitizing:
+        try:
+            dj_database_url.parse(url)
+            return url
+        except Exception:
+            pass
+
+    import re
+    import urllib.parse
+
+    m = re.match(r'^([a-zA-Z0-9+_-]+://)(.*)$', url)
+    if not m:
+        return url
+    scheme, body = m.groups()
+    if '@' not in body:
+        return url
+
+    user_pass, host_part = body.rsplit('@', 1)
+    if ':' in user_pass:
+        user, password = user_pass.split(':', 1)
+    else:
+        user, password = user_pass, ''
+
+    user = user.strip('[]').replace('[', '').replace(']', '')
+    password = password.strip('[]').replace('[', '').replace(']', '')
+    host_part = host_part.replace('[', '').replace(']', '')
+
+    raw_pass = urllib.parse.unquote(password)
+    clean_pass = urllib.parse.quote(raw_pass, safe='')
+
+    raw_user = urllib.parse.unquote(user)
+    clean_user = urllib.parse.quote(raw_user, safe='.')
+
+    return f'{scheme}{clean_user}:{clean_pass}@{host_part}'
+
+
 database_url = os.environ.get('DATABASE_URL')
 if database_url:
-    # Supabase connection strings require SSL
-    is_supabase = ('supabase.co' in database_url) or ('supabase.com' in database_url)
-    ssl_require = is_supabase or ('onrender.com' in database_url) or (os.environ.get('DATABASE_SSL_REQUIRE', 'False').lower() in ('true', '1'))
-    conn_max_age = 0 if (is_supabase or ':6543' in database_url) else 600
+    cleaned_url = clean_database_url(database_url)
+    os.environ['DATABASE_URL'] = cleaned_url
+    is_supabase = ('supabase.co' in cleaned_url) or ('supabase.com' in cleaned_url)
+    ssl_require = is_supabase or ('onrender.com' in cleaned_url) or (os.environ.get('DATABASE_SSL_REQUIRE', 'False').lower() in ('true', '1'))
+    conn_max_age = 0 if (is_supabase or ':6543' in cleaned_url) else 600
 
-    DATABASES = {
-        'default': dj_database_url.config(
-            default=database_url,
-            conn_max_age=conn_max_age,
-            ssl_require=ssl_require
-        )
-    }
+    try:
+        DATABASES = {
+            'default': dj_database_url.parse(
+                cleaned_url,
+                conn_max_age=conn_max_age,
+                ssl_require=ssl_require
+            )
+        }
+    except Exception as parse_err:
+        print(f"[Django Settings Warning] Error parsing DATABASE_URL ({parse_err}). Falling back to SQLite.")
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': BASE_DIR / 'db.sqlite3',
+            }
+        }
 else:
     DATABASES = {
         'default': {
