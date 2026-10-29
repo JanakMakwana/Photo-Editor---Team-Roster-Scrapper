@@ -20,10 +20,8 @@ venv_python = os.path.join(script_dir, ".venv", "bin", "python3")
 if not os.environ.get("RENDER") and sys.prefix == sys.base_prefix and os.path.exists(venv_python) and sys.executable != venv_python:
     os.execv(venv_python, [venv_python] + sys.argv)
 
-import cv2
-import numpy as np
-import rembg
-
+# Note: Heavy libraries (cv2, numpy, rembg, mediapipe) are imported lazily inside
+# classes/functions to keep cold startup memory < 50MB on 512MB RAM cloud instances.
 
 MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
 MODEL_PATH = os.path.join(script_dir, "models", "blaze_face_short_range.tflite")
@@ -73,6 +71,7 @@ class FaceDetectorWrapper:
             print(f"Warning: MediaPipe Tasks initialization error: {e}")
 
         # Fallback to OpenCV Haar Cascade
+        import cv2
         cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
         self.detector = cv2.CascadeClassifier(cascade_path)
         self.backend = "opencv"
@@ -82,6 +81,7 @@ class FaceDetectorWrapper:
         Detects primary face in PIL Image.
         Returns: (x, y, w, h) bounding box coordinates in pixels, or None.
         """
+        import numpy as np
         w_img, h_img = pil_image.size
         
         if self.backend == "solutions":
@@ -103,6 +103,7 @@ class FaceDetectorWrapper:
                 bb = results.detections[0].bounding_box
                 return (bb.origin_x, bb.origin_y, bb.width, bb.height)
         elif self.backend == "opencv":
+            import cv2
             gray = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2GRAY)
             faces = self.detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(100, 100))
             if len(faces) > 0:
@@ -141,6 +142,7 @@ def process_portrait(
     fx, fy, fw, fh = face_box
 
     # 2. Background removal
+    import rembg
     no_bg = rembg.remove(orig_img, session=rembg_session)
 
     # 3. Apply custom sports framing paddings
@@ -355,6 +357,7 @@ def main():
     print("-" * 66)
 
     # Initialize models once
+    import rembg
     print("Initializing MediaPipe Face Detection & Rembg...")
     detector = FaceDetectorWrapper()
     rembg_session = rembg.new_session("u2net")

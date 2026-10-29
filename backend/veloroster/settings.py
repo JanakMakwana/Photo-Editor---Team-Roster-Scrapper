@@ -86,11 +86,12 @@ if database_url:
     # Supabase connection strings require SSL
     is_supabase = ('supabase.co' in database_url) or ('supabase.com' in database_url)
     ssl_require = is_supabase or ('onrender.com' in database_url) or (os.environ.get('DATABASE_SSL_REQUIRE', 'False').lower() in ('true', '1'))
-    
+    conn_max_age = 0 if (is_supabase or ':6543' in database_url) else 600
+
     DATABASES = {
         'default': dj_database_url.config(
             default=database_url,
-            conn_max_age=600,
+            conn_max_age=conn_max_age,
             ssl_require=ssl_require
         )
     }

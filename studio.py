@@ -49,8 +49,7 @@ if not os.environ.get("RENDER") and sys.prefix == sys.base_prefix:
             os.execv(vp, [vp] + sys.argv)
 
 from PIL import Image
-import rembg
-from process_portraits import FaceDetectorWrapper, find_input_images
+from process_portraits import find_input_images
 import saas_db
 import saas_email
 import saas_auth
@@ -65,9 +64,15 @@ AI_LOCK = threading.Semaphore(1)
 def get_services():
     global DETECTOR, REMBG_SESSION
     if DETECTOR is None:
-        print("[Studio] Initializing Face Detector...")
-        DETECTOR = FaceDetectorWrapper()
+        try:
+            from process_portraits import FaceDetectorWrapper
+            print("[Studio] Initializing Face Detector...")
+            DETECTOR = FaceDetectorWrapper()
+        except Exception as e:
+            print(f"[Studio Warning] Face detector wrapper init error: {e}")
+            DETECTOR = None
     if REMBG_SESSION is None:
+        import rembg
         # Default to u2netp on Render to use only ~199MB RAM instead of 371MB (preventing 503 OOM crashes)
         model_name = os.environ.get("REMBG_MODEL", "u2netp" if os.environ.get("RENDER") else "u2net")
         print(f"[Studio] Initializing Rembg Engine ({model_name})...")
@@ -265,6 +270,7 @@ def process_custom_framed_portrait(
     output_size: int = 180,
 ) -> Image.Image:
     """Crops the framed region, runs rembg, and fits to 180x180 RGBA canvas directly in-memory or to disk."""
+    import rembg
     _, rembg_session = get_services()
     if image_bytes:
         orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
@@ -15086,7 +15092,10 @@ if __name__ == "__main__":
         port = os.environ.get("PORT", "8000")
         print(f"[VeloRoster Pro] Initializing Django application on port {port}...")
         try:
-            subprocess.run([sys.executable, "backend/manage.py", "collectstatic", "--noinput"], check=False)
+            # Only run collectstatic if staticfiles directory is missing or empty
+            staticfiles_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backend", "staticfiles")
+            if not os.path.exists(staticfiles_dir) or not os.listdir(staticfiles_dir):
+                subprocess.run([sys.executable, "backend/manage.py", "collectstatic", "--noinput"], check=False)
             subprocess.run([sys.executable, "backend/manage.py", "migrate", "--noinput"], check=False)
             subprocess.run([sys.executable, "backend/manage.py", "seed_demo_data"], check=False)
         except Exception as err:
@@ -15094,13 +15103,17 @@ if __name__ == "__main__":
 
         gunicorn_path = shutil.which("gunicorn")
         if gunicorn_path:
-            print(f"[VeloRoster Pro] Launching Gunicorn WSGI server on 0.0.0.0:{port}...")
+            print(f"[VeloRoster Pro] Launching Gunicorn WSGI server (1 worker, 4 threads) on 0.0.0.0:{port}...")
             os.execvp(gunicorn_path, [
                 gunicorn_path,
                 "--chdir", "backend",
                 "veloroster.wsgi:application",
                 "--bind", f"0.0.0.0:{port}",
-                "--workers", "2",
+                "--workers", "1",
+                "--threads", "4",
+                "--worker-class", "gthread",
+                "--max-requests", "1000",
+                "--max-requests-jitter", "50",
                 "--timeout", "120"
             ])
         else:

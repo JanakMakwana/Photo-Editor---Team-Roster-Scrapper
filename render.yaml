@@ -5,14 +5,20 @@ services:
   - type: web
     name: veloroster-backend
     runtime: python
-    buildCommand: pip install -r requirements.txt && python backend/manage.py collectstatic --noinput && python backend/manage.py migrate && python backend/manage.py seed_demo_data
-    startCommand: gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    buildCommand: pip install -r requirements.txt && python backend/manage.py collectstatic --noinput
+    startCommand: python backend/manage.py migrate --noinput && python backend/manage.py seed_demo_data && gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4 --worker-class gthread --max-requests 1000 --max-requests-jitter 50 --timeout 120
     healthCheckPath: /healthz
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
       - key: REMBG_MODEL
         value: u2netp
+      - key: MALLOC_ARENA_MAX
+        value: "2"
+      - key: OMP_NUM_THREADS
+        value: "1"
+      - key: PYTHONUNBUFFERED
+        value: "1"
       - key: DJANGO_DEBUG
         value: "False"
       - key: DJANGO_SECRET_KEY

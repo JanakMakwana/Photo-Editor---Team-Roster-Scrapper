@@ -15,12 +15,20 @@ ROOT_DIR = str(Path(__file__).resolve().parents[3])
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-try:
-    from studio import scrape_roster_data, download_player_portrait_bytes
-except Exception as e:
-    print(f"[Roster View Import Warning] Could not import from studio: {e}")
-    scrape_roster_data = None
-    download_player_portrait_bytes = None
+_scrape_roster_data = None
+_download_player_portrait_bytes = None
+
+
+def get_roster_helpers():
+    global _scrape_roster_data, _download_player_portrait_bytes
+    if _scrape_roster_data is None:
+        try:
+            from studio import scrape_roster_data, download_player_portrait_bytes
+            _scrape_roster_data = scrape_roster_data
+            _download_player_portrait_bytes = download_player_portrait_bytes
+        except Exception as e:
+            print(f"[Roster View Import Warning] Could not import from studio: {e}")
+    return _scrape_roster_data, _download_player_portrait_bytes
 
 
 @csrf_exempt
@@ -39,6 +47,7 @@ def api_fetch_roster(request):
         return JsonResponse({"status": "error", "message": "Missing url or player_name parameter."}, status=400)
 
     try:
+        scrape_roster_data, _ = get_roster_helpers()
         if scrape_roster_data:
             result = scrape_roster_data(url, player_name=player_name, team_name=team_name)
         else:
@@ -74,6 +83,7 @@ def api_proxy_photo(request):
         return HttpResponse('{"status":"error","message":"Missing url"}', content_type="application/json", status=400)
 
     try:
+        _, download_player_portrait_bytes = get_roster_helpers()
         if download_player_portrait_bytes:
             img_bytes, mime = download_player_portrait_bytes(img_url, target_width=target_width)
         else:
@@ -113,6 +123,7 @@ def api_download_roster_zip(request):
 
     zip_buf = io.BytesIO()
     seen = set()
+    _, download_player_portrait_bytes = get_roster_helpers()
 
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for idx, p in enumerate(players, 1):

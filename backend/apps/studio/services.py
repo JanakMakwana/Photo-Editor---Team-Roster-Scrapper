@@ -7,7 +7,6 @@ import re
 import shutil
 import threading
 from PIL import Image
-import rembg
 from pathlib import Path
 
 WORKSPACE_DIR = str(Path(__file__).resolve().parents[3])
@@ -31,6 +30,7 @@ def get_services():
             DETECTOR = None
 
     if REMBG_SESSION is None:
+        import rembg
         model_name = os.environ.get("REMBG_MODEL", "u2netp" if os.environ.get("RENDER") else "u2net")
         print(f"[Django Studio] Initializing Rembg Engine ({model_name})...")
         REMBG_SESSION = rembg.new_session(model_name)
@@ -107,6 +107,7 @@ def compute_auto_framing(image_path: str = None, image_bytes: bytes = None, cach
 
 def remove_background_bytes(image_bytes: bytes) -> bytes:
     """Removes background and returns RGBA PNG bytes."""
+    import rembg
     _, session = get_services()
     with AI_LOCK:
         output_bytes = rembg.remove(image_bytes, session=session)
@@ -122,6 +123,7 @@ def process_custom_framed_portrait(
     output_size: int = 180,
 ) -> Image.Image:
     """Crops the framed region, runs rembg, and fits to 180x180 RGBA canvas."""
+    import rembg
     _, rembg_session = get_services()
     if image_bytes:
         orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")

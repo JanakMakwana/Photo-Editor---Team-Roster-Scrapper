@@ -28,6 +28,8 @@ COPY saas_db.py saas_auth.py saas_email.py studio.py process_portraits.py ./
 ENV PYTHONUNBUFFERED=1 \
     DJANGO_DEBUG=False \
     REMBG_MODEL=u2netp \
+    MALLOC_ARENA_MAX=2 \
+    OMP_NUM_THREADS=1 \
     PORT=8000
 
 # Collect static assets
@@ -38,6 +40,6 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://127.0.0.1:${PORT:-8000}/healthz || exit 1
 
-# Run migrations, seed base tiers, and start Gunicorn WSGI server
-CMD ["sh", "-c", "python backend/manage.py migrate && python backend/manage.py seed_demo_data && gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 2 --timeout 120"]
+# Run migrations, seed base tiers, and start Gunicorn WSGI server (single worker with threads for 512MB RAM constraint)
+CMD ["sh", "-c", "python backend/manage.py migrate --noinput && python backend/manage.py seed_demo_data && gunicorn --chdir backend veloroster.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 4 --worker-class gthread --max-requests 1000 --max-requests-jitter 50 --timeout 120"]
 
